@@ -36,7 +36,8 @@ Los prompts para desarrollar cada fase con Claude Code están en
 
 Requisitos: [uv](https://docs.astral.sh/uv/), `git` y `jq` (lo usa el hook de Claude Code).
 El núcleo corre en cualquier SO para tests, pero D-Bus, audio y control de ventanas necesitan
-un Linux con escritorio: recomendado una VM Debian 13 + XFCE (ver §13 de la investigación).
+un Linux con escritorio: una VM Debian 13 + XFCE. Cómo armarla en ~30 minutos:
+[docs/entorno-vm.md](docs/entorno-vm.md).
 
 ```bash
 uv sync                     # instala dependencias (sin las de voz)
