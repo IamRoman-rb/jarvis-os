@@ -30,7 +30,8 @@ el proyecto también es de aprendizaje.
 - agent/brain.py usa ClaudeSDKClient con tools=[] (sin built-ins) y un servidor MCP in-process
   "system" con NUESTRAS tools. Claude solo actúa a través de ellas.
 - policy/: cada tool tiene nivel 1, 2 o 3 (docs/permisos.md es la fuente de verdad).
-  Nivel 1 → allowed_tools. Nivel 2 y 3 → can_use_tool → confirmación. Hook PreToolUse → auditoría.
+  allowed_tools=[] y setting_sources=[]: toda tool pasa por can_use_tool → policy/gate.py, que
+  aprueba sola el nivel 1 y pide confirmación para 2 y 3. Hook PreToolUse → auditoría (devuelve {}).
 - La voz es 100% local (wake → STT → texto a Claude → TTS). Nunca se manda audio a la API.
 
 ## Reglas de seguridad (NO negociables)
