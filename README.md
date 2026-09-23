@@ -20,7 +20,7 @@ Detalle completo, alternativas evaluadas y fuentes: [docs/investigacion.md](docs
 | Fase | Descripción | Estado |
 |---|---|---|
 | 0 | Esqueleto del repo, CI | ✅ |
-| 1a | Núcleo por texto (agente, tools, permisos, auditoría) | ⏳ |
+| 1a | Núcleo por texto (agente, tools, permisos, auditoría) | ✅ |
 | 1b | Demonio systemd + D-Bus + confirmación gráfica | ⏳ |
 | 1c | Voz (wake word, STT, TTS) | ⏳ |
 | 2 | Sincronización Syncthing + Tailscale | ⏳ |
@@ -49,6 +49,32 @@ uv run jarvis version
 
 La API key de Anthropic (`ANTHROPIC_API_KEY`) se toma **solo** del entorno o de una credencial
 de systemd. Nunca se commitea.
+
+## Probar JARVIS
+
+1. Conseguí una API key en la consola de Anthropic (conviene ponerle un límite de gasto mensual)
+   y exportala solo en tu sesión:
+   ```bash
+   export ANTHROPIC_API_KEY=...   # no la guardes en el repo
+   ```
+2. (Opcional) Creá `~/.config/jarvis/config.toml`. Sin archivo se usan estos valores:
+   ```toml
+   model = "claude-sonnet-5"
+   allowed_dirs = ["~/Facultad", "~/Proyectos"]   # lo único que JARVIS puede tocar
+   max_turns = 10
+   max_budget_usd = 0.5                           # tope de gasto por pedido
+   ```
+3. Pedile algo:
+   ```bash
+   uv run jarvis ask --texto "¿cuánta RAM tengo?"          # nivel 1: responde sin preguntar
+   uv run jarvis ask --texto "buscá mis PDFs de algoritmos"  # nivel 1
+   uv run jarvis ask --texto "abrí firefox"                  # nivel 2: pide confirmación
+   uv run jarvis ask --texto "tirá a la papelera ~/Facultad/viejo.txt"  # nivel 3: hay que escribir "si"
+   ```
+   `open_app` y `trash_file` usan `gio`, así que funcionan en Linux (la VM Debian), no en Windows.
+
+Cada tool que Claude pide queda en el log de auditoría (`~/.local/state/jarvis/audit.sqlite3`
+en Linux). Qué puede hacer cada tool y con qué nivel: [docs/permisos.md](docs/permisos.md).
 
 ## Estructura
 
