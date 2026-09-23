@@ -1,0 +1,44 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secretos: nunca al repo
+.env
+.env.*
+secrets*.toml
+.secrets/
+*.key
+
+# Datos locales de JARVIS
+*.sqlite3
+*.db
+
+# Modelos de voz descargados (pesados)
+models/
+*.onnx
+*.onnx.json
+
+# live-build (fase 4)
+image/cache/
+image/chroot/
+image/binary/
+image/*.iso
+image/.build/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Config local de Claude Code (la compartida es .claude/settings.json)
+.claude/settings.local.json

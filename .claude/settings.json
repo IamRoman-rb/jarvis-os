@@ -1,0 +1,56 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Bash(uv sync)",
+      "Bash(uv run pytest *)",
+      "Bash(uv run ruff *)",
+      "Bash(uv run mypy *)",
+      "Bash(uv run jarvis *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(systemctl --user status *)",
+      "Bash(journalctl --user -u jarvisd *)",
+      "Bash(tailscale status *)",
+      "Edit(/src/**)",
+      "Edit(/tests/**)",
+      "Edit(/docs/**)",
+      "Edit(/packaging/**)",
+      "Edit(/sync/**)",
+      "Edit(/android/termux/**)"
+    ],
+    "ask": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(uv add *)",
+      "Bash(systemctl --user restart *)",
+      "Bash(systemctl --user enable *)",
+      "Bash(curl *)",
+      "Edit(/image/**)",
+      "Edit(/.claude/**)",
+      "Edit(/CLAUDE.md)",
+      "Edit(/pyproject.toml)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.config/jarvis/secrets*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/no-secrets.sh" }
+        ]
+      }
+    ]
+  }
+}

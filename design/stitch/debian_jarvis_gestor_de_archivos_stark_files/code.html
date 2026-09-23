@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"surface-variant":"#2e353f","primary":"#dbfcff","on-tertiary-fixed-variant":"#004396","on-surface-variant":"#b9cacb","tertiary-fixed":"#d8e2ff","inverse-primary":"#006970","surface-tint":"#00dbe9","on-tertiary-fixed":"#001a42","secondary-fixed-dim":"#ffb869","surface-container-high":"#242a34","tertiary":"#f4f5ff","on-primary-container":"#006970","on-primary-fixed-variant":"#004f54","surface-container-lowest":"#080f18","error":"#ffb4ab","primary-container":"#00f0ff","tertiary-fixed-dim":"#aec6ff","on-primary":"#00363a","background":"#0d141d","primary-fixed-dim":"#00dbe9","outline-variant":"#3b494b","surface-dim":"#0d141d","on-background":"#dce3f0","surface-container-highest":"#2e353f","error-container":"#93000a","on-secondary-fixed-variant":"#673d00","inverse-surface":"#dce3f0","tertiary-container":"#cbd9ff","on-tertiary":"#002e6a","on-error":"#690005","on-secondary":"#482900","secondary-container":"#fe9d00","surface-bright":"#333a44","on-tertiary-container":"#005ac4","on-secondary-fixed":"#2c1700","outline":"#849495","surface-container-low":"#151c26","primary-fixed":"#7df4ff","on-surface":"#dce3f0","secondary-fixed":"#ffdcbb","on-secondary-container":"#663c00","surface":"#0d141d","on-error-container":"#ffdad6","inverse-on-surface":"#2a313b","on-primary-fixed":"#002022","surface-container":"#19202a","secondary":"#ffc384"},borderRadius:{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},spacing:{"space-md":"1rem","space-sm":"0.5rem","space-xl":"2rem","space-xs":"0.25rem","space-lg":"1.5rem","gutter":"1rem","margin":"1.5rem"},fontFamily:{"headline-lg":["Space Grotesk"],"headline-md":["Space Grotesk"],"headline-sm":["JetBrains Mono"],"body-lg":["JetBrains Mono"],"body-sm":["JetBrains Mono"],"label-sm":["JetBrains Mono"],"display-lg":["Space Grotesk"],"body-md":["JetBrains Mono"],"display-sm":["Space Grotesk"],"label-lg":["JetBrains Mono"],"label-md":["JetBrains Mono"]},fontSize:{"headline-lg":["28px",{"lineHeight":"36px","letterSpacing":"0.04em","fontWeight":"600"}],"headline-md":["22px",{"lineHeight":"30px","letterSpacing":"0.03em","fontWeight":"500"}],"headline-sm":["16px",{"lineHeight":"24px","letterSpacing":"0.05em","fontWeight":"700"}],"body-lg":["15px",{"lineHeight":"22px","letterSpacing":"0.01em","fontWeight":"400"}],"body-sm":["11px",{"lineHeight":"16px","letterSpacing":"0.02em","fontWeight":"300"}],"label-sm":["9px",{"lineHeight":"12px","letterSpacing":"0.16em","fontWeight":"500"}],"display-lg":["56px",{"lineHeight":"64px","letterSpacing":"0.08em","fontWeight":"700"}],"body-md":["13px",{"lineHeight":"18px","letterSpacing":"0.0em","fontWeight":"400"}],"display-sm":["36px",{"lineHeight":"44px","letterSpacing":"0.06em","fontWeight":"600"}],"label-lg":["12px",{"lineHeight":"16px","letterSpacing":"0.1em","fontWeight":"600"}],"label-md":["10px",{"lineHeight":"14px","letterSpacing":"0.12em","fontWeight":"500"}]}}}}</script></head><body class="bg-surface font-body-md text-on-surface min-h-screen selection:bg-primary-container selection:text-on-primary-container"><header class="fixed top-0 left-0 right-0 h-14 bg-surface-container-lowest/90 backdrop-blur-xl z-50 shadow-[0_1px_8px_rgba(0,0,0,0.4)]"><div class="h-14 w-full px-space-md flex items-center justify-between gap-space-md"><div class="flex items-center gap-space-md"><img alt="Brand logo. - Primary color: #00f0ff - Font: spaceGrotesk - Mode: dark - Roundness: rounded-sm" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1U-rm53LBh_SI7RVua4eD8gZ5EylFDkdOB10vuAyXDOVkxR3Td2_u4D9GZhUK731uSD-imPimlf3kYLMl4_zwOgZV90C9AJzDkjJBTE9cZmweKTpGNasmAywou2F2b8bjYAL0wtoJQYazX4dWBnafbViBpnfLmSDKs_-OrRplOLOQZkScT1CiFtjpBrRRdtKAIc4rqqguyrlSERbpmGOt-ea1Gu-OjIDon8SLCi6luHkzRJwJw-tuXCbyk"/><div class="flex flex-col"><span class="font-headline-sm text-headline-sm uppercase tracking-wider text-primary">STARK OS v12.4</span><span class="font-label-sm text-label-sm text-on-surface-variant">DEBIAN-6.1.0-21-STARK-AMD64</span></div><div class="h-5 w-[1px] bg-surface-variant mx-space-xs hidden md:block"></div><nav class="hidden lg:flex items-center gap-space-xs" data-active-classes="bg-surface-container-high text-primary-fixed shadow-[0_0_8px_rgba(0,240,255,0.2)]"><a class="px-space-sm py-space-xs rounded font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all" data-path="workstation" href="#">01:WORKSTATION</a><a aria-current="page" class="px-space-sm py-space-xs rounded font-label-md transition-all bg-surface-container-high text-primary-fixed shadow-[0_0_8px_rgba(0,240,255,0.2)]" data-path="filesystem" href="#">02:FILESYSTEM</a><a class="px-space-sm py-space-xs rounded font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all" data-path="diagnostics" href="#">03:DIAGNOSTICS</a><a class="px-space-sm py-space-xs rounded font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all" data-path="comm-net" href="#">04:COMM_NET</a></nav></div><div class="flex items-center gap-space-md"><div class="hidden xl:flex items-center gap-space-md px-space-md py-space-xs rounded bg-surface-container-low/80"><div class="flex items-center gap-space-xs"><span class="h-2 w-2 rounded-full bg-primary-container animate-pulse"></span><span class="font-label-sm text-label-sm text-on-surface-variant">ARC:</span><span class="font-label-sm text-label-sm text-primary">99.8%</span></div><div class="flex items-center gap-space-xs"><span class="font-label-sm text-label-sm text-on-surface-variant">CPU:</span><span class="font-label-sm text-label-sm text-primary">14.2%</span></div><div class="flex items-center gap-space-xs"><span class="font-label-sm text-label-sm text-on-surface-variant">RAM:</span><span class="font-label-sm text-label-sm text-secondary">8.4G</span></div><div class="flex items-center gap-space-xs"><span class="font-label-sm text-label-sm text-on-surface-variant">PING:</span><span class="font-label-sm text-label-sm text-primary-fixed-dim">0.4MS</span></div></div><div class="flex items-center gap-space-sm pl-space-xs"><div class="flex flex-col text-right hidden sm:block"><span class="font-label-md text-label-md text-on-surface uppercase">T. STARK</span><span class="font-label-sm text-label-sm text-secondary-container">ARCHITECT / ROOT</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></div></header><aside class="fixed left-0 top-14 bottom-10 w-64 bg-surface-container-lowest/80 backdrop-blur-xl z-40 flex flex-col py-space-md"><div class="px-space-md mb-space-md"><div class="px-space-sm py-space-xs rounded bg-surface-container-high/40 flex items-center justify-between"><span class="font-label-sm text-label-sm text-on-surface-variant uppercase">JARVIS KERNEL</span><span class="font-label-sm text-label-sm text-primary-container">ONLINE</span></div></div><nav class="flex-1 px-space-sm space-y-space-xs" data-active-classes="bg-surface-container-high text-primary font-bold"><a class="flex items-center px-space-md py-space-sm rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all gap-space-sm" data-path="workstation" href="#"><span class="material-symbols-outlined text-[18px]">terminal</span><span class="font-label-md text-label-md uppercase tracking-wider">Workstation Core</span></a><a aria-current="page" class="flex items-center px-space-md py-space-sm rounded transition-all gap-space-sm bg-surface-container-high text-primary font-bold" data-path="filesystem" href="#"><span class="material-symbols-outlined text-[18px]">folder_data</span><span class="font-label-md text-label-md uppercase tracking-wider">Filesystem Hub</span></a><a class="flex items-center px-space-md py-space-sm rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all gap-space-sm" data-path="diagnostics" href="#"><span class="material-symbols-outlined text-[18px]">insights</span><span class="font-label-md text-label-md uppercase tracking-wider">Diagnostics HUD</span></a><a class="flex items-center px-space-md py-space-sm rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all gap-space-sm" data-path="comm-net" href="#"><span class="material-symbols-outlined text-[18px]">hub</span><span class="font-label-md text-label-md uppercase tracking-wider">Comm Net Matrix</span></a><a class="flex items-center px-space-md py-space-sm rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all gap-space-sm" data-path="system-settings" href="#"><span class="material-symbols-outlined text-[18px]">tune</span><span class="font-label-md text-label-md uppercase tracking-wider">HUD Protocols</span></a></nav><div class="px-space-md mt-auto"><div class="p-space-sm rounded bg-surface-container-low/50"><div class="flex items-center justify-between mb-space-xs"><span class="font-label-sm text-label-sm text-on-surface-variant">SECURITY RUNLEVEL</span><span class="font-label-sm text-label-sm text-primary">05 [SECURE]</span></div><div class="w-full h-1 bg-surface-container-high rounded-full overflow-hidden"><div class="h-full bg-primary-container w-[92%]"></div></div></div></div></aside><div class="pl-64"><main class="relative pt-14 pb-10 w-full min-h-screen bg-surface"><div class="flex flex-col w-full min-w-0 text-on-surface">
+<!-- Desktop Environment Stage (HUD Crosshair Pattern Background) -->
+<div class="relative w-full min-h-[calc(100vh-6rem)] p-space-lg flex gap-space-lg select-none overflow-x-hidden">
+<!-- Background Ambient Glow & Telemetry Grid Reticle -->
+<div class="absolute inset-0 pointer-events-none opacity-25">
+<div class="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-primary-container/10 blur-3xl"></div>
+<div class="absolute top-1/2 right-10 w-[30rem] h-[30rem] rounded-full bg-surface-tint/5 blur-3xl"></div>
+<div class="absolute bottom-10 left-1/3 w-80 h-80 rounded-full bg-secondary-container/5 blur-3xl"></div>
+<svg class="w-full h-full text-primary-container/10" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<pattern height="48" id="reticle-grid" patternunits="userSpaceOnUse" width="48">
+<circle cx="2" cy="2" fill="currentColor" r="1"></circle>
+<path d="M 24 22 L 24 26 M 22 24 L 26 24" stroke="currentColor" stroke-opacity="0.3" stroke-width="0.6"></path>
+</pattern>
+</defs>
+<rect fill="url(#reticle-grid)" height="100%" width="100%"></rect>
+</svg>
+</div>
+<!-- LEFT DESKTOP SHORTCUT LAUNCHER COLUMN -->
+<div class="relative z-10 w-24 shrink-0 flex flex-col items-center gap-space-md py-space-sm">
+<!-- Shortcut: Stark Files (Active Application Indicator) -->
+<div class="group relative flex flex-col items-center gap-space-xs cursor-pointer p-space-xs rounded-xl hover:bg-surface-container-high/60 transition-all">
+<div class="relative w-14 h-14 rounded-lg bg-surface-container-low p-1.5 shadow-[0_0_15px_rgba(0,240,255,0.25)] ring-1 ring-primary-container/40">
+<img alt="Stark Filesystem Explorer" class="w-full h-full object-contain rounded drop-shadow" src="https://lh3.googleusercontent.com/aida/AEtjO1Xo_nBSO4bMLLEc3ScNoHK0vSgL3o-nipyllE9Q0RIjAg_xDX5eyq1G5Izw47krSE1u_jUlZReFMqIVR4sUtgKuTeHWBmUhOWF5IbawMcM0X8nTN9JHHpEY1u_XCaXU8vC5ELWD82U8KfuoCDdIYdKS6fcZVMb38-O1cV-flqxpvsGlrE5i0C8rfA9TmbqQlOgXCZ2dmcqIO221XzS7lhG1CGjsiPlEpXtuSJaps7TBm49s-rniD7WDztU"/>
+<span class="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-primary-container ring-2 ring-surface"></span>
+</div>
+<span class="font-label-sm text-label-sm text-primary font-bold text-center tracking-wider max-w-[80px] truncate">Stark Files</span>
+<span class="absolute -left-1.5 top-5 w-1 h-5 rounded-full bg-primary-container shadow-[0_0_8px_#00f0ff]"></span>
+</div>
+<!-- Shortcut: Stark Terminal -->
+<div class="group relative flex flex-col items-center gap-space-xs cursor-pointer p-space-xs rounded-xl hover:bg-surface-container-high/40 transition-all">
+<div class="w-14 h-14 rounded-lg bg-surface-container-low p-1.5 shadow-sm group-hover:shadow-[0_0_12px_rgba(0,240,255,0.2)] transition-all">
+<img alt="Stark Terminal CLI" class="w-full h-full object-contain rounded" src="https://lh3.googleusercontent.com/aida/AEtjO1Xwu0a9IBO8OItkpe9oY5KA95Nn94pRhC2--XnMR-PjougZum2jimYk47yKfcKd3He7OmIPcmgraw3ZvANAfMEUiZrlNxVczpTRRqIX6OD5IUrz93PkJG3fY1Euk9MrgLrDvmikqyW7G3naML4QLKllIizOz0LQpjl-aoJfJlO4PuvVqr3qgr8gTla_RHDL2YOxq4VitHWwCAMyuUvkPbBAjtuTZUFKpCANkjgPajCyI0b7GeT2fzdm_8c"/>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant group-hover:text-on-surface text-center tracking-wider max-w-[80px] truncate">Terminal</span>
+</div>
+<!-- Shortcut: JARVIS AI Core -->
+<div class="group relative flex flex-col items-center gap-space-xs cursor-pointer p-space-xs rounded-xl hover:bg-surface-container-high/40 transition-all">
+<div class="w-14 h-14 rounded-lg bg-surface-container-low p-1.5 shadow-sm group-hover:shadow-[0_0_14px_rgba(254,157,0,0.3)] transition-all">
+<img alt="JARVIS AI Core" class="w-full h-full object-contain rounded" src="https://lh3.googleusercontent.com/aida/AEtjO1UeOqujd-sp5dKO5SlMUJvW_P5Qslig4GVinCFp5GtM0jFsQz--rNfuCItGPEegBzLb0heoaSXOVO3jJidIq8k2dwT1zYpCDcZs4YpaKO1kACgto1lqshzQ1sFTQpG4PwoG123jBCOA24aCaX_2gelXTW665rPF76OpTQ0zRGqEK24P0Zc3HlIJzdXT8XvOUK-_2rQxEP2Pc0a3xRQgOILfKD3c6BjfhwKYbN0zx1U163U-Ls1koQY77w"/>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant group-hover:text-secondary-container text-center tracking-wider max-w-[80px] truncate">JARVIS AI</span>
+</div>
+<!-- Shortcut: System Preferences -->
+<div class="group relative flex flex-col items-center gap-space-xs cursor-pointer p-space-xs rounded-xl hover:bg-surface-container-high/40 transition-all">
+<div class="w-14 h-14 rounded-lg bg-surface-container-low p-1.5 shadow-sm group-hover:shadow-[0_0_12px_rgba(0,240,255,0.2)] transition-all">
+<img alt="System Control" class="w-full h-full object-contain rounded" src="https://lh3.googleusercontent.com/aida/AEtjO1ULEoDNlP265wqpK_DcxvbHHOtOmGWJTvC3f6_8-b35oOB8WopyHabnwJXOXywzrDeJCkCfVosZ268i1mvRsdRrsyv22nPbbyLRv4f9UnSzOMlIAG5iIcF_CRJGzsTcbk9VdDzlorKyfLUQ5yI81SFMVlb8Y3hYDBJ1hxNvNfa2_WqIfq7_VL-sZVp3Y2csBcTpbPnLvkTJ177H8sXUvCEO7KaAnumevUV87m2N3ZToniim_s0I35KEqaI"/>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant group-hover:text-on-surface text-center tracking-wider max-w-[80px] truncate">Preferences</span>
+</div>
+<!-- Shortcut: Debian APT Repos -->
+<div class="group relative flex flex-col items-center gap-space-xs cursor-pointer p-space-xs rounded-xl hover:bg-surface-container-high/40 transition-all">
+<div class="w-14 h-14 rounded-lg bg-surface-container-low flex items-center justify-center p-2 shadow-sm text-primary-fixed group-hover:text-primary">
+<span class="material-symbols-outlined text-[32px]">inventory_2</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant group-hover:text-on-surface text-center tracking-wider max-w-[80px] truncate">APT Repos</span>
+</div>
+<!-- Shortcut: Trash Bin -->
+<div class="group relative flex flex-col items-center gap-space-xs cursor-pointer p-space-xs rounded-xl hover:bg-surface-container-high/40 transition-all mt-auto">
+<div class="w-14 h-14 rounded-lg bg-surface-container-low flex items-center justify-center p-2 shadow-sm text-on-surface-variant group-hover:text-error">
+<span class="material-symbols-outlined text-[28px]">delete</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant text-center tracking-wider max-w-[80px] truncate">Trash [0]</span>
+</div>
+</div>
+<!-- CENTER / MAIN DESKTOP APPLICATION WINDOW: STARK-FS EXPLORER -->
+<div class="relative z-20 flex-1 flex flex-col min-w-0 rounded-xl bg-surface-container-lowest/85 backdrop-blur-2xl shadow-[0_20px_60px_rgba(0,0,0,0.6)] overflow-hidden">
+<!-- 1. WINDOW TITLE BAR (Wayland / GTK Holographic Precision Glass) -->
+<div class="h-11 bg-surface-container-high/80 px-space-md flex items-center justify-between gap-space-md border-b border-outline-variant/30">
+<!-- Left: Window Controls & Title -->
+<div class="flex items-center gap-space-md min-w-0">
+<!-- Window Action Circles -->
+<div class="flex items-center gap-1.5">
+<button class="w-3 h-3 rounded-full bg-error/80 hover:bg-error transition-all shadow-[0_0_6px_rgba(255,180,171,0.5)]"></button>
+<button class="w-3 h-3 rounded-full bg-secondary-container/80 hover:bg-secondary-container transition-all shadow-[0_0_6px_rgba(254,157,0,0.5)]"></button>
+<button class="w-3 h-3 rounded-full bg-primary-container/80 hover:bg-primary-container transition-all shadow-[0_0_6px_rgba(0,240,255,0.5)]"></button>
+</div>
+<!-- Active Path Spec & NVMe Bus Badge -->
+<div class="flex items-center gap-space-xs truncate">
+<span class="font-headline-sm text-body-sm text-primary font-semibold truncate">stark@debian-workstation:</span>
+<span class="font-headline-sm text-body-sm text-on-surface truncate">~/mark-85/firmware</span>
+<span class="hidden xl:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-container-highest text-label-sm font-label-sm text-primary-fixed-dim uppercase tracking-wider">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>
+              EXT4 - 14.2 GB/s NVMe
+            </span>
+</div>
+</div>
+<!-- Center: Window Tabs -->
+<div class="hidden md:flex items-center gap-1 bg-surface-container-lowest/60 p-0.5 rounded-lg border border-outline-variant/20">
+<button class="px-space-sm py-1 rounded font-label-sm text-label-sm bg-surface-container-high text-primary shadow-[0_0_8px_rgba(0,240,255,0.2)] flex items-center gap-1.5 font-bold">
+<span class="material-symbols-outlined text-[14px]">folder</span>
+<span>/firmware</span>
+<span class="material-symbols-outlined text-[12px] opacity-60 hover:opacity-100 ml-1">close</span>
+</button>
+<button class="px-space-sm py-1 rounded font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container/60 transition-all flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]">folder</span>
+<span>/etc/apt/sources.list.d</span>
+</button>
+<button class="px-space-sm py-1 rounded font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container/60 transition-all flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]">folder</span>
+<span>/sys/kernel/debug/arc</span>
+</button>
+<button class="p-1 text-on-surface-variant hover:text-primary transition-all">
+<span class="material-symbols-outlined text-[14px]">add</span>
+</button>
+</div>
+<!-- Right: Window Telemetry Coordinates -->
+<div class="flex items-center gap-space-sm shrink-0">
+<div class="hidden lg:flex items-center gap-space-xs font-label-sm text-label-sm text-on-surface-variant">
+<span class="text-primary-container">PID:</span>
+<span>8044</span>
+<span class="text-outline-variant">|</span>
+<span>WAYLAND_0</span>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant hover:text-primary text-[18px] cursor-pointer">fullscreen</span>
+</div>
+</div>
+<!-- 2. NAVIGATION & ACTION TOOLBAR -->
+<div class="h-12 bg-surface-container-low/70 px-space-md flex items-center justify-between gap-space-md border-b border-outline-variant/20">
+<!-- Left: Nav Arrows & Path Breadcrumbs -->
+<div class="flex items-center gap-space-sm min-w-0 flex-1">
+<div class="flex items-center gap-0.5">
+<button class="p-1 rounded bg-surface-container-high/60 text-on-surface-variant hover:text-primary transition-all" title="Back">
+<span class="material-symbols-outlined text-[18px]">arrow_back</span>
+</button>
+<button class="p-1 rounded bg-surface-container-high/30 text-on-surface-variant/40 cursor-not-allowed" title="Forward">
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+<button class="p-1 rounded bg-surface-container-high/60 text-on-surface-variant hover:text-primary transition-all ml-0.5" title="Up Hierarchy">
+<span class="material-symbols-outlined text-[18px]">arrow_upward</span>
+</button>
+</div>
+<!-- High-Tech Holographic Path Breadcrumb Bar -->
+<div class="flex items-center gap-1.5 px-space-sm py-1 rounded bg-surface-container-lowest/80 text-body-sm font-body-sm overflow-x-auto text-on-surface-variant max-w-xl">
+<span class="material-symbols-outlined text-[14px] text-primary-container">hard_drive</span>
+<span class="hover:text-primary cursor-pointer">root</span>
+<span class="text-outline-variant text-[10px]">/</span>
+<span class="hover:text-primary cursor-pointer">home</span>
+<span class="text-outline-variant text-[10px]">/</span>
+<span class="hover:text-primary cursor-pointer">stark</span>
+<span class="text-outline-variant text-[10px]">/</span>
+<span class="hover:text-primary cursor-pointer">mark-85</span>
+<span class="text-outline-variant text-[10px]">/</span>
+<span class="text-primary font-semibold bg-surface-container-high px-1.5 rounded">firmware</span>
+</div>
+</div>
+<!-- Center / Right: Filter, Views & Terminal Triggers -->
+<div class="flex items-center gap-space-sm shrink-0">
+<!-- Holographic Module Filter Input -->
+<div class="relative hidden sm:flex items-center">
+<span class="material-symbols-outlined absolute left-2.5 text-[16px] text-primary-container">search</span>
+<input class="w-60 h-8 pl-8 pr-3 rounded bg-surface-container-lowest/90 font-label-md text-label-md text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:ring-1 focus:ring-primary-container/70 border border-outline-variant/30" placeholder="Type to filter Stark modules..." type="text"/>
+<span class="absolute right-2 px-1 rounded bg-surface-container-high text-[9px] font-label-sm text-on-surface-variant font-mono">⌘F</span>
+</div>
+<!-- View Mode Toggle -->
+<div class="flex items-center p-0.5 rounded bg-surface-container-lowest border border-outline-variant/30">
+<button class="p-1 rounded bg-surface-container-high text-primary" title="List View">
+<span class="material-symbols-outlined text-[16px]">format_list_bulleted</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface transition-all" title="Grid View">
+<span class="material-symbols-outlined text-[16px]">grid_view</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface transition-all" title="Hex Terminal Preview">
+<span class="material-symbols-outlined text-[16px]">terminal</span>
+</button>
+</div>
+<!-- Action Buttons -->
+<button class="hidden lg:flex items-center gap-1.5 px-space-sm py-1.5 rounded bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-surface-bright transition-all">
+<span class="material-symbols-outlined text-[14px]">create_new_folder</span>
+<span>+ Folder</span>
+</button>
+<button class="flex items-center gap-1.5 px-space-sm py-1.5 rounded bg-primary-container/15 text-primary ring-1 ring-primary-container/50 font-label-md text-label-md hover:bg-primary-container/30 transition-all shadow-[0_0_10px_rgba(0,240,255,0.2)]">
+<span class="material-symbols-outlined text-[14px]">terminal</span>
+<span class="hidden sm:inline">Open Terminal</span>
+</button>
+<button class="hidden xl:flex items-center gap-1.5 px-space-sm py-1.5 rounded bg-secondary-container/15 text-secondary font-label-md text-label-md hover:bg-secondary-container/25 transition-all">
+<span class="material-symbols-outlined text-[14px]">cloud_sync</span>
+<span>Mount S3</span>
+</button>
+</div>
+</div>
+<!-- 3-PANE WORKSPACE BODY -->
+<div class="flex-1 grid grid-cols-12 min-h-0 divide-x divide-outline-variant/20 overflow-hidden">
+<!-- 3. LEFT NAVIGATION PANE (Places, Volumes, Network Mounts) -->
+<div class="col-span-3 lg:col-span-2 bg-surface-container-lowest/60 p-space-sm flex flex-col gap-space-md overflow-y-auto hidden md:flex">
+<!-- QUICK ACCESS Group -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between px-space-xs text-label-sm font-label-sm uppercase tracking-widest text-on-surface-variant">
+<span>Quick Access</span>
+<span class="material-symbols-outlined text-[12px]">expand_less</span>
+</div>
+<a class="flex items-center gap-2 px-space-xs py-1.5 rounded font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-high/60 hover:text-on-surface transition-all" href="#">
+<span class="material-symbols-outlined text-[16px] text-primary-fixed-dim">home</span>
+<span class="truncate">Home (/home/stark)</span>
+</a>
+<a class="flex items-center gap-2 px-space-xs py-1.5 rounded font-body-sm text-body-sm bg-surface-container-high text-primary font-semibold shadow-[0_0_8px_rgba(0,240,255,0.15)]" href="#">
+<span class="material-symbols-outlined text-[16px] text-primary-container">memory</span>
+<span class="truncate">Mark-85 Firmware</span>
+</a>
+<a class="flex items-center gap-2 px-space-xs py-1.5 rounded font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-high/60 hover:text-on-surface transition-all" href="#">
+<span class="material-symbols-outlined text-[16px] text-secondary-container">psychology</span>
+<span class="truncate">AI Neural Weights</span>
+</a>
+<a class="flex items-center gap-2 px-space-xs py-1.5 rounded font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-high/60 hover:text-on-surface transition-all" href="#">
+<span class="material-symbols-outlined text-[16px] text-primary-fixed-dim">query_stats</span>
+<span class="truncate">Telemetry Logs</span>
+</a>
+<a class="flex items-center gap-2 px-space-xs py-1.5 rounded font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-high/60 hover:text-on-surface transition-all" href="#">
+<span class="material-symbols-outlined text-[16px]">cached</span>
+<span class="truncate">Apt Cache (/var)</span>
+</a>
+</div>
+<!-- MOUNTED STORAGE Group -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between px-space-xs text-label-sm font-label-sm uppercase tracking-widest text-on-surface-variant">
+<span>Mounted Storage</span>
+<span class="text-label-sm text-primary-container font-mono">4 VOL</span>
+</div>
+<!-- NVMe RAID-0 -->
+<div class="p-2 rounded bg-surface-container-low/70 flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface font-semibold flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px] text-primary-container">dns</span>
+                  NVMe RAID-0
+                </span>
+<span class="font-label-sm text-label-sm text-primary">55%</span>
+</div>
+<div class="w-full h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-primary-container w-[55%]"></div>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">2.2 TB free / 4.0 TB</span>
+</div>
+<!-- Arc Buffer -->
+<div class="p-2 rounded bg-surface-container-low/40 flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface-variant font-semibold flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px] text-secondary-container">bolt</span>
+                  Arc SS-Buffer
+                </span>
+<span class="font-label-sm text-label-sm text-secondary">88%</span>
+</div>
+<div class="w-full h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-secondary-container w-[88%]"></div>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">61 GB free / 512 GB</span>
+</div>
+<!-- Encrypted Quantum Hologram Vault -->
+<a class="flex items-center justify-between px-space-xs py-1.5 rounded font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-high/60 transition-all" href="#">
+<span class="flex items-center gap-2 truncate">
+<span class="material-symbols-outlined text-[16px] text-error">lock</span>
+<span class="truncate">Quantum Vault</span>
+</span>
+<span class="font-label-sm text-label-sm text-error bg-error-container/40 px-1 rounded">AES-512</span>
+</a>
+<!-- Debian 12 Live USB -->
+<a class="flex items-center gap-2 px-space-xs py-1.5 rounded font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-high/60 transition-all" href="#">
+<span class="material-symbols-outlined text-[16px]">usb</span>
+<span class="truncate">Debian 12 Live USB</span>
+</a>
+</div>
+<!-- NETWORK PLACES Group -->
+<div class="flex flex-col gap-1 mt-auto">
+<div class="flex items-center justify-between px-space-xs text-label-sm font-label-sm uppercase tracking-widest text-on-surface-variant">
+<span>Network Matrix</span>
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container animate-pulse"></span>
+</div>
+<a class="flex items-center gap-2 px-space-xs py-1 rounded font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface" href="#">
+<span class="material-symbols-outlined text-[14px] text-primary-fixed">router</span>
+<span class="truncate">stark-cloud.internal</span>
+</a>
+<a class="flex items-center gap-2 px-space-xs py-1 rounded font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface" href="#">
+<span class="material-symbols-outlined text-[14px] text-primary-fixed">satellite_alt</span>
+<span class="truncate">satellite-link-mesh</span>
+</a>
+<a class="flex items-center gap-2 px-space-xs py-1 rounded font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface" href="#">
+<span class="material-symbols-outlined text-[14px] text-secondary">hub</span>
+<span class="truncate">jarvis-neural-hub</span>
+</a>
+</div>
+</div>
+<!-- 4. MAIN CONTENT AREA (Detailed File & Folder List) -->
+<div class="col-span-12 md:col-span-9 lg:col-span-7 bg-surface-container-low/20 flex flex-col min-w-0 overflow-y-auto">
+<!-- Column Headers Table -->
+<div class="h-9 px-space-md bg-surface-container-high/40 flex items-center text-label-sm font-label-sm uppercase tracking-wider text-on-surface-variant sticky top-0 backdrop-blur-md z-10 border-b border-outline-variant/20">
+<div class="flex-1 min-w-[200px] flex items-center gap-2">
+<span>Name / Node</span>
+<span class="material-symbols-outlined text-[12px] text-primary">arrow_downward</span>
+</div>
+<div class="w-28 hidden sm:block">Permissions</div>
+<div class="w-20 hidden lg:block">Owner</div>
+<div class="w-24 text-right pr-space-md">Size</div>
+<div class="w-28 text-right hidden xl:block">Integrity</div>
+</div>
+<!-- File Items Container -->
+<div class="divide-y divide-outline-variant/10 text-body-sm font-body-sm">
+<!-- Folder 1: arc_cooling_algorithms/ -->
+<div class="flex items-center px-space-md py-2.5 hover:bg-surface-container-high/40 cursor-pointer group transition-colors">
+<div class="flex-1 min-w-[200px] flex items-center gap-3">
+<span class="material-symbols-outlined text-[20px] text-primary-container fill-1">folder</span>
+<div class="flex flex-col min-w-0">
+<span class="font-headline-sm text-body-md text-on-surface group-hover:text-primary transition-colors truncate">arc_cooling_algorithms/</span>
+<span class="text-label-sm font-label-sm text-on-surface-variant">4 directory items</span>
+</div>
+</div>
+<div class="w-28 font-mono text-label-md text-on-surface-variant hidden sm:block">drwxr-xr-x</div>
+<div class="w-20 font-mono text-label-md text-on-surface-variant hidden lg:block">stark</div>
+<div class="w-24 text-right pr-space-md font-mono text-on-surface-variant">4.0 KB</div>
+<div class="w-28 text-right hidden xl:block">
+<span class="px-1.5 py-0.5 rounded bg-surface-container-highest text-label-sm text-on-surface-variant">DIRECTORY</span>
+</div>
+</div>
+<!-- Folder 2: nanotech_assembly_specs/ -->
+<div class="flex items-center px-space-md py-2.5 hover:bg-surface-container-high/40 cursor-pointer group transition-colors">
+<div class="flex-1 min-w-[200px] flex items-center gap-3">
+<span class="material-symbols-outlined text-[20px] text-secondary-container fill-1">folder_special</span>
+<div class="flex flex-col min-w-0">
+<span class="font-headline-sm text-body-md text-on-surface group-hover:text-secondary-container transition-colors truncate">nanotech_assembly_specs/</span>
+<span class="text-label-sm font-label-sm text-on-surface-variant">18 blueprints</span>
+</div>
+</div>
+<div class="w-28 font-mono text-label-md text-on-surface-variant hidden sm:block">drwx------</div>
+<div class="w-20 font-mono text-label-md text-on-surface-variant hidden lg:block">stark</div>
+<div class="w-24 text-right pr-space-md font-mono text-on-surface-variant">16.0 KB</div>
+<div class="w-28 text-right hidden xl:block">
+<span class="px-1.5 py-0.5 rounded bg-secondary-container/20 text-label-sm text-secondary font-mono">ENCR-0700</span>
+</div>
+</div>
+<!-- Folder 3: flight_aerodynamics_deb12/ -->
+<div class="flex items-center px-space-md py-2.5 hover:bg-surface-container-high/40 cursor-pointer group transition-colors">
+<div class="flex-1 min-w-[200px] flex items-center gap-3">
+<span class="material-symbols-outlined text-[20px] text-primary-container fill-1">folder</span>
+<div class="flex flex-col min-w-0">
+<span class="font-headline-sm text-body-md text-on-surface group-hover:text-primary transition-colors truncate">flight_aerodynamics_deb12/</span>
+<span class="text-label-sm font-label-sm text-on-surface-variant">6 telemetry graphs</span>
+</div>
+</div>
+<div class="w-28 font-mono text-label-md text-on-surface-variant hidden sm:block">drwxr-xr-x</div>
+<div class="w-20 font-mono text-label-md text-on-surface-variant hidden lg:block">stark</div>
+<div class="w-24 text-right pr-space-md font-mono text-on-surface-variant">8.0 KB</div>
+<div class="w-28 text-right hidden xl:block">
+<span class="px-1.5 py-0.5 rounded bg-surface-container-highest text-label-sm text-on-surface-variant">DIRECTORY</span>
+</div>
+</div>
+<!-- File 1: arc_reactor_v4.ko (SELECTED ACTIVE ITEM) -->
+<div class="flex items-center px-space-md py-3 bg-surface-container-high/80 ring-1 ring-primary-container/40 shadow-[inset_0_0_15px_rgba(0,240,255,0.08)] cursor-pointer group">
+<div class="flex-1 min-w-[200px] flex items-center gap-3">
+<span class="material-symbols-outlined text-[22px] text-primary-container animate-pulse">memory</span>
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-body-md text-primary font-bold truncate">arc_reactor_v4.ko</span>
+<span class="px-1 py-0.2 rounded bg-primary-container/20 text-primary text-label-sm font-label-sm border border-primary-container/40">SELECTED</span>
+</div>
+<span class="text-label-sm font-label-sm text-on-surface-variant">Linux Kernel Loadable Module (ELF64)</span>
+</div>
+</div>
+<div class="w-28 font-mono text-label-md text-primary-fixed-dim hidden sm:block">-rw-r--r--</div>
+<div class="w-20 font-mono text-label-md text-primary-fixed hidden lg:block">root</div>
+<div class="w-24 text-right pr-space-md font-mono text-primary font-semibold">12.4 MB</div>
+<div class="w-28 text-right hidden xl:block">
+<span class="px-1.5 py-0.5 rounded bg-primary-container/20 text-label-sm text-primary font-mono">SHA-256:OK</span>
+</div>
+</div>
+<!-- File 2: jarvis_voice_matrix.weights -->
+<div class="flex items-center px-space-md py-2.5 hover:bg-surface-container-high/40 cursor-pointer group transition-colors">
+<div class="flex-1 min-w-[200px] flex items-center gap-3">
+<span class="material-symbols-outlined text-[20px] text-secondary">model_training</span>
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-body-md text-on-surface group-hover:text-secondary transition-colors truncate">jarvis_voice_matrix.weights</span>
+<span class="px-1 py-0.2 rounded bg-secondary-container/20 text-secondary text-label-sm font-mono">CUDA-PIN</span>
+</div>
+<span class="text-label-sm font-label-sm text-on-surface-variant">FP16 Transformer Neural Tensor</span>
+</div>
+</div>
+<div class="w-28 font-mono text-label-md text-on-surface-variant hidden sm:block">-rw-rw-r--</div>
+<div class="w-20 font-mono text-label-md text-on-surface-variant hidden lg:block">stark</div>
+<div class="w-24 text-right pr-space-md font-mono text-secondary font-medium">4.2 GB</div>
+<div class="w-28 text-right hidden xl:block">
+<span class="px-1.5 py-0.5 rounded bg-surface-container-highest text-label-sm text-on-surface-variant font-mono">FP16-VALID</span>
+</div>
+</div>
+<!-- File 3: flight_stabilizer_mark85.deb -->
+<div class="flex items-center px-space-md py-2.5 hover:bg-surface-container-high/40 cursor-pointer group transition-colors">
+<div class="flex-1 min-w-[200px] flex items-center gap-3">
+<span class="material-symbols-outlined text-[20px] text-primary-fixed">package_2</span>
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-body-md text-on-surface group-hover:text-primary transition-colors truncate">flight_stabilizer_mark85.deb</span>
+<span class="px-1 py-0.2 rounded bg-surface-container-highest text-label-sm text-primary-fixed-dim font-mono">dpkg-ready</span>
+</div>
+<span class="text-label-sm font-label-sm text-on-surface-variant">Debian Binary Package (Architecture: amd64)</span>
+</div>
+</div>
+<div class="w-28 font-mono text-label-md text-on-surface-variant hidden sm:block">-rw-r--r--</div>
+<div class="w-20 font-mono text-label-md text-on-surface-variant hidden lg:block">stark</div>
+<div class="w-24 text-right pr-space-md font-mono text-on-surface">180 MB</div>
+<div class="w-28 text-right hidden xl:block">
+<span class="px-1.5 py-0.5 rounded bg-surface-container-highest text-label-sm text-on-surface-variant font-mono">GPG-SIGNED</span>
+</div>
+</div>
+<!-- File 4: defense_override.sh -->
+<div class="flex items-center px-space-md py-2.5 hover:bg-surface-container-high/40 cursor-pointer group transition-colors">
+<div class="flex-1 min-w-[200px] flex items-center gap-3">
+<span class="material-symbols-outlined text-[20px] text-error">terminal</span>
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-body-md text-on-surface group-hover:text-error transition-colors truncate">defense_override.sh</span>
+<span class="px-1 py-0.2 rounded bg-error-container/30 text-error text-label-sm font-mono">ROOT EXEC</span>
+</div>
+<span class="text-label-sm font-label-sm text-on-surface-variant">Bourne-Again Shell Executable Script</span>
+</div>
+</div>
+<div class="w-28 font-mono text-label-md text-error hidden sm:block">-rwx------</div>
+<div class="w-20 font-mono text-label-md text-error hidden lg:block">root</div>
+<div class="w-24 text-right pr-space-md font-mono text-on-surface">42 KB</div>
+<div class="w-28 text-right hidden xl:block">
+<span class="px-1.5 py-0.5 rounded bg-error-container/20 text-label-sm text-error font-mono">0700-SUID</span>
+</div>
+</div>
+<!-- File 5: telemetry_dump_2024.log.zst -->
+<div class="flex items-center px-space-md py-2.5 hover:bg-surface-container-high/40 cursor-pointer group transition-colors">
+<div class="flex-1 min-w-[200px] flex items-center gap-3">
+<span class="material-symbols-outlined text-[20px] text-on-surface-variant">folder_zip</span>
+<div class="flex flex-col min-w-0">
+<span class="font-headline-sm text-body-md text-on-surface group-hover:text-on-background transition-colors truncate">telemetry_dump_2024.log.zst</span>
+<span class="text-label-sm font-label-sm text-on-surface-variant">Zstandard Compressed High-Speed Flight Logs</span>
+</div>
+</div>
+<div class="w-28 font-mono text-label-md text-on-surface-variant hidden sm:block">-rw-r--r--</div>
+<div class="w-20 font-mono text-label-md text-on-surface-variant hidden lg:block">stark</div>
+<div class="w-24 text-right pr-space-md font-mono text-on-surface">850 MB</div>
+<div class="w-28 text-right hidden xl:block">
+<span class="px-1.5 py-0.5 rounded bg-surface-container-highest text-label-sm text-on-surface-variant font-mono">ZSTD:19</span>
+</div>
+</div>
+</div>
+<!-- Bottom Visual Empty Space filler with telemetry quote -->
+<div class="mt-auto p-space-md flex items-center justify-between text-label-sm font-label-sm text-on-surface-variant/40 border-t border-outline-variant/10">
+<span>JARVIS_VFS // IO_DISPATCHER: ACTIVE POOL</span>
+<span class="font-mono">SYS_CLOCK: 4.88 GHz UNLOCKED</span>
+</div>
+</div>
+<!-- 5. RIGHT INSPECTOR / PREVIEW PANE (Selected File Telemetry) -->
+<div class="col-span-3 bg-surface-container-lowest/80 p-space-md flex flex-col gap-space-md overflow-y-auto hidden lg:flex">
+<!-- Inspector Header -->
+<div class="flex items-center justify-between border-b border-outline-variant/20 pb-space-xs">
+<span class="font-label-sm text-label-sm uppercase tracking-widest text-primary font-bold">Node Telemetry Inspector</span>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant hover:text-primary cursor-pointer">dock_to_right</span>
+</div>
+<!-- Holographic Arc Reactor Visualizer / Wireframe Diagram -->
+<div class="relative w-full aspect-video rounded-lg bg-surface-container-high/60 flex flex-col items-center justify-center p-space-sm overflow-hidden border border-outline-variant/30">
+<!-- Reticle Crosshairs -->
+<div class="absolute inset-2 border border-primary-container/20 rounded pointer-events-none"></div>
+<div class="absolute top-2 left-2 text-[8px] font-mono text-primary-container/60">SECTOR // MARK-85</div>
+<div class="absolute bottom-2 right-2 text-[8px] font-mono text-primary-container/60">REV: 04.14.9</div>
+<!-- Concentric Glowing Ring SVG (Debian Swirl & Arc Reactor Motif) -->
+<svg class="w-24 h-24 text-primary-container" fill="none" viewbox="0 0 100 100">
+<!-- Outer Dashed Ring -->
+<circle class="opacity-40 animate-[spin_20s_linear_infinite]" cx="50" cy="50" r="42" stroke="currentColor" stroke-dasharray="6 3" stroke-width="1.5"></circle>
+<!-- Middle Segmented Ring -->
+<circle class="opacity-80 animate-[spin_12s_linear_infinite_reverse]" cx="50" cy="50" r="34" stroke="currentColor" stroke-dasharray="14 8 4 8" stroke-width="2.5"></circle>
+<!-- Inner Power Ring -->
+<circle class="opacity-90" cx="50" cy="50" r="22" stroke="#ff9d00" stroke-width="2"></circle>
+<!-- Core Debian/Arc Spiral Core -->
+<path d="M 50 34 C 44 34 40 38 40 44 C 40 52 56 50 56 60 C 56 65 52 68 47 68 C 42 68 38 65 38 61" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path>
+<!-- Central Reactor Point -->
+<circle class="shadow-[0_0_8px_#00f0ff]" cx="50" cy="50" fill="#00f0ff" r="4"></circle>
+</svg>
+<span class="font-label-sm text-label-sm text-primary font-bold tracking-wider mt-1">arc_reactor_v4.ko</span>
+<span class="font-label-sm text-[9px] text-on-surface-variant font-mono">DYNAMIC DRIVER ATTACHMENT</span>
+</div>
+<!-- File Attributes & Metadata Bento -->
+<div class="flex flex-col gap-space-sm bg-surface-container-low/50 p-space-sm rounded-lg border border-outline-variant/20">
+<span class="font-label-sm text-label-sm uppercase text-on-surface-variant font-semibold">Binary Architecture</span>
+<div class="flex flex-col gap-1.5 font-label-md text-label-md">
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant">File Type:</span>
+<span class="text-on-surface font-mono font-medium">ELF 64-bit Relocatable</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant">Target Machine:</span>
+<span class="text-primary font-mono font-medium">x86-64 [AMD64]</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant">Host OS:</span>
+<span class="text-on-surface font-mono font-medium">Debian 12 (Bookworm)</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant">Kernel ABI:</span>
+<span class="text-on-surface font-mono font-medium">6.1.0-21-stark</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant">Status:</span>
+<span class="text-secondary font-mono font-semibold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-container"></span>
+                  INACTIVE [UNLOADED]
+                </span>
+</div>
+</div>
+</div>
+<!-- Cryptographic SHA-256 Hash Block -->
+<div class="flex flex-col gap-1 p-space-xs rounded bg-surface-container-high/40 border border-outline-variant/20">
+<div class="flex items-center justify-between text-label-sm font-label-sm">
+<span class="text-on-surface-variant">SHA-256 Checksum:</span>
+<span class="text-primary-container font-mono">VERIFIED</span>
+</div>
+<div class="font-mono text-[9px] text-primary break-all leading-tight bg-surface-container-lowest p-1.5 rounded select-all">
+              e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+            </div>
+</div>
+<!-- Telemetry Inspector Actions -->
+<div class="flex flex-col gap-space-xs mt-auto">
+<!-- Primary Action: Load Module -->
+<button class="w-full py-2 px-space-sm rounded bg-primary-container text-on-primary font-label-md text-label-md font-bold uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-primary transition-all shadow-[0_0_15px_rgba(0,240,255,0.35)]">
+<span class="material-symbols-outlined text-[16px]">play_arrow</span>
+<span>Load Module (insmod)</span>
+</button>
+<!-- Secondary Actions -->
+<div class="grid grid-cols-2 gap-space-xs">
+<button class="py-1.5 px-space-xs rounded bg-surface-container-high text-on-surface hover:bg-surface-bright font-label-md text-label-md font-medium text-center truncate border border-outline-variant/30">
+                Sign Stark Key
+              </button>
+<button class="py-1.5 px-space-xs rounded bg-surface-container-high text-on-surface hover:bg-surface-bright font-label-md text-label-md font-medium text-center truncate border border-outline-variant/30">
+                Hex Viewer
+              </button>
+</div>
+</div>
+</div>
+</div>
+<!-- 6. BOTTOM STATUS BAR (Telemetry & Virtual File System Sync) -->
+<div class="h-8 bg-surface-container-high/90 px-space-md flex items-center justify-between gap-space-md border-t border-outline-variant/20 font-label-sm text-label-sm text-on-surface-variant">
+<div class="flex items-center gap-space-md truncate">
+<div class="flex items-center gap-1.5 text-on-surface">
+<span class="material-symbols-outlined text-[14px] text-primary-container">info</span>
+<span>8 items, 5.25 GB total</span>
+</div>
+<span class="text-outline-variant">|</span>
+<div class="hidden sm:flex items-center gap-1">
+<span>Free space:</span>
+<span class="text-primary font-mono">1.8 TB NVMe RAID-0</span>
+</div>
+<span class="hidden md:inline text-outline-variant">|</span>
+<div class="hidden md:flex items-center gap-1">
+<span>Permissions:</span>
+<span class="text-on-surface font-mono">chmod 0755</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md shrink-0">
+<div class="flex items-center gap-1.5 text-primary">
+<span class="w-2 h-2 rounded-full bg-primary-container shadow-[0_0_6px_#00f0ff]"></span>
+<span class="font-bold">JARVIS FS Sync: NOMINAL</span>
+</div>
+<span class="text-outline-variant hidden sm:inline">|</span>
+<span class="hidden sm:inline font-mono">IOPS: 184.2K</span>
+</div>
+</div>
+</div>
+</div>
+</div></main></div><footer class="fixed bottom-0 left-0 right-0 h-10 bg-surface-container-lowest/95 backdrop-blur-xl z-50 flex items-center justify-between px-space-md shadow-[0_-1px_8px_rgba(0,0,0,0.4)]"><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs"><span class="h-1.5 w-1.5 rounded-full bg-primary-container"></span><span class="font-label-sm text-label-sm text-primary-fixed-dim">SYS_OK // TTY1 ACTIVE</span></div><div class="hidden sm:flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm"><span>HOST:</span><span class="text-on-surface">MARK-85-PRIMARY</span></div></div><div class="flex items-center gap-space-lg"><div class="flex items-center gap-space-md font-label-sm text-label-sm text-on-surface-variant"><span class="hidden md:inline">DEBIAN BOOKWORM 12.5</span><span class="text-secondary">NEURAL LINK LOCKED</span><span class="text-on-surface">23:42:09 UTC</span></div></div></footer></body></html>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" fill="none">
+  <defs>
+    <radialGradient id="glow-settings" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#00f0ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gear-grad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#142333"/>
+      <stop offset="100%" stop-color="#07101a"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="108" height="108" rx="20" fill="url(#glow-settings)"/>
+  <rect x="14" y="14" width="100" height="100" rx="16" stroke="#00f0ff" stroke-opacity="0.2" stroke-width="1.5" stroke-dasharray="4 4"/>
+
+  <!-- Outer Reactor Arc Casing -->
+  <circle cx="64" cy="64" r="44" stroke="#00f0ff" stroke-width="2" stroke-dasharray="14 6"/>
+  <circle cx="64" cy="64" r="36" fill="url(#gear-grad)" stroke="#00f0ff" stroke-width="2"/>
+  
+  <!-- Mechanical Gear / Arc Segment notches -->
+  <path d="M64 24V16 M64 112V104 M24 64H16 M112 64H104 M36 36L30 30 M98 98L92 92 M36 92L30 98 M98 30L92 36" stroke="#ffb703" stroke-width="3" stroke-linecap="round"/>
+  
+  <!-- Inner Plasma Core -->
+  <circle cx="64" cy="64" r="22" stroke="#00f0ff" stroke-width="2.5"/>
+  <circle cx="64" cy="64" r="14" fill="#0d1b28" stroke="#ffb703" stroke-width="1.5" stroke-dasharray="4 2"/>
+  <circle cx="64" cy="64" r="6" fill="#00f0ff"/>
+  <circle cx="64" cy="64" r="2" fill="#ffffff"/>
+
+  <!-- Corner Labels -->
+  <text x="64" y="100" text-anchor="middle" font-family="monospace" font-size="5.5" fill="#00f0ff" letter-spacing="1.5">SYS · CONTROL // OPT</text>
+</svg>
