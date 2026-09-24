@@ -5,7 +5,8 @@
 //! de páginas iniciales, mapear la memoria física y pedirle al firmware UEFI un framebuffer.
 //! Después salta a `kernel_main`.
 //!
-//! Orden de arranque: serie → GDT → IDT/PIC → PIT → TSC → heap → pantalla → interrupciones → bucle.
+//! Orden de arranque: serie → GDT → IDT/PIC → PIT → TSC → heap → disco → pantalla → interrupciones
+//! → bucle.
 
 #![no_std]
 #![no_main]
@@ -17,10 +18,12 @@ mod allocator;
 mod gdt;
 mod interrupts;
 mod keyboard;
+mod pci;
 mod pit;
 mod rtc;
 mod serial;
 mod time;
+mod virtio_blk;
 
 use alloc::vec;
 use core::fmt::Write;
@@ -29,6 +32,7 @@ use core::panic::PanicInfo;
 use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::info::{MemoryRegionKind, PixelFormat as BootPixelFormat};
 use bootloader_api::{BootInfo, entry_point};
+use jarvis_fs::FileSystem;
 use jarvis_gfx::clock::{DateTime, StrBuf};
 use jarvis_gfx::scene::Scene;
 use jarvis_gfx::{Canvas, Color, PixelFormat, text};
@@ -101,6 +105,43 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         heap / (1024 * 1024)
     );
 
+    // Disco: virtio-blk + FAT32. Si no hay disco o no se puede montar, el sistema arranca igual.
+    let disk =
+        virtio_blk::VirtioBlk::init(phys_offset).and_then(|blk| match FileSystem::mount(blk) {
+            Ok(fs) => Some(fs),
+            Err(e) => {
+                serial_println!("disco: no se pudo montar: {}", e);
+                None
+            }
+        });
+    let mut disk_row = StrBuf::<32>::new();
+    match disk {
+        Some(mut fs) => {
+            let _ = write!(
+                disk_row,
+                "{} · {} MiB libres",
+                fs.label(),
+                fs.free_bytes() / (1024 * 1024)
+            );
+            serial_println!(
+                "disco: FAT32 \"{}\", {} MiB libres",
+                fs.label(),
+                fs.free_bytes() / (1024 * 1024)
+            );
+            if let Ok(entries) = fs.list("/") {
+                let mut names = StrBuf::<256>::new();
+                for e in &entries {
+                    let _ = write!(names, "{}{} ", e.name, if e.is_dir { "/" } else { "" });
+                }
+                serial_println!("ARCHIVOS_RAIZ: {}", names.as_str());
+            }
+            let _ = fs; // la app Archivos lo va a usar
+        }
+        None => {
+            let _ = write!(disk_row, "sin disco");
+        }
+    }
+
     let Some(fb) = boot_info.framebuffer.as_mut() else {
         serial_println!("sin framebuffer: el firmware no dio pantalla gráfica");
         halt();
@@ -145,6 +186,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ("MEMORIA", mem.as_str()),
         ("PANTALLA", res.as_str()),
         ("RELOJ", "RTC CMOS · UTC-3"),
+        ("DISCO", disk_row.as_str()),
         ("CEREBRO", "sin conectar"),
         ("DEMO", "ESPACIO = HABLAR"),
     ];

@@ -1,0 +1,11 @@
+Bienvenido a JARVIS-OS.
+
+Este archivo vive en un disco virtual con un sistema de archivos FAT32
+escrito desde cero para este sistema operativo. Lo que crees, renombres o
+mandes a la papelera desde el gestor de archivos queda guardado en el disco
+y sigue ahí después de reiniciar.
+
+Probá:
+  - F7 para crear una carpeta
+  - F2 para renombrar
+  - Supr para mandar algo a la Papelera
