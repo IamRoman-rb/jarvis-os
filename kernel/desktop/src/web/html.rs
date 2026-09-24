@@ -80,6 +80,73 @@ const BLOCKS: [&str; 22] = [
     "fieldset",
 ];
 
+/// Elementos sin contenido (no tienen etiqueta de cierre).
+const VOID: [&str; 13] = [
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
+    "wbr",
+];
+
+/// Palabras de clases e ids que marcan partes que no son el contenido.
+const NOISE: [&str; 21] = [
+    "nav",
+    "navbar",
+    "navbox",
+    "navigation",
+    "menu",
+    "dropdown",
+    "breadcrumb",
+    "breadcrumbs",
+    "toc",
+    "portlet",
+    "noprint",
+    "interlanguage",
+    "jump",
+    "skip",
+    "cookie",
+    "cookies",
+    "banner",
+    "share",
+    "social",
+    "advert",
+    "ads",
+];
+
+/// "Modo lectura": lo que no es el contenido (menús, cabeceras y pies del sitio, formularios,
+/// cosas ocultas) no se muestra. Las cabeceras de un `<article>` o `<main>` sí (tienen el título).
+fn hidden(name: &str, a: &[(String, String)], in_main: bool) -> bool {
+    // Los contenedores de toda la página nunca (en Wikipedia, `<body>` tiene la clase
+    // "vector-toc-available", y ocultarlo dejaba la página vacía).
+    if matches!(name, "html" | "body" | "main" | "article") {
+        return false;
+    }
+    let chrome = matches!(
+        name,
+        "nav" | "aside" | "form" | "button" | "select" | "dialog"
+    ) || (!in_main && matches!(name, "header" | "footer"));
+    let role = attr(a, "role").unwrap_or("");
+    let style: String = attr(a, "style")
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    // Clases e ids que en casi todos los sitios son menús, índices o avisos.
+    let noise = |v: &str| {
+        v.split(|c: char| c.is_whitespace() || c == '-' || c == '_')
+            .any(|t| {
+                let t = t.to_ascii_lowercase();
+                NOISE.contains(&t.as_str())
+                    || (!in_main && matches!(t.as_str(), "header" | "footer" | "sidebar"))
+            })
+    };
+    chrome
+        || noise(attr(a, "class").unwrap_or(""))
+        || noise(attr(a, "id").unwrap_or(""))
+        || attr(a, "hidden").is_some()
+        || attr(a, "aria-hidden") == Some("true")
+        || matches!(role, "navigation" | "banner" | "contentinfo" | "search")
+        || style.contains("display:none")
+}
+
 struct Builder {
     doc: Document,
     current: Block,
@@ -255,10 +322,15 @@ pub fn parse(html: &str) -> Document {
     };
     let bytes = html.as_bytes();
     let mut i = 0;
+    // Elemento que se está salteando (nombre y cuántos del mismo nombre hay abiertos adentro).
+    let mut hide: Option<(String, u32)> = None;
+    let mut in_main = 0u32;
     while i < bytes.len() {
         if bytes[i] != b'<' {
             let end = html[i..].find('<').map_or(html.len(), |e| i + e);
-            b.push_text(&decode_entities(&html[i..end]), false);
+            if hide.is_none() {
+                b.push_text(&decode_entities(&html[i..end]), false);
+            }
             i = end;
             continue;
         }
@@ -308,6 +380,31 @@ pub fn parse(html: &str) -> Document {
         } else {
             attrs(&inner[name_end..])
         };
+        let void = VOID.contains(&name.as_str()) || inner.ends_with('/');
+        if let Some((hidden_name, depth)) = &mut hide {
+            if name == *hidden_name && !void {
+                if end_tag {
+                    *depth -= 1;
+                    if *depth == 0 {
+                        hide = None;
+                    }
+                } else {
+                    *depth += 1;
+                }
+            }
+            continue;
+        }
+        if matches!(name.as_str(), "main" | "article") {
+            if end_tag {
+                in_main = in_main.saturating_sub(1);
+            } else {
+                in_main += 1;
+            }
+        }
+        if !end_tag && !void && hidden(&name, &a, in_main > 0) {
+            hide = Some((name, 1));
+            continue;
+        }
         match (name.as_str(), end_tag) {
             (n, _) if BLOCKS.contains(&n) => b.flush(),
             ("h1" | "h2" | "h3" | "h4" | "h5" | "h6", false) => {
@@ -604,6 +701,15 @@ mod tests {
         assert_eq!(decode_entities("“Hola” — dijo…"), "\"Hola\" - dijo...");
         assert_eq!(decode_entities("AT&T &unknown; &"), "AT&T &unknown; &");
         assert_eq!(decode_bytes(&[0x63, 0xF3, 0x6D, 0x6F]), "cómo");
+    }
+
+    #[test]
+    fn modo_lectura_saltea_menus_y_ocultos() {
+        let d = parse(
+            "<body class='vector-toc-available'><header><a href=/>Logo</a></header><nav><ul><li>Menú<nav>x</nav></li></ul></nav>             <div hidden><p>oculto</p></div><div style='display: none'>tampoco</div>             <main><article><header><h1>Título</h1></header><p>Contenido</p></article></main>             <form><input name=q><button>Buscar</button></form><footer>pie</footer><p>fin</p>             <div class='vector-dropdown'>idiomas</div><a class=mw-jump-link href=#c>saltar</a>             </body>",
+        );
+        assert_eq!(texts(&d), ["Título", "Contenido", "fin"]);
+        assert!(d.links.is_empty(), "los enlaces del menú no cuentan");
     }
 
     #[test]

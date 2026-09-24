@@ -24,7 +24,7 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use jarvis_desktop::web::http::{Connect, Fetch, PROXY_HOST, PROXY_PORT, Step, Target};
+use jarvis_desktop::web::http::{Connect, Fetch, PROXY_HOST, PROXY_PORT, Step, Target, request};
 use jarvis_desktop::{HttpResponse, NetInfo, NetRequest};
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::Device;
@@ -38,6 +38,9 @@ use smoltcp::wire::{
 
 /// Tiempo máximo para cada etapa (resolver el nombre, conectar, recibir).
 const STAGE_TIMEOUT_MS: u64 = 20_000;
+/// DNS de respaldo, por si el que da el DHCP no contesta (se pregunta en orden).
+const FALLBACK_DNS: [[u8; 4]; 2] = [[1, 1, 1, 1], [8, 8, 8, 8]];
+
 /// Tope de una página (para que una descarga enorme no se coma toda la memoria).
 const MAX_BODY: usize = 8 * 1024 * 1024;
 const TCP_RX: usize = 64 * 1024;
@@ -65,6 +68,8 @@ struct Job {
     stage: Stage,
     since: u64,
     raw: Vec<u8>,
+    /// El DNS falló y se está usando el puente del anfitrión.
+    via_proxy_fallback: bool,
 }
 
 pub struct Net<D: Device> {
@@ -178,6 +183,7 @@ impl<D: Device> Net<D> {
             },
             since: now_ms,
             raw: Vec::new(),
+            via_proxy_fallback: false,
         };
         if let Err(e) = self.begin(&mut job, connect, now_ms) {
             return Some((req.id, Err(e)));
@@ -297,8 +303,15 @@ impl<D: Device> Net<D> {
                         self.iface.routes_mut().remove_default_ipv4_route();
                     }
                 }
-                let servers: Vec<IpAddress> =
+                let mut servers: Vec<IpAddress> =
                     dns_servers.iter().map(|s| IpAddress::Ipv4(*s)).collect();
+                for ip in FALLBACK_DNS {
+                    let ip = IpAddress::Ipv4(Ipv4Address::from(ip));
+                    if !servers.contains(&ip) {
+                        servers.push(ip);
+                    }
+                }
+                servers.truncate(4);
                 self.sockets
                     .get_mut::<dns::Socket>(self.dns)
                     .update_servers(&servers);
@@ -372,7 +385,22 @@ impl<D: Device> Net<D> {
                         Ok(None)
                     }
                     Err(GetQueryResultError::Pending) => Ok(None),
-                    Err(GetQueryResultError::Failed) => Err(format!("no se encontró {host} (DNS)")),
+                    Err(GetQueryResultError::Failed) => {
+                        // Sin DNS: la página se pide por el puente del anfitrión, que resuelve
+                        // el nombre con el DNS de la computadora anfitriona.
+                        let request = request(&job.fetch.url, true);
+                        let proxy = self.proxy;
+                        match self.connect(proxy) {
+                            Ok(stage) => {
+                                job.request = request;
+                                job.stage = stage;
+                                job.since = now_ms;
+                                job.via_proxy_fallback = true;
+                                Ok(None)
+                            }
+                            Err(_) => Err(format!("no se encontró {host} (DNS)")),
+                        }
+                    }
                 }
             }
             Stage::Transfer {
@@ -404,7 +432,11 @@ impl<D: Device> Net<D> {
                 }
                 let finished = *established && !s.may_recv() && !s.can_recv();
                 if !*established && s.state() == tcp::State::Closed {
-                    return Err("el servidor rechazó la conexión".into());
+                    return Err(if job.via_proxy_fallback {
+                        "el DNS no respondió y el puente del anfitrión no está (¿QEMU se abrió sin cargo xtask run?)".into()
+                    } else {
+                        "el servidor rechazó la conexión".into()
+                    });
                 }
                 if !finished {
                     return Ok(None);

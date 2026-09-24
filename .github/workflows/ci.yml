@@ -45,7 +45,7 @@ jobs:
         run: |
           cargo clippy --workspace --exclude jarvis-kernel --all-targets -- -D warnings
           cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
-      - name: Tests (FAT32 contra fatfs, escritorio, gráficos)
+      - name: Tests (FAT32 contra fatfs, escritorio, red con loopback, gráficos)
         run: cargo test
-      - name: De punta a punta en QEMU (teclado, mouse, Archivos y disco)
+      - name: De punta a punta en QEMU (teclado, mouse, ventanas, disco y red)
         run: cargo xtask test

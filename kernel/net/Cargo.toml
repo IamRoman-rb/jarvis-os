@@ -8,7 +8,7 @@ publish.workspace = true
 
 [dependencies]
 jarvis-desktop = { path = "../desktop" }
-smoltcp = { version = "0.12", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp", "socket-dhcpv4", "socket-dns"] }
+smoltcp = { version = "0.12", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp", "socket-dhcpv4", "socket-dns", "dns-max-server-count-4", "dns-max-result-count-4"] }
 
 [lints]
 workspace = true

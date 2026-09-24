@@ -322,7 +322,7 @@ impl Session {
 }
 
 impl Session {
-    /// Tipea `text` tecla por tecla (minúsculas, dígitos, espacios y `- . : /`).
+    /// Tipea `text` tecla por tecla (letras, dígitos, espacios y `- _ . : /`).
     fn type_text(&mut self, text: &str) -> Result<()> {
         for c in text.chars() {
             let key = match c {
@@ -331,6 +331,8 @@ impl Session {
                 '/' => "slash".to_string(),
                 ':' => "shift-semicolon".to_string(),
                 ' ' => "spc".to_string(),
+                '_' => "shift-minus".to_string(),
+                c if c.is_ascii_uppercase() => format!("shift-{}", c.to_ascii_lowercase()),
                 c => c.to_string(),
             };
             self.monitor(&format!("sendkey {key}"))?;
@@ -476,6 +478,7 @@ fn verify_dir_on_disk(disk: &Path, dir: &str) -> Result<()> {
 /// menú de inicio, Alt+Tab y la vista de tareas.
 fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     let port = puente::test_server(TEST_PAGE)?;
+    puente::start();
     let shot = |s: &mut Session, name: &str| s.screenshot(&target_dir().join(name));
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
@@ -517,6 +520,30 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("RED_RESPUESTA 200", STEP)?;
     thread::sleep(Duration::from_millis(800));
     shot(&mut s, "jarvis-os-navegador.png")?;
+
+    // Internet de verdad (si hay): http:// directo (DNS + TCP) y https:// por el puente.
+    // Si no hay conexión, se sigue igual: estas dos capturas son opcionales.
+    for (url, name) in [
+        (
+            "http://info.cern.ch/hypertext/WWW/TheProject.html",
+            "jarvis-os-web-http.png",
+        ),
+        (
+            "https://es.wikipedia.org/wiki/Sistema_operativo",
+            "jarvis-os-web-https.png",
+        ),
+    ] {
+        s.monitor("sendkey ctrl-l")?;
+        s.type_text(url)?;
+        s.monitor("sendkey ret")?;
+        match s.wait_for("RED_RESPUESTA", Duration::from_secs(30)) {
+            Ok(()) => {
+                thread::sleep(Duration::from_millis(800));
+                shot(&mut s, name)?;
+            }
+            Err(e) => println!("(sin internet para {url}: {e})"),
+        }
+    }
 
     // Alt+Tab con Alt apretado (sendkey con tiempo de espera: mantiene las teclas).
     s.monitor("sendkey alt-tab 3000")?;
