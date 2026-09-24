@@ -20,5 +20,6 @@ pub mod sphere;
 pub mod text;
 pub mod theme;
 pub mod trig;
+pub mod vfont;
 
 pub use canvas::{Canvas, Color, PixelFormat, Rect};

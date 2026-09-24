@@ -48,6 +48,7 @@ pub struct Scene {
     height: usize,
     last_clock: Option<ClockKey>,
     last_message: Option<(usize, bool)>,
+    clock_face: hud::ClockFace,
 }
 
 impl Scene {
@@ -59,6 +60,7 @@ impl Scene {
             height,
             last_clock: None,
             last_message: None,
+            clock_face: hud::ClockFace::new(),
         }
     }
 
@@ -119,7 +121,7 @@ impl Scene {
             self.cloud.draw(frame, &view, pulse);
         }
         if dirty.touches(&clock_rect) {
-            hud::draw_clock(frame, clock);
+            hud::draw_clock(frame, &mut self.clock_face, clock);
         }
         if dirty.touches(&message_rect) {
             hud::draw_message(frame, self.assistant.visible_text(now_ms), speaking);

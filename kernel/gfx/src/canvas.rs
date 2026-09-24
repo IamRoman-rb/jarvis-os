@@ -90,6 +90,43 @@ impl Rect {
             && other.y < self.y + self.h
     }
 
+    /// La parte común de los dos, si existe.
+    pub fn intersection(&self, other: &Rect) -> Option<Rect> {
+        let x0 = self.x.max(other.x);
+        let y0 = self.y.max(other.y);
+        let x1 = (self.x + self.w).min(other.x + other.w);
+        let y1 = (self.y + self.h).min(other.y + other.h);
+        (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
+    }
+
+    /// El rectángulo más chico que contiene a los dos.
+    pub fn union(&self, other: &Rect) -> Rect {
+        if self.is_empty() {
+            return *other;
+        }
+        if other.is_empty() {
+            return *self;
+        }
+        let x0 = self.x.min(other.x);
+        let y0 = self.y.min(other.y);
+        let x1 = (self.x + self.w).max(other.x + other.w);
+        let y1 = (self.y + self.h).max(other.y + other.h);
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    }
+
+    /// ¿`other` queda entero adentro de este?
+    pub const fn covers(&self, other: &Rect) -> bool {
+        other.x >= self.x
+            && other.y >= self.y
+            && other.x + other.w <= self.x + self.w
+            && other.y + other.h <= self.y + self.h
+    }
+
+    /// Achica (o agranda, con `d` negativo) el rectángulo `d` píxeles por lado.
+    pub const fn inset(&self, d: i32) -> Rect {
+        Rect::new(self.x + d, self.y + d, self.w - 2 * d, self.h - 2 * d)
+    }
+
     /// Recorta el rectángulo a una pantalla de `width` × `height`.
     pub fn clamp(&self, width: usize, height: usize) -> Rect {
         let x0 = self.x.clamp(0, width as i32);
@@ -108,8 +145,8 @@ pub enum PixelFormat {
     Gray,
 }
 
-/// Máximo de rectángulos en la zona de recorte (alcanza para los 3 de cada frame).
-pub const MAX_CLIP: usize = 4;
+/// Máximo de rectángulos en la zona de recorte (el escritorio junta los que sobran en uno).
+pub const MAX_CLIP: usize = 16;
 
 /// Superficie de dibujo. `stride` es el ancho real de cada fila en píxeles (puede ser mayor que
 /// `width`: el hardware a veces agrega relleno al final de cada fila).
@@ -176,6 +213,23 @@ impl<'a> Canvas<'a> {
 
     pub fn height(&self) -> usize {
         self.height
+    }
+
+    pub fn format(&self) -> PixelFormat {
+        self.format
+    }
+
+    pub fn bytes_per_pixel(&self) -> usize {
+        self.bytes_per_pixel
+    }
+
+    /// Bytes de un píxel de color `c` en el formato de este canvas.
+    fn encode(&self, c: Color) -> [u8; 4] {
+        match self.format {
+            PixelFormat::Rgb => [c.r, c.g, c.b, 0],
+            PixelFormat::Bgr => [c.b, c.g, c.r, 0],
+            PixelFormat::Gray => [c.luma(), 0, 0, 0],
+        }
     }
 
     fn offset(&self, x: i32, y: i32) -> Option<usize> {
@@ -248,6 +302,19 @@ impl<'a> Canvas<'a> {
     }
 
     pub fn fill_rect(&mut self, x: i32, y: i32, w: i32, h: i32, c: Color) {
+        if self.clip[0].is_none() && self.bytes_per_pixel <= 4 {
+            // Camino rápido (sin recorte): se escriben los bytes de cada fila directo.
+            let r = Rect::new(x, y, w, h).clamp(self.width, self.height);
+            let px = self.encode(c);
+            let bpp = self.bytes_per_pixel;
+            for yy in r.y..r.y + r.h {
+                let start = (yy as usize * self.stride + r.x as usize) * bpp;
+                for chunk in self.buf[start..start + r.w as usize * bpp].chunks_exact_mut(bpp) {
+                    chunk.copy_from_slice(&px[..bpp]);
+                }
+            }
+            return;
+        }
         for yy in y.max(0)..(y + h).min(self.height as i32) {
             for xx in x.max(0)..(x + w).min(self.width as i32) {
                 self.put(xx, yy, c);
@@ -284,10 +351,95 @@ impl<'a> Canvas<'a> {
     }
 }
 
+impl Canvas<'_> {
+    /// Copia `src` entero con su esquina en (dx, dy), respetando el recorte. Sirve para
+    /// componer las ventanas (cada una tiene su propio buffer) sobre el frame. Si los formatos
+    /// coinciden, cada fila es un `memcpy`.
+    pub fn blit(&mut self, src: &Canvas<'_>, dx: i32, dy: i32) {
+        let dst =
+            Rect::new(dx, dy, src.width as i32, src.height as i32).clamp(self.width, self.height);
+        if dst.is_empty() {
+            return;
+        }
+        let mut areas = [None; MAX_CLIP];
+        if self.clip[0].is_some() {
+            areas = self.clip;
+        } else {
+            areas[0] = Some(dst);
+        }
+        let same = self.format == src.format && self.bytes_per_pixel == src.bytes_per_pixel;
+        for area in areas.iter().flatten() {
+            let Some(r) = area.intersection(&dst) else {
+                continue;
+            };
+            for y in r.y..r.y + r.h {
+                let sy = (y - dy) as usize;
+                let sx = (r.x - dx) as usize;
+                if same {
+                    let bpp = self.bytes_per_pixel;
+                    let d = (y as usize * self.stride + r.x as usize) * bpp;
+                    let s = (sy * src.stride + sx) * bpp;
+                    let len = r.w as usize * bpp;
+                    self.buf[d..d + len].copy_from_slice(&src.buf[s..s + len]);
+                } else {
+                    for x in r.x..r.x + r.w {
+                        if let Some(c) = src.get(x - dx, y - dy) {
+                            self.put(x, y, c);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Copia `src` achicado (o agrandado) al rectángulo `dst`, tomando el píxel más cercano.
+    /// Se usa para las miniaturas de la vista de tareas.
+    pub fn blit_scaled(&mut self, src: &Canvas<'_>, dst: Rect) {
+        if dst.is_empty() || src.width == 0 || src.height == 0 {
+            return;
+        }
+        for y in 0..dst.h {
+            let sy = (y as i64 * src.height as i64 / dst.h as i64) as i32;
+            for x in 0..dst.w {
+                let sx = (x as i64 * src.width as i64 / dst.w as i64) as i32;
+                if let Some(c) = src.get(sx, sy) {
+                    self.put(dst.x + x, dst.y + y, c);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::vec;
+
+    #[test]
+    fn blit_respeta_posicion_y_recorte() {
+        let mut a = vec![0u8; 4 * 4 * 4];
+        let mut src = Canvas::new(&mut a, 4, 4, 4, 4, PixelFormat::Bgr).unwrap();
+        src.fill(Color::WHITE);
+        let mut b = vec![0u8; 10 * 10 * 4];
+        let mut dst = Canvas::new(&mut b, 10, 10, 10, 4, PixelFormat::Bgr).unwrap();
+        dst.set_clip([Rect::new(0, 0, 10, 5)]);
+        dst.blit(&src, 8, 3); // se sale por la derecha y el recorte corta abajo
+        dst.clear_clip();
+        for y in 0..10 {
+            for x in 0..10 {
+                let lit = (8..10).contains(&x) && (3..5).contains(&y);
+                assert_eq!(dst.get(x, y) == Some(Color::WHITE), lit, "({x}, {y})");
+            }
+        }
+        assert_eq!(
+            Rect::new(0, 0, 5, 5).intersection(&Rect::new(3, 3, 5, 5)),
+            Some(Rect::new(3, 3, 2, 2))
+        );
+        assert_eq!(
+            Rect::new(0, 0, 2, 2).union(&Rect::new(5, 5, 1, 1)),
+            Rect::new(0, 0, 6, 6)
+        );
+    }
 
     #[test]
     fn hex_y_operaciones_de_color() {

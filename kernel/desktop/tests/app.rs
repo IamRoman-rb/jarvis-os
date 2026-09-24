@@ -214,7 +214,7 @@ fn navegar_con_el_teclado_y_vista_previa() {
 fn f7_crea_una_carpeta_en_el_disco() {
     let mut t = Driver::new();
     t.key(Key::Tab);
-    t.key(Key::F7);
+    t.key(Key::F(7));
     assert!(matches!(t.d.files().dialog, Some(Dialog::NewFolder(_))));
     t.type_text("Tareas");
     t.key(Key::Enter);
@@ -232,7 +232,7 @@ fn f7_crea_una_carpeta_en_el_disco() {
 fn un_nombre_repetido_avisa_y_deja_el_dialogo_abierto() {
     let mut t = Driver::new();
     t.key(Key::Tab);
-    t.key(Key::F7);
+    t.key(Key::F(7));
     t.type_text("documentos"); // ya existe (FAT no distingue mayúsculas)
     t.key(Key::Enter);
     assert!(
@@ -254,7 +254,7 @@ fn f2_renombra() {
     t.select_named("Documentos");
     t.key(Key::Enter);
     t.select_named("notas.txt");
-    t.key(Key::F2);
+    t.key(Key::F(2));
     t.clear_input();
     t.type_text("apuntes de SO.txt");
     t.key(Key::Enter);
@@ -278,7 +278,7 @@ fn supr_manda_a_la_papelera_y_ahi_borra_definitivo() {
     );
 
     // Otro con el mismo nombre: en la Papelera queda como "LEAME (2).txt".
-    t.key(Key::F6);
+    t.key(Key::F(6));
     t.clear_input();
     t.type_text("LEAME.txt");
     t.key(Key::Enter);
@@ -375,7 +375,7 @@ fn render_incremental_igual_a_redibujar_todo() {
         t.d.render(&mut frame, &bg, t.now, CLOCK);
         t.key(Key::Tab);
         t.d.render(&mut frame, &bg, t.now, CLOCK);
-        for k in [Key::Down, Key::Down, Key::Enter, Key::F7] {
+        for k in [Key::Down, Key::Down, Key::Enter, Key::F(7)] {
             t.key(k);
             t.d.render(&mut frame, &bg, t.now, CLOCK);
         }
@@ -395,7 +395,7 @@ fn render_incremental_igual_a_redibujar_todo() {
 fn sin_disco_no_rompe() {
     let mut d: Desktop<MemDisk> = Desktop::new(W, H, 300, None);
     d.handle(Event::Key(Key::Tab), 10, CLOCK);
-    d.handle(Event::Key(Key::F7), 20, CLOCK);
+    d.handle(Event::Key(Key::F(7)), 20, CLOCK);
     let (mut bg_buf, mut frame_buf) = buffers();
     let bg = canvas(&mut bg_buf);
     let mut frame = canvas(&mut frame_buf);

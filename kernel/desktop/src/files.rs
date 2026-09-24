@@ -658,9 +658,9 @@ impl FilesApp {
             Key::Enter | Key::Right => self.enter_selected(fs, now_ms, log),
             Key::Backspace => self.go_up(fs, now_ms, log),
             Key::Left => self.go_back(fs, now_ms, log),
-            Key::F7 => self.start_new_folder(),
-            Key::F6 => self.start_new_file(),
-            Key::F2 => self.start_rename(),
+            Key::F(7) => self.start_new_folder(),
+            Key::F(6) => self.start_new_file(),
+            Key::F(2) => self.start_rename(),
             Key::Delete => self.start_delete(now_ms, log),
             _ => return false,
         }

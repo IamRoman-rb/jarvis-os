@@ -16,6 +16,7 @@ use crate::shapes::{circle, glow, line, rect_outline, rounded_outline, rounded_r
 use crate::sphere::{Pulse, View};
 use crate::text::{self, Size, Style, Weight};
 use crate::trig::FULL_TURN;
+use crate::vfont::VectorText;
 use crate::{Canvas, Color, theme};
 
 const MARGIN: i32 = 28;
@@ -24,10 +25,29 @@ const SPIN_PERIOD_MS: u64 = 25_000;
 /// La fecha más larga posible, para reservar su espacio.
 const LONGEST_DATE: &str = "MIÉRCOLES, 30 DE SEPTIEMBRE DE 2026";
 
-fn time_style() -> Style {
-    Style::new(Weight::Bold, Size::Size32, Color::WHITE)
-        .scale(2)
-        .tracking(4)
+/// Alto de los dígitos de la hora, en píxeles.
+const TIME_HEIGHT: i32 = 58;
+
+/// La hora se dibuja con la fuente vectorial (nítida a cualquier tamaño) y un halo suave: el
+/// mismo texto con un trazo mucho más grueso y casi transparente.
+pub struct ClockFace {
+    digits: VectorText,
+    halo: VectorText,
+}
+
+impl ClockFace {
+    pub const fn new() -> Self {
+        ClockFace {
+            digits: VectorText::new(TIME_HEIGHT, 4 * 64, 10),
+            halo: VectorText::new(TIME_HEIGHT, 14 * 64, 10),
+        }
+    }
+}
+
+impl Default for ClockFace {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn date_style() -> Style {
@@ -41,10 +61,16 @@ fn date_style() -> Style {
 pub fn draw_static(c: &mut Canvas<'_>, info: &[(&str, &str)]) {
     background(c);
     let right = c.width() as i32 - MARGIN - 8;
-    let title = Style::new(Weight::Light, Size::Size32, theme::TEXT_FAINT)
-        .scale(3)
-        .tracking(10);
-    text::draw_right(c, right, MARGIN - 8, "JARVIS", &title);
+    // Título de fondo, con la fuente vectorial (antes era la bitmap agrandada ×3: borrosa).
+    let mut title = VectorText::new(34, 2 * 64, 16);
+    let tw = title.width("JARVIS");
+    title.draw(
+        c,
+        right - tw,
+        MARGIN - 10,
+        "JARVIS",
+        theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 90),
+    );
     status_panel(c, info);
 }
 
@@ -192,15 +218,17 @@ fn status_panel(c: &mut Canvas<'_>, rows: &[(&str, &str)]) {
 /// Zona que ocupan la hora y la fecha (incluido el halo de la hora).
 pub fn clock_rect(width: usize, _height: usize) -> Rect {
     let right = width as i32 - MARGIN - 8;
-    let ty = MARGIN + 34;
+    let face = ClockFace::new();
+    let ty = MARGIN + 38;
+    let pad = face.halo.overhang();
     let date_w = text::width(LONGEST_DATE, &date_style());
-    let time_w = text::width("00:00", &time_style()) + 18;
+    let time_w = face.digits.width("00:00") + 10 + pad;
     let x0 = (right - date_w.max(time_w) - 14).max(0);
-    let y1 = ty + time_style().line_height() + 6 + date_style().line_height() + 4;
-    Rect::new(x0, ty - 4, right + 4 - x0, y1 - (ty - 4))
+    let y1 = ty + TIME_HEIGHT + 14 + date_style().line_height() + 4;
+    Rect::new(x0, ty - pad, right + pad - x0, y1 - (ty - pad))
 }
 
-pub fn draw_clock(c: &mut Canvas<'_>, now: Option<DateTime>) {
+pub fn draw_clock(c: &mut Canvas<'_>, face: &mut ClockFace, now: Option<DateTime>) {
     let right = c.width() as i32 - MARGIN - 8;
     let mut time = StrBuf::<8>::new();
     let mut date = StrBuf::<48>::new();
@@ -214,21 +242,16 @@ pub fn draw_clock(c: &mut Canvas<'_>, now: Option<DateTime>) {
             let _ = date.write_str("RELOJ NO DISPONIBLE");
         }
     }
-    let big = time_style();
-    let tw = text::width(time.as_str(), &big);
-    let ty = MARGIN + 34;
-    text::draw_glowing(
-        c,
-        right - tw - 18,
-        ty,
-        time.as_str(),
-        &big,
-        theme::CYAN.scale(40),
-    );
+    let tw = face.digits.width(time.as_str());
+    let ty = MARGIN + 38;
+    let tx = right - tw - 10;
+    face.halo
+        .draw_alpha(c, tx, ty, time.as_str(), theme::CYAN, 22);
+    face.digits.draw(c, tx, ty, time.as_str(), Color::WHITE);
     text::draw_right(
         c,
         right - 10,
-        ty + big.line_height() + 6,
+        ty + TIME_HEIGHT + 14,
         date.as_str(),
         &date_style(),
     );
@@ -323,7 +346,7 @@ mod tests {
         };
         let mut buf = vec![0u8; w * h * 4];
         let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Rgb).unwrap();
-        draw_clock(&mut c, Some(now));
+        draw_clock(&mut c, &mut ClockFace::new(), Some(now));
         draw_message(&mut c, "Sistema en línea. ¿En qué te ayudo?", true);
         let (cr, mr) = (clock_rect(w, h), message_rect(w, h));
         for y in 0..h as i32 {

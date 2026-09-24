@@ -52,6 +52,7 @@ pub struct Desktop<D: BlockDevice> {
     /// El próximo frame de Archivos se dibuja completo (recién se cambió de modo).
     full_redraw: bool,
     files_clock: Option<ClockKey>,
+    clock_face: hud::ClockFace,
 }
 
 fn timestamp(clock: Option<DateTime>) -> Timestamp {
@@ -83,6 +84,7 @@ impl<D: BlockDevice> Desktop<D> {
             phrase: 0,
             full_redraw: true,
             files_clock: None,
+            clock_face: hud::ClockFace::new(),
         }
     }
 
@@ -144,6 +146,7 @@ impl<D: BlockDevice> Desktop<D> {
         match event {
             Event::Key(key) => self.key(key, now_ms, clock),
             Event::Mouse(packet) => self.mouse(packet, now_ms, clock),
+            Event::Mods(_) => {}
         }
     }
 
@@ -297,7 +300,7 @@ impl<D: BlockDevice> Desktop<D> {
             files_view::draw(frame, &self.files, &layout, self.fs.is_some());
         }
         if dirty.touches(&clock_rect) {
-            hud::draw_clock(frame, clock);
+            hud::draw_clock(frame, &mut self.clock_face, clock);
         }
         if full {
             hud::draw_toolbar(frame, hud::TOOLBAR_FILES);
