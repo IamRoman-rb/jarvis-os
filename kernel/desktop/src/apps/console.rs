@@ -1,6 +1,6 @@
 //! Consola de JARVIS: le escribís una orden y JARVIS responde (y la esfera "habla").
 //!
-//! Es el lugar del micrófono de la barra: hasta que haya audio (K9) y conexión con Claude (K4),
+//! Es el lugar del micrófono de la barra: hasta que haya audio (K11) y conexión con Claude (K6),
 //! a JARVIS se le habla escribiendo. Entiende un puñado de órdenes locales (abrir apps, ver
 //! archivos, navegar, estado de la máquina); lo demás lo va a responder Claude.
 
@@ -14,6 +14,7 @@ use jarvis_gfx::{Canvas, Rect, theme};
 
 use super::Ctx;
 use crate::files::format_size;
+use crate::i18n::tr;
 use crate::input::{Key, Mods};
 use crate::system::{AppKind, Launch, Power};
 use crate::text_input::TextInput;
@@ -65,7 +66,7 @@ impl Console {
             dirty: true,
             lines: alloc::vec![(
                 Who::Jarvis,
-                "Consola de JARVIS. Escribí \"ayuda\" para ver qué sé hacer.".into()
+                tr("Consola de JARVIS. Escribí \"ayuda\" para ver qué sé hacer.").into()
             ),],
             input: TextInput::new("", 200),
             history: Vec::new(),
@@ -75,7 +76,7 @@ impl Console {
     }
 
     pub fn title(&self) -> String {
-        "Consola JARVIS".into()
+        tr("Consola JARVIS").into()
     }
 
     fn say(&mut self, who: Who, text: impl Into<String>) {
@@ -126,7 +127,7 @@ impl Console {
                 c,
                 r.x + r.w - 16,
                 field.y - 22,
-                "(RePág/AvPág para moverse)",
+                tr("(RePág/AvPág para moverse)"),
                 &light(theme::TEXT_DIM),
             );
         }
@@ -267,7 +268,7 @@ impl Console {
             "ls" | "dir" => {
                 let path = if arg.is_empty() { "/" } else { arg };
                 let Some(fs) = ctx.fs.as_deref_mut() else {
-                    self.fail("No hay disco.");
+                    self.fail(tr("No hay disco."));
                     return;
                 };
                 match fs.list(path) {
@@ -295,7 +296,7 @@ impl Console {
             }
             "cat" | "ver" | "type" => {
                 let Some(fs) = ctx.fs.as_deref_mut() else {
-                    self.fail("No hay disco.");
+                    self.fail(tr("No hay disco."));
                     return;
                 };
                 match fs.read_prefix(arg, 16 * 1024) {

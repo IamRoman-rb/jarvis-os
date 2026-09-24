@@ -34,9 +34,10 @@ fn configuracion_cambia_el_fondo_y_queda_guardada() {
     t.key(Key::Right);
     t.frame();
     assert!(t.logs().iter().any(|l| l == "CONFIG_GUARDADA"));
-    // Reloj de 12 horas (Fecha y hora, segunda fila) y velocidad del mouse.
+    // Reloj de 12 horas (Hora e idioma, tercera fila).
     t.key(Key::PageDown);
-    t.key(Key::Down);
+    assert_eq!(settings_section(&t), "Hora e idioma");
+    t.keys(&[Key::Down, Key::Down]);
     t.key(Key::Enter);
     assert!(!t.d.config().clock_24h);
     t.frame();
@@ -70,7 +71,10 @@ fn la_configuracion_se_lee_al_arrancar() {
 fn pin_de_bloqueo() {
     let mut t = Driver::new();
     t.combo(Mods::WIN, Key::Char('i'));
-    // Privacidad y seguridad es la última sección: RePág desde Sistema da la vuelta.
+    // Firewall es la última sección (RePág desde Sistema da la vuelta) y antes está
+    // Privacidad y seguridad.
+    t.key(Key::PageUp);
+    assert_eq!(settings_section(&t), "Firewall");
     t.key(Key::PageUp);
     assert_eq!(settings_section(&t), "Privacidad y seguridad");
     t.key(Key::Enter); // editar el PIN
@@ -229,12 +233,18 @@ fn navegador_con_estilos_formularios_e_imagenes() {
     match t.d.app(AppKind::Browser) {
         Some(App::Browser(b)) => {
             let d = b.document();
-            assert_eq!(d.bg, Some(jarvis_gfx::Color::WHITE));
+            let p = b.prepared().unwrap();
+            assert_eq!(
+                jarvis_desktop::web::html::canvas_color(p),
+                Some(jarvis_gfx::Color::WHITE)
+            );
             assert_eq!(d.fields.len(), 3);
-            assert!(
-                d.blocks
-                    .iter()
-                    .any(|bl| bl.bg == Some(jarvis_gfx::Color::hex(0xeeeeee))),
+            let logo = (0..p.dom.nodes.len())
+                .find(|&i| p.dom.nodes[i].attr("class") == Some("logo"))
+                .unwrap();
+            assert_eq!(
+                p.styled.get(logo).and_then(|s| s.bg).map(|c| c.c),
+                Some(jarvis_gfx::Color::hex(0xeeeeee)),
                 "se aplicó la hoja externa"
             );
         }
@@ -285,4 +295,29 @@ fn el_navegador_guarda_descargas_en_descargas() {
             .any(|l| l.starts_with("DESCARGA /Descargas/instalador.exe"))
     );
     assert!(fatfs_exists(t.d, "/Descargas/instalador.exe"));
+}
+
+#[test]
+fn firewall_desde_la_configuracion_bloquea_una_app() {
+    let mut t = Driver::new();
+    t.d.open(Launch::Settings(10), t.now, CLOCK);
+    assert_eq!(settings_section(&t), "Firewall");
+    // Fila 5: "Permitir: Navegador web" (se apaga = regla que bloquea al navegador).
+    t.keys(&[Key::Down; 5]);
+    t.key(Key::Enter);
+    assert_eq!(
+        t.d.config().firewall.rules[0].to_line(),
+        "denegar salida app navegador"
+    );
+    t.d.open(Launch::Browse("http://example.com/".into()), t.now, CLOCK);
+    let req = t.d.take_requests();
+    assert!(req.net.is_empty(), "no sale nada a la red");
+    // El error llega en el próximo pedido (como una respuesta).
+    let _ = t.d.take_requests();
+    t.frame();
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l.contains("FIREWALL_BLOQUEO navegador example.com"))
+    );
 }

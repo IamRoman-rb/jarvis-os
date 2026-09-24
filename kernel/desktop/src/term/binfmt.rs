@@ -19,6 +19,8 @@ pub enum Kind {
     Script,
     Text,
     Deb,
+    /// Sistema de archivos comprimido de Linux: un paquete `.snap` (o una imagen de AppImage).
+    Squashfs,
     Other(&'static str),
 }
 
@@ -78,6 +80,9 @@ pub fn detect(b: &[u8]) -> Kind {
     }
     if b.starts_with(b"!<arch>\ndebian-binary") {
         return Kind::Deb;
+    }
+    if b.starts_with(b"hsqs") {
+        return Kind::Squashfs;
     }
     if b.starts_with(b"#!") {
         return Kind::Script;
@@ -295,6 +300,7 @@ pub fn describe(b: &[u8]) -> String {
         Kind::Script => "script de shell (texto con #!)".into(),
         Kind::Text => "texto".into(),
         Kind::Deb => "paquete de Debian/Ubuntu (.deb)".into(),
+        Kind::Squashfs => "paquete snap de Linux (sistema de archivos squashfs)".into(),
         Kind::Other(o) => o.into(),
     }
 }
@@ -326,11 +332,15 @@ pub fn why_not(b: &[u8]) -> Option<String> {
             describe(b),
             "dpkg y programas ELF de Linux adentro del paquete",
         ),
+        Kind::Squashfs => (
+            describe(b),
+            "leer squashfs y los programas ELF de Linux que trae adentro",
+        ),
         _ => return None,
     };
     Some(format!(
         "{what}\nJARVIS-OS todavía no puede ejecutarlo: le falta espacio de usuario (ring 3), un\n\
-         cargador de programas y {needs}. Está en el roadmap (K9). Mientras tanto: `file`,\n\
+         cargador de programas y {needs}. Está en el roadmap (K10). Mientras tanto: `file`,\n\
          `xxd` y `strings` para inspeccionarlo, y `apt install` para programas de JARVIS-OS."
     ))
 }

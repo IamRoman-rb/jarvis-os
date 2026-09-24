@@ -129,12 +129,18 @@ fn handle(mut stream: TcpStream, agent: &ureq::Agent) -> Result<(), String> {
     }
     let lang = header(&head, "Accept-Language").unwrap_or("es-AR,es;q=0.9");
     let accept = header(&head, "Accept").unwrap_or("*/*");
-    match agent
+    let mut req = agent
         .get(url)
         .header("Accept-Language", lang)
-        .header("Accept", accept)
-        .call()
-    {
+        .header("Accept", accept);
+    // Pocas cabeceras más, y solo estas: la API de la tienda de snaps pide la serie del
+    // dispositivo.
+    for name in ["Snap-Device-Series", "Snap-Device-Architecture"] {
+        if let Some(v) = header(&head, name) {
+            req = req.header(name, v);
+        }
+    }
+    match req.call() {
         Ok(mut resp) => {
             let status = resp.status().as_u16();
             let get = |name: &str| {
@@ -189,27 +195,91 @@ fn handle(mut stream: TcpStream, agent: &ureq::Agent) -> Result<(), String> {
     }
 }
 
-/// Cualquier imagen → BMP de 24 bits (con la transparencia sobre blanco), achicada si hace falta.
+fn looks_like_svg(data: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&data[..data.len().min(1024)]).to_ascii_lowercase();
+    head.contains("<svg")
+}
+
+/// Un SVG (dibujo vectorial) → imagen, al tamaño que dice (achicado si es enorme).
+fn svg_to_image(data: &[u8], max_side: u32) -> Result<image::DynamicImage, String> {
+    let tree = resvg::usvg::Tree::from_data(data, &resvg::usvg::Options::default())
+        .map_err(|e| format!("SVG inválido: {e}"))?;
+    let size = tree.size();
+    let (w, h) = (size.width().max(1.0), size.height().max(1.0));
+    let scale = (max_side as f32 / w.max(h)).min(1.0);
+    let (pw, ph) = (
+        ((w * scale).ceil() as u32).max(1),
+        ((h * scale).ceil() as u32).max(1),
+    );
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(pw, ph).ok_or_else(|| "SVG sin tamaño".to_string())?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    // tiny-skia guarda los colores premultiplicados por la opacidad: se deshace.
+    let mut rgba = image::RgbaImage::new(pw, ph);
+    for (i, px) in pixmap.pixels().iter().enumerate() {
+        let c = px.demultiply();
+        rgba.put_pixel(
+            i as u32 % pw,
+            i as u32 / pw,
+            image::Rgba([c.red(), c.green(), c.blue(), c.alpha()]),
+        );
+    }
+    Ok(image::DynamicImage::ImageRgba8(rgba))
+}
+
+/// Cualquier imagen (PNG, JPEG, GIF, WebP, ICO, SVG) → BMP, achicada si hace falta. Si tiene
+/// partes transparentes, BMP de 32 bits con canal alfa (el kernel la mezcla con el fondo de la
+/// página); si no, de 24 bits.
 pub fn to_bmp(data: &[u8], max_side: u32) -> Result<Vec<u8>, String> {
-    let img = image::load_from_memory(data)
-        .map_err(|e| format!("formato de imagen no soportado: {e}"))?;
+    let img = if looks_like_svg(data) {
+        svg_to_image(data, max_side)?
+    } else {
+        image::load_from_memory(data).map_err(|e| format!("formato de imagen no soportado: {e}"))?
+    };
     let img = if img.width().max(img.height()) > max_side {
         img.thumbnail(max_side, max_side)
     } else {
         img
     };
     let rgba = img.to_rgba8();
-    let mut rgb = image::RgbImage::new(rgba.width(), rgba.height());
-    for (x, y, p) in rgba.enumerate_pixels() {
-        let a = p[3] as u32;
-        let mix = |c: u8| ((c as u32 * a + 255 * (255 - a)) / 255) as u8;
-        rgb.put_pixel(x, y, image::Rgb([mix(p[0]), mix(p[1]), mix(p[2])]));
+    if rgba.pixels().all(|p| p[3] == 255) {
+        let mut out = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(rgba).to_rgb8())
+            .write_to(&mut out, image::ImageFormat::Bmp)
+            .map_err(|e| e.to_string())?;
+        return Ok(out.into_inner());
     }
-    let mut out = Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgb8(rgb)
-        .write_to(&mut out, image::ImageFormat::Bmp)
-        .map_err(|e| e.to_string())?;
-    Ok(out.into_inner())
+    Ok(bmp32(&rgba))
+}
+
+/// BMP de 32 bits (BGRA, filas de abajo hacia arriba) con cabecera clásica de 40 bytes.
+fn bmp32(img: &image::RgbaImage) -> Vec<u8> {
+    let (w, h) = (img.width(), img.height());
+    let data_len = w * h * 4;
+    let mut out = Vec::with_capacity(54 + data_len as usize);
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&(54 + data_len).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&54u32.to_le_bytes());
+    out.extend_from_slice(&40u32.to_le_bytes());
+    out.extend_from_slice(&(w as i32).to_le_bytes());
+    out.extend_from_slice(&(h as i32).to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // sin compresión
+    out.extend_from_slice(&data_len.to_le_bytes());
+    out.extend_from_slice(&[0u8; 16]);
+    for y in (0..h).rev() {
+        for x in 0..w {
+            let p = img.get_pixel(x, y);
+            out.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+        }
+    }
+    out
 }
 
 pub fn repo_dir() -> PathBuf {
@@ -302,13 +372,16 @@ mod tests {
         .unwrap();
         let bmp = to_bmp(&png, MAX_SIDE).unwrap();
         assert!(bmp.starts_with(b"BM"));
-        let back = image::load_from_memory(&bmp).unwrap().to_rgb8();
-        assert_eq!(back.width(), MAX_SIDE, "se achica");
-        assert_eq!(
-            back.get_pixel(0, 0),
-            &image::Rgb([255, 255, 255]),
-            "transparente sobre blanco"
-        );
+        let width = u32::from_le_bytes(bmp[18..22].try_into().unwrap());
+        assert_eq!(width, MAX_SIDE, "se achica");
+        assert_eq!(u16::from_le_bytes([bmp[28], bmp[29]]), 32, "con canal alfa");
+        assert_eq!(bmp[54 + 3], 0, "el píxel es transparente");
         assert!(to_bmp(b"no es una imagen", MAX_SIDE).is_err());
+        // Un SVG se dibuja.
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="#00ff00"/></svg>"##;
+        let bmp = to_bmp(svg, MAX_SIDE).unwrap();
+        let img = image::load_from_memory(&bmp).unwrap().to_rgb8();
+        assert_eq!((img.width(), img.height()), (20, 10));
+        assert_eq!(img.get_pixel(5, 5), &image::Rgb([0, 255, 0]));
     }
 }

@@ -9,6 +9,7 @@ use jarvis_gfx::{Canvas, Rect, theme};
 
 use super::Ctx;
 use crate::bmp::{self, Image};
+use crate::i18n::tr;
 use crate::input::Key;
 use crate::widgets::{WINDOW_BG, light, s16};
 
@@ -21,10 +22,12 @@ pub struct Viewer {
 impl Viewer {
     pub fn open<D: BlockDevice>(path: &str, ctx: &mut Ctx<'_, D>) -> Self {
         let image = match ctx.fs.as_deref_mut() {
-            None => Err("No hay disco.".into()),
+            None => Err(tr("No hay disco.").into()),
             Some(fs) => match fs.read_file(path) {
                 Ok(bytes) => bmp::decode(&bytes).ok_or_else(|| {
-                    String::from("Solo puedo mostrar imágenes BMP sin compresión (por ahora).")
+                    String::from(tr(
+                        "Solo puedo mostrar imágenes BMP sin compresión (por ahora).",
+                    ))
                 }),
                 Err(e) => Err(crate::files::error_message(e)),
             },

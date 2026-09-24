@@ -16,6 +16,8 @@ pub mod binfmt;
 mod cmds;
 pub mod parse;
 mod regex;
+pub mod snap;
+pub mod winget;
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -45,8 +47,10 @@ pub mod ansi {
 
 /// Carpeta personal (`~`). El disco de JARVIS-OS tiene todo en la raíz.
 pub const HOME: &str = "/";
-/// Dónde quedan los programas instalados (el `PATH`).
+/// Dónde quedan los programas instalados con `apt`.
 pub const BIN: &str = "/Programas/bin";
+/// El `PATH`: los programas de `apt` y los de `snap`.
+pub const PATH: &str = "/Programas/bin:/snap/bin";
 const MAX_DEPTH: u32 = 8;
 
 /// Lo que devuelve un comando.
@@ -73,6 +77,8 @@ pub(crate) enum Job {
         since: u64,
     },
     Apt(alloc::boxed::Box<apt::AptJob>),
+    Snap(alloc::boxed::Box<snap::SnapJob>),
+    Winget(alloc::boxed::Box<winget::WingetJob>),
     Sleep {
         until: u64,
     },
@@ -83,6 +89,8 @@ impl Job {
         match self {
             Job::Fetch { id, .. } | Job::Ping { id, .. } => Some(*id),
             Job::Apt(a) => a.waiting_id(),
+            Job::Snap(s) => s.waiting_id(),
+            Job::Winget(w) => w.waiting_id(),
             Job::Sleep { .. } => None,
         }
     }
@@ -182,7 +190,7 @@ impl Shell {
             ("USER", user),
             ("LOGNAME", user),
             ("HOSTNAME", host),
-            ("PATH", BIN),
+            ("PATH", PATH),
             ("SHELL", "/bin/jsh"),
             ("TERM", "jarvis-256color"),
             ("LANG", "es_AR.UTF-8"),
@@ -804,6 +812,8 @@ impl Shell {
                 })
             }
             Job::Apt(job) => job.on_response(id, result, ctx, &mut out),
+            Job::Snap(job) => job.on_response(result, ctx, &mut out),
+            Job::Winget(job) => job.on_response(result, ctx, &mut out),
             Job::Sleep { .. } => Some((0, String::new())),
         };
         match finished {
@@ -883,9 +893,11 @@ impl Shell {
                 }
             }
             if let Some(fs) = ctx.fs.as_deref_mut() {
-                for e in fs.list(BIN).unwrap_or_default() {
-                    if e.name.starts_with(word) && !e.is_dir {
-                        out.push(e.name);
+                for dir in PATH.split(':') {
+                    for e in fs.list(dir).unwrap_or_default() {
+                        if e.name.starts_with(word) && !e.is_dir && !out.contains(&e.name) {
+                            out.push(e.name);
+                        }
                     }
                 }
             }

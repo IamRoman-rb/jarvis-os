@@ -7,7 +7,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use super::html::{attrs, decode_entities};
+use super::html::{attrs, decode_entities, decode_text};
 
 /// Elementos sin contenido.
 pub const VOID: [&str; 14] = [
@@ -49,7 +49,7 @@ const CLOSES_P: [&str; 24] = [
 ];
 
 const MAX_NODES: usize = 150_000;
-const MAX_DEPTH: usize = 400;
+const MAX_DEPTH: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeKind {
@@ -78,6 +78,8 @@ pub struct Dom {
     pub stylesheet_links: Vec<String>,
     /// `<base href>`.
     pub base: Option<String>,
+    /// Cuántos `<script>` tiene (para avisar si la página depende de JavaScript).
+    pub scripts: usize,
 }
 
 impl Node {
@@ -242,6 +244,38 @@ impl Builder {
 }
 
 pub fn parse(html: &str) -> Dom {
+    let mut dom = parse_raw(html);
+    wrap_in_html(&mut dom);
+    dom
+}
+
+/// Como hacen los navegadores, todo documento tiene un `<html>` (aunque la página no lo
+/// escriba): así valen las reglas de `:root` y `html`.
+fn wrap_in_html(dom: &mut Dom) {
+    let has_html = dom.nodes[0]
+        .children
+        .iter()
+        .any(|&c| dom.nodes[c].name() == "html");
+    if has_html || dom.nodes[0].children.is_empty() {
+        return;
+    }
+    let id = dom.nodes.len();
+    let kids = core::mem::take(&mut dom.nodes[0].children);
+    for &k in &kids {
+        dom.nodes[k].parent = Some(id);
+    }
+    dom.nodes.push(Node {
+        kind: NodeKind::Element {
+            name: "html".into(),
+            attrs: Vec::new(),
+        },
+        children: kids,
+        parent: Some(0),
+    });
+    dom.nodes[0].children.push(id);
+}
+
+fn parse_raw(html: &str) -> Dom {
     let mut b = Builder {
         dom: Dom {
             nodes: alloc::vec![Node {
@@ -258,7 +292,7 @@ pub fn parse(html: &str) -> Dom {
     while i < bytes.len() {
         if bytes[i] != b'<' {
             let end = html[i..].find('<').map_or(html.len(), |e| i + e);
-            b.text(&decode_entities(&html[i..end]));
+            b.text(&decode_text(&html[i..end]));
             i = end;
             continue;
         }
@@ -319,20 +353,23 @@ pub fn parse(html: &str) -> Dom {
                 }
                 "textarea" => {
                     b.start(&name, a, false);
-                    b.text(&decode_entities(raw));
+                    b.text(&decode_text(raw));
                     b.end(&name);
                 }
+                // Un dibujo vectorial: no lo dibujamos, pero ocupa su lugar (su tamaño).
+                "svg" => b.start(&name, a, true),
+                "script" => b.dom.scripts += 1,
                 "noscript" => {
                     // Sin JavaScript, lo de <noscript> es justamente lo que hay que mostrar.
                     // Se interpreta como HTML (salvo los meta refresh que mandan a otra página).
                     if !raw.to_ascii_lowercase().contains("http-equiv") {
-                        let sub = parse(raw);
+                        let sub = parse_raw(raw);
                         b.start("div", a, false);
                         graft(&mut b, &sub, 0);
                         b.end("div");
                     }
                 }
-                _ => {} // script, template, svg: no se muestran
+                _ => {} // template: no se muestra
             }
             i = html[close_at..]
                 .find('>')
@@ -386,7 +423,7 @@ mod tests {
     }
 
     fn tree(html: &str) -> String {
-        let d = parse(html);
+        let d = parse_raw(html);
         let mut s = String::new();
         outline(&d, 0, &mut s);
         s

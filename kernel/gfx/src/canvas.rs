@@ -203,6 +203,37 @@ impl<'a> Canvas<'a> {
         self.clip = [None; MAX_CLIP];
     }
 
+    /// El recorte actual (para restaurarlo con [`Canvas::restore_clip`]).
+    pub fn saved_clip(&self) -> [Option<Rect>; MAX_CLIP] {
+        self.clip
+    }
+
+    pub fn restore_clip(&mut self, saved: [Option<Rect>; MAX_CLIP]) {
+        self.clip = saved;
+    }
+
+    /// Achica el recorte actual a lo que además cae dentro de `r` (recortes anidados: una caja
+    /// con `overflow: hidden` dentro de una ventana).
+    pub fn intersect_clip(&mut self, r: Rect) {
+        if self.clip[0].is_none() {
+            self.clip[0] = Some(r);
+            return;
+        }
+        let mut next = [None; MAX_CLIP];
+        let mut n = 0;
+        for c in self.clip.iter().flatten() {
+            if let Some(i) = c.intersection(&r) {
+                next[n] = Some(i);
+                n += 1;
+            }
+        }
+        if n == 0 {
+            // Nada visible: un rectángulo vacío (con `None` se pintaría todo).
+            next[0] = Some(Rect::new(0, 0, 0, 0));
+        }
+        self.clip = next;
+    }
+
     fn clipped_out(&self, x: i32, y: i32) -> bool {
         self.clip[0].is_some() && !self.clip.iter().flatten().any(|r| r.contains(x, y))
     }

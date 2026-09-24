@@ -52,6 +52,7 @@ fn run(
             id: 7,
             url: url.into(),
             kind: Default::default(),
+            app: "terminal".into(),
         },
         now,
     ) {

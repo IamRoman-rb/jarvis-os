@@ -32,6 +32,7 @@ use crate::apps::{
 use crate::chrome::{self, Hover};
 use crate::config::{self, Config, Wallpaper};
 use crate::cursor;
+use crate::i18n::{tr, trf};
 use crate::input::{Event, Key, Mods, MousePacket};
 use crate::panels::{self, Action, Menu, QuickButton, QuickHit};
 use crate::shell::{
@@ -219,6 +220,8 @@ pub struct Desktop<D: BlockDevice> {
     window_screenshot: bool,
     /// Frames que la esfera se sigue dibujando después de hablar (para que vuelva a su forma).
     sphere_settle: u32,
+    /// Pedidos que bloqueó el firewall: se les contesta con un error en `take_requests`.
+    fw_blocked: Vec<(u32, String)>,
 }
 
 /// Arma un `Ctx` con campos separados de `self` (así se puede usar junto con `self.slots`).
@@ -237,6 +240,17 @@ macro_rules! ctx {
     };
 }
 
+/// A nombre de quién salen los pedidos de red de cada app (para el firewall).
+fn app_tag(kind: AppKind) -> &'static str {
+    match kind {
+        AppKind::Browser => "navegador",
+        AppKind::Terminal => "terminal",
+        AppKind::Settings => "configuracion",
+        AppKind::Console => "jarvis",
+        _ => "sistema",
+    }
+}
+
 fn singleton(kind: AppKind) -> bool {
     !matches!(kind, AppKind::Editor | AppKind::Viewer)
 }
@@ -253,6 +267,7 @@ impl<D: BlockDevice> Desktop<D> {
             .and_then(|fs| fs.read_file(config::PATH).ok())
             .map(|b| Config::parse(&String::from_utf8_lossy(&b)))
             .unwrap_or_default();
+        crate::i18n::set(config.language);
         let screen = Rect::new(0, 0, width as i32, height as i32);
         let work = Rect::new(0, WORK_TOP, width as i32, height as i32 - WORK_TOP);
         Desktop {
@@ -303,6 +318,7 @@ impl<D: BlockDevice> Desktop<D> {
             beep_until: None,
             window_screenshot: false,
             sphere_settle: 0,
+            fw_blocked: Vec::new(),
             last_clock: None,
             last_now: 0,
         }
@@ -434,7 +450,72 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// Pedidos para el kernel (red, parlante, apagado).
     pub fn take_requests(&mut self) -> Requests {
+        // Lo que bloqueó el firewall no llega al kernel: la app recibe el error acá.
+        for (id, msg) in core::mem::take(&mut self.fw_blocked) {
+            self.net_response(id, Err(msg));
+        }
         core::mem::take(&mut self.requests)
+    }
+
+    /// ¿Deja salir este pedido el firewall?
+    fn firewall_check(&self, req: &NetRequest) -> Result<(), String> {
+        let Some(u) = crate::web::url::Url::parse(&req.url) else {
+            return Ok(());
+        };
+        if !matches!(
+            u.scheme,
+            crate::web::url::Scheme::Http | crate::web::url::Scheme::Https
+        ) {
+            return Ok(());
+        }
+        self.config.firewall.check_out(&u.host, u.port, &req.app)
+    }
+
+    fn firewall_block(
+        &mut self,
+        req: NetRequest,
+        why: String,
+        now_ms: u64,
+        clock: Option<DateTime>,
+    ) {
+        let host = crate::web::url::Url::parse(&req.url)
+            .map(|u| u.host)
+            .unwrap_or_default();
+        self.logs
+            .push(format!("FIREWALL_BLOQUEO {} {} ({why})", req.app, host));
+        if self.config.firewall.log
+            && let Some(fs) = self.fs.as_mut()
+        {
+            let when = clock.map_or(String::new(), |t| {
+                format!(
+                    "{}-{:02}-{:02} {:02}:{:02}:{:02} ",
+                    t.year, t.month, t.day, t.hour, t.minute, t.second
+                )
+            });
+            let mut log = fs
+                .read_file(crate::firewall::LOG_PATH)
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_default();
+            log.push_str(&format!(
+                "{when}BLOQUEADO {} -> {} ({why})\n",
+                req.app, req.url
+            ));
+            // Solo las últimas 200 líneas.
+            let lines: Vec<&str> = log.lines().collect();
+            let keep = lines[lines.len().saturating_sub(200)..].join("\n") + "\n";
+            let stamp = crate::apps::timestamp(clock);
+            let _ = crate::term::apt::ensure_dirs(fs, "/Sistema", stamp)
+                .and_then(|()| fs.write_file(crate::firewall::LOG_PATH, keep.as_bytes(), stamp));
+        }
+        if req.kind != crate::system::FetchKind::Image {
+            self.notify(
+                trf("Firewall: bloqueó {} ({})", &[&host, &req.app]),
+                true,
+                now_ms,
+            );
+        }
+        self.fw_blocked
+            .push((req.id, format!("bloqueado por el firewall: {why}")));
     }
 
     /// El kernel mide la máquina una vez por segundo.
@@ -464,6 +545,7 @@ impl<D: BlockDevice> Desktop<D> {
         {
             let mut ctx = ctx!(self, now_ms, self.last_clock, &tasks);
             for s in &mut self.slots {
+                ctx.out.app = app_tag(s.app.kind());
                 s.app.net_response(id, &result, &mut ctx);
                 if s.app.take_dirty() {
                     s.content_dirty = true;
@@ -684,6 +766,7 @@ impl<D: BlockDevice> Desktop<D> {
             let tasks = self.tasks();
             let mut ctx = ctx!(self, now_ms, clock, &tasks);
             let slot = &mut self.slots[i];
+            ctx.out.app = app_tag(slot.app.kind());
             let used = slot.app.key(key, m, content, &mut ctx);
             if slot.app.take_dirty() {
                 slot.content_dirty = true;
@@ -909,7 +992,14 @@ impl<D: BlockDevice> Desktop<D> {
         let (cur, n) = self.wm.desktops();
         self.logs
             .push(format!("ESCRITORIO_VIRTUAL {} de {n}", cur + 1));
-        self.notify(format!("Escritorio {} de {n}", cur + 1), false, now_ms);
+        self.notify(
+            trf(
+                "Escritorio {} de {}",
+                &[&(cur + 1).to_string(), &n.to_string()],
+            ),
+            false,
+            now_ms,
+        );
     }
 
     /// Hace lo que se eligió en un menú (Win+X, Alt+Espacio).
@@ -964,9 +1054,18 @@ impl<D: BlockDevice> Desktop<D> {
         if old.wallpaper != self.config.wallpaper {
             self.bg_dirty = true;
         }
+        if old.language != self.config.language {
+            // Otro idioma: se redibuja todo (barra, ventanas, HUD).
+            crate::i18n::set(self.config.language);
+            self.bg_dirty = true;
+            for s in &mut self.slots {
+                s.chrome_dirty = true;
+            }
+        }
         if old.clock_24h != self.config.clock_24h
             || old.status_panel != self.config.status_panel
             || old.animations != self.config.animations
+            || old.language != self.config.language
         {
             self.full_redraw = true;
         }
@@ -989,7 +1088,7 @@ impl<D: BlockDevice> Desktop<D> {
         match saved {
             Some(Ok(())) => self.logs.push("CONFIG_GUARDADA".into()),
             Some(Err(e)) => self.notify(
-                format!("No se pudo guardar la configuración: {e}"),
+                trf("No se pudo guardar la configuración: {}", &[&e.to_string()]),
                 true,
                 now_ms,
             ),
@@ -1212,6 +1311,8 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::Terminal(_) => AppKind::Terminal,
             Launch::Settings(_) => AppKind::Settings,
         };
+        // Lo que pida la app al abrirse sale a su nombre (firewall).
+        self.out.app = app_tag(kind);
         // ¿Ya está abierta?
         let existing = self.slots.iter().position(|s| match (&what, &s.app) {
             (Launch::Edit(p), App::Editor(e)) => e.path.as_deref() == Some(p.as_str()),
@@ -1232,7 +1333,8 @@ impl<D: BlockDevice> Desktop<D> {
                     }
                 }
                 (Launch::Settings(n), App::Settings(st)) => {
-                    let section = crate::apps::settings::SECTIONS[(*n).min(9)];
+                    let section = crate::apps::settings::SECTIONS
+                        [(*n).min(crate::apps::settings::SECTIONS.len() - 1)];
                     st.enter(section, &mut ctx);
                 }
                 _ => {}
@@ -1279,7 +1381,7 @@ impl<D: BlockDevice> Desktop<D> {
                 &mut ctx,
             )),
             Launch::Settings(n) => App::Settings(Settings::new(
-                crate::apps::settings::SECTIONS[n.min(9)],
+                crate::apps::settings::SECTIONS[n.min(crate::apps::settings::SECTIONS.len() - 1)],
                 &mut ctx,
             )),
         };
@@ -1303,6 +1405,7 @@ impl<D: BlockDevice> Desktop<D> {
         let Some(i) = self.slot_index(id) else { return };
         let tasks = self.tasks();
         let mut ctx = ctx!(self, now_ms, clock, &tasks);
+        ctx.out.app = app_tag(self.slots[i].app.kind());
         let closed = self.slots[i].app.on_close(&mut ctx);
         if !closed {
             self.slots[i].content_dirty = true;
@@ -1356,7 +1459,12 @@ impl<D: BlockDevice> Desktop<D> {
                 self.set_overlay(Overlay::Power { sel: 0 });
             }
             self.screenshot |= out.screenshot;
-            self.requests.net.extend(out.net);
+            for req in out.net {
+                match self.firewall_check(&req) {
+                    Ok(()) => self.requests.net.push(req),
+                    Err(why) => self.firewall_block(req, why, now_ms, clock),
+                }
+            }
             if out.tone.is_some() {
                 self.requests.tone = out.tone;
             }
@@ -1446,6 +1554,7 @@ impl<D: BlockDevice> Desktop<D> {
                 delta = -delta;
             }
             let slot = &mut self.slots[i];
+            ctx.out.app = app_tag(slot.app.kind());
             slot.app.wheel(delta, content, &mut ctx);
             if slot.app.take_dirty() {
                 slot.content_dirty = true;
@@ -1639,6 +1748,7 @@ impl<D: BlockDevice> Desktop<D> {
                     let tasks = self.tasks();
                     let mut ctx = ctx!(self, now_ms, clock, &tasks);
                     let slot = &mut self.slots[i];
+                    ctx.out.app = app_tag(slot.app.kind());
                     slot.app.click(
                         Click {
                             x: cx,
@@ -1795,6 +1905,7 @@ impl<D: BlockDevice> Desktop<D> {
         {
             let mut ctx = ctx!(self, now_ms, clock, &tasks);
             for s in &mut self.slots {
+                ctx.out.app = app_tag(s.app.kind());
                 s.app.tick(&mut ctx);
                 if s.app.take_dirty() {
                     s.content_dirty = true;
@@ -2086,7 +2197,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Quick { sel } => {
                 let net = match self.stats.net.ip {
                     Some(a) => format!("RED {}", crate::widgets::ip(a)),
-                    None => "SIN RED".into(),
+                    None => tr("SIN RED").into(),
                 };
                 panels::draw_quick(frame, w, h, &self.config, *sel, &net);
             }
@@ -2131,7 +2242,7 @@ impl<D: BlockDevice> Desktop<D> {
         area: Option<Rect>,
     ) {
         let Some(fs) = self.fs.as_mut() else {
-            self.notify("No hay disco para guardar la captura.", true, now_ms);
+            self.notify(tr("No hay disco para guardar la captura."), true, now_ms);
             return;
         };
         let ts = crate::apps::timestamp(clock);
@@ -2175,9 +2286,13 @@ impl<D: BlockDevice> Desktop<D> {
         match fs.write_file(&path, &data, ts) {
             Ok(()) => {
                 self.logs.push(format!("CAPTURA {path}"));
-                self.notify(format!("Captura guardada en {path}"), false, now_ms);
+                self.notify(trf("Captura guardada en {}", &[&path]), false, now_ms);
             }
-            Err(e) => self.notify(format!("No se pudo guardar la captura: {e}"), true, now_ms),
+            Err(e) => self.notify(
+                trf("No se pudo guardar la captura: {}", &[&e.to_string()]),
+                true,
+                now_ms,
+            ),
         }
     }
 

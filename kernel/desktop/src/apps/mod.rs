@@ -23,6 +23,7 @@ use jarvis_gfx::clock::DateTime;
 use jarvis_gfx::hud::Icon;
 use jarvis_gfx::{Canvas, Rect};
 
+use crate::i18n::tr;
 use crate::input::{Key, Mods};
 use crate::system::{AppKind, History, HttpResponse, Outbox, SystemStats};
 use crate::wm::WinId;
@@ -88,6 +89,8 @@ pub struct Click {
     pub right: bool,
 }
 
+// Una sola por ventana: que el navegador sea más grande que las demás no importa.
+#[allow(clippy::large_enum_variant)]
 pub enum App {
     Files(files::FilesWindow),
     Monitor(monitor::Monitor),
@@ -281,14 +284,14 @@ pub fn icon_of(kind: AppKind) -> Icon {
 /// Nombre para mostrar (menú de inicio, Alt+Tab).
 pub fn name_of(kind: AppKind) -> &'static str {
     match kind {
-        AppKind::Console => "Consola JARVIS",
-        AppKind::Monitor => "Monitor del sistema",
-        AppKind::Files => "Archivos",
-        AppKind::Music => "Música",
-        AppKind::Browser => "Navegador",
-        AppKind::Editor => "Editor de texto",
-        AppKind::Viewer => "Visor de imágenes",
+        AppKind::Console => tr("Consola JARVIS"),
+        AppKind::Monitor => tr("Monitor del sistema"),
+        AppKind::Files => tr("Archivos"),
+        AppKind::Music => tr("Música"),
+        AppKind::Browser => tr("Navegador"),
+        AppKind::Editor => tr("Editor de texto"),
+        AppKind::Viewer => tr("Visor de imágenes"),
         AppKind::Terminal => "Terminal",
-        AppKind::Settings => "Configuración",
+        AppKind::Settings => tr("Configuración"),
     }
 }

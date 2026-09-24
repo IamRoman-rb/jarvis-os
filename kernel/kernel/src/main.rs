@@ -1,4 +1,4 @@
-//! Kernel de JARVIS-OS — hito K4: terminal, paquetes, configuración y navegador con CSS.
+//! Kernel de JARVIS-OS — hito K5: motor web, firewall, snap/winget e idiomas.
 //!
 //! No hay sistema operativo debajo: este código corre directamente sobre el hardware (o QEMU).
 //! El crate `bootloader` se encarga de lo previo: pasar la CPU a modo 64 bits, armar las tablas
@@ -67,7 +67,7 @@ type Disk = BlockCache<VirtioBlk>;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
-    config.kernel_stack_size = 512 * 1024;
+    config.kernel_stack_size = 4 * 1024 * 1024;
     // Mapear toda la memoria física: el heap la usa (ver allocator.rs) y el disco hace DMA.
     config.mappings.physical_memory = Some(Mapping::Dynamic);
     // Sin pedir resolución mínima: el bootloader deja el modo de video que eligió el firmware

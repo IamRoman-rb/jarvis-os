@@ -14,6 +14,8 @@ png = "0.18"
 ureq = "3"
 # El puente convierte las imágenes de la web a BMP (el kernel solo lee BMP; ver ADR 0005).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+# Y dibuja los SVG (logos e íconos de las páginas).
+resvg = { version = "0.45", default-features = false }
 
 [lints]
 workspace = true

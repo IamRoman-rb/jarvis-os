@@ -15,9 +15,10 @@
 //! ```
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use crate::i18n::{tr, trf};
 use jarvis_gfx::shapes::{circle, line, rect_outline, rounded_outline, rounded_rect};
 use jarvis_gfx::text::{self, Size, Style, Weight};
 use jarvis_gfx::{Canvas, Color, Rect, theme};
@@ -110,17 +111,17 @@ impl Layout {
         let up = Rect::new(x + 50, by, 32, 30);
         let mut specs: Vec<(Action, &'static str)> = Vec::new();
         if app.in_trash() {
-            specs.push((Action::Restore, "RESTAURAR"));
-            specs.push((Action::Delete, "BORRAR"));
-            specs.push((Action::EmptyTrash, "VACIAR"));
+            specs.push((Action::Restore, tr("RESTAURAR")));
+            specs.push((Action::Delete, tr("BORRAR")));
+            specs.push((Action::EmptyTrash, tr("VACIAR")));
         } else {
-            specs.push((Action::NewFolder, "+ CARPETA"));
-            specs.push((Action::NewFile, "+ ARCHIVO"));
-            specs.push((Action::Rename, "RENOMBRAR"));
+            specs.push((Action::NewFolder, tr("+ CARPETA")));
+            specs.push((Action::NewFile, tr("+ ARCHIVO")));
+            specs.push((Action::Rename, tr("RENOMBRAR")));
             if app.clipboard.is_some() {
-                specs.push((Action::Paste, "PEGAR"));
+                specs.push((Action::Paste, tr("PEGAR")));
             }
-            specs.push((Action::Delete, "PAPELERA"));
+            specs.push((Action::Delete, tr("PAPELERA")));
         }
         let mut right = x + w - 12;
         let mut buttons = Vec::new();
@@ -408,7 +409,13 @@ fn draw_sidebar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
         s.y + s.h - 1,
         theme::PANEL_RIM,
     );
-    text::draw(c, s.x + 16, s.y + 12, "ACCESOS", &label(theme::TEXT_DIM));
+    text::draw(
+        c,
+        s.x + 16,
+        s.y + 12,
+        tr("ACCESOS"),
+        &label(theme::TEXT_DIM),
+    );
     for (i, (name, path)) in SHORTCUTS.iter().enumerate() {
         let r = l.shortcut_rect(i);
         let current = app.cwd == *path;
@@ -423,7 +430,7 @@ fn draw_sidebar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
         };
         kind_icon(c, kind, r.x + 12, r.y + 5, 1);
         let col = if current { theme::CYAN } else { theme::TEXT };
-        text::draw(c, r.x + 42, r.y + 7, name, &s16(col));
+        text::draw(c, r.x + 42, r.y + 7, tr(name), &s16(col));
     }
 
     // Almacenamiento: nombre, tipo y barra de uso.
@@ -431,7 +438,13 @@ fn draw_sidebar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
     if y + 110 > s.y + s.h {
         return;
     }
-    text::draw(c, s.x + 16, y, "ALMACENAMIENTO", &label(theme::TEXT_DIM));
+    text::draw(
+        c,
+        s.x + 16,
+        y,
+        tr("ALMACENAMIENTO"),
+        &label(theme::TEXT_DIM),
+    );
     let card = Rect::new(s.x + 10, y + 28, s.w - 20, 84);
     rounded_rect(c, card.x, card.y, card.w, card.h, 6, theme::PANEL, 255);
     rounded_outline(c, card.x, card.y, card.w, card.h, 6, theme::PANEL_RIM);
@@ -449,7 +462,7 @@ fn draw_sidebar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
     rounded_rect(c, bar.x, bar.y, bar.w, bar.h, 3, theme::PANEL_RIM, 255);
     let filled = (bar.w * pct / 100).max(if used > 0 { 3 } else { 0 });
     rounded_rect(c, bar.x, bar.y, filled, bar.h, 3, theme::CYAN, 255);
-    let free = format!("{} libres", format_size(app.free_bytes));
+    let free = trf("{} libres", &[&format_size(app.free_bytes)]);
     text::draw(c, card.x + 12, card.y + 54, &free, &s16(theme::TEXT_DIM));
 }
 
@@ -460,9 +473,9 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
     // El encabezado de la columna por la que se ordena va en celeste, con un triángulo.
     let (column, ascending) = app.sort;
     for (col, name, anchor) in [
-        (Column::Name, "NOMBRE", None),
-        (Column::Size, "TAMAÑO", Some(size_x)),
-        (Column::Modified, "MODIFICADO", Some(date_x)),
+        (Column::Name, tr("NOMBRE"), None),
+        (Column::Size, tr("TAMAÑO"), Some(size_x)),
+        (Column::Modified, tr("MODIFICADO"), Some(date_x)),
     ] {
         let active = col == column;
         let st = label(if active { theme::CYAN } else { theme::TEXT_DIM });
@@ -489,9 +502,9 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
 
     if !has_disk || app.entries.is_empty() {
         let msg = if has_disk {
-            "Carpeta vacía"
+            tr("Carpeta vacía")
         } else {
-            "No hay disco: arrancá QEMU con el disco virtual"
+            tr("No hay disco: arrancá QEMU con el disco virtual")
         };
         let st = s16(theme::TEXT_DIM);
         let tw = text::width(msg, &st);
@@ -581,13 +594,19 @@ fn sort_mark(c: &mut Canvas<'_>, x: i32, y: i32, ascending: bool) {
 
 fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
     line(c, r.x, r.y, r.x, r.y + r.h - 1, theme::PANEL_RIM);
-    text::draw(c, r.x + 18, r.y + 12, "INSPECTOR", &label(theme::TEXT_DIM));
+    text::draw(
+        c,
+        r.x + 18,
+        r.y + 12,
+        tr("INSPECTOR"),
+        &label(theme::TEXT_DIM),
+    );
     let Some(entry) = app.selected_entry() else {
         text::draw(
             c,
             r.x + 18,
             r.y + 50,
-            "Nada seleccionado",
+            tr("Nada seleccionado"),
             &s16(theme::TEXT_DIM),
         );
         return;
@@ -617,11 +636,11 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
         format!("{} ({} bytes)", format_size(entry.size as u64), entry.size)
     };
     let rows: [(&str, String); 6] = [
-        ("TIPO", String::from(kind.description(entry))),
-        ("TAMAÑO", size),
-        ("CREADO", format_date(entry.created)),
-        ("MODIFICADO", format_date(entry.modified)),
-        ("NOMBRE 8.3", entry.short_name.clone()),
+        (tr("TIPO"), String::from(kind.description(entry))),
+        (tr("TAMAÑO"), size),
+        (tr("CREADO"), format_date(entry.created)),
+        (tr("MODIFICADO"), format_date(entry.modified)),
+        (tr("NOMBRE 8.3"), entry.short_name.clone()),
         ("CLUSTER", format!("{}", entry.first_cluster)),
     ];
     let mut y = card.y + card.h + 14;
@@ -642,7 +661,7 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
     if y + 60 > r.y + r.h {
         return;
     }
-    text::draw(c, r.x + 18, y, "VISTA PREVIA", &label(theme::TEXT_DIM));
+    text::draw(c, r.x + 18, y, tr("VISTA PREVIA"), &label(theme::TEXT_DIM));
     let bx = Rect::new(r.x + 14, y + 24, r.w - 28, r.y + r.h - (y + 24) - 12);
     rounded_rect(c, bx.x, bx.y, bx.w, bx.h, 4, FIELD_BG, 255);
     rounded_outline(c, bx.x, bx.y, bx.w, bx.h, 4, theme::PANEL_RIM);
@@ -665,12 +684,18 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
                 c,
                 bx.x + 8,
                 bx.y + 8,
-                "Archivo binario: sin vista previa",
+                tr("Archivo binario: sin vista previa"),
                 &st,
             );
         }
         None if entry.is_dir => {
-            text::draw(c, bx.x + 8, bx.y + 8, "Enter para abrir la carpeta", &st);
+            text::draw(
+                c,
+                bx.x + 8,
+                bx.y + 8,
+                tr("Enter para abrir la carpeta"),
+                &st,
+            );
         }
         None => {}
     }
@@ -702,15 +727,18 @@ fn draw_status(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         .filter(|e| !e.is_dir)
         .map(|e| e.size as u64)
         .sum();
-    let left = format!("{} elementos · {}", app.entries.len(), format_size(files));
+    let left = trf(
+        "{} elementos · {}",
+        &[&app.entries.len().to_string(), &format_size(files)],
+    );
     text::draw(c, s.x + 16, ty, &left, &s16(theme::TEXT));
-    let mid = format!("libre: {}", format_size(app.free_bytes));
+    let mid = trf("libre: {}", &[&format_size(app.free_bytes)]);
     text::draw(c, s.x + s.w / 3, ty, &mid, &s16(theme::TEXT_DIM));
-    let help = "CTRL+C/X/V · F2 RENOMBRAR · SUPR PAPELERA";
+    let help = tr("CTRL+C/X/V · F2 RENOMBRAR · SUPR PAPELERA");
     let right = if has_disk {
-        "SINCRONIZADO"
+        tr("SINCRONIZADO")
     } else {
-        "SIN DISCO"
+        tr("SIN DISCO")
     };
     let rw = text::draw_right(
         c,
@@ -774,6 +802,6 @@ fn draw_dialog(c: &mut Canvas<'_>, dialog: &Dialog, l: &Layout) {
         c.fill_rect(f.x + 12 + tw, f.y + 8, 2, 18, accent); // cursor
     }
     let (cancel, accept) = l.dialog_buttons();
-    button(c, cancel, "CANCELAR", theme::TEXT_DIM, 20);
+    button(c, cancel, tr("CANCELAR"), theme::TEXT_DIM, 20);
     button(c, accept, dialog.accept_label(), accent, 60);
 }

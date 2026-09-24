@@ -23,7 +23,8 @@ pub const MARGIN: i32 = 28;
 /// Una vuelta de la esfera cada 25 segundos.
 const SPIN_PERIOD_MS: u64 = 25_000;
 /// La fecha más larga posible, para reservar su espacio.
-const LONGEST_DATE: &str = "MIÉRCOLES, 30 DE SEPTIEMBRE DE 2026";
+/// La fecha más larga (en cualquiera de los tres idiomas): reserva su lugar.
+const LONGEST_DATE: &str = "QUARTA-FEIRA, 30 DE SETEMBRO DE 2026";
 
 /// Alto de los dígitos de la hora, en píxeles.
 const TIME_HEIGHT: i32 = 58;

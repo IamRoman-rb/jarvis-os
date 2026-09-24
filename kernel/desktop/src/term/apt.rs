@@ -177,7 +177,7 @@ impl AptJob {
         } else {
             FetchKind::Download
         };
-        self.waiting = Some(ctx.out.fetch_kind(&url, kind));
+        self.waiting = Some(ctx.out.fetch_as(&url, kind, "apt"));
     }
 
     /// Llegó una respuesta. `Some((código, salida))` cuando terminó.

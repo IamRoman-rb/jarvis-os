@@ -5,7 +5,7 @@
 //! - **Centro de notificaciones** (Win+N): calendario del mes y los últimos avisos.
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use jarvis_gfx::clock::DateTime;
@@ -15,6 +15,7 @@ use jarvis_gfx::text;
 use jarvis_gfx::{Canvas, Color, Rect, theme};
 
 use crate::config::Config;
+use crate::i18n::{tr, trf};
 use crate::system::Launch;
 use crate::widgets::{SELECTED_BG, button, draw_fit, label, light, s16};
 use crate::wm::{Side, WinId};
@@ -125,50 +126,55 @@ pub fn quick_links() -> Menu {
     use crate::system::AppKind::*;
     let app = |k| Action::Launch(Launch::App(k));
     Menu {
-        title: "ENLACES RÁPIDOS (WIN+X)",
+        title: tr("ENLACES RÁPIDOS (WIN+X)"),
         items: alloc::vec![
             MenuItem::new(
-                "Aplicaciones instaladas",
+                tr("Aplicaciones instaladas"),
                 "",
                 Some(Icon::Package),
                 Action::Launch(Launch::Settings(7))
             ),
             MenuItem::new(
-                "Monitor del sistema",
+                tr("Monitor del sistema"),
                 "Ctrl+Shift+Esc",
                 Some(Icon::Gauge),
                 app(Monitor)
             ),
-            MenuItem::new("Configuración", "Win+I", Some(Icon::Gear), app(Settings)),
+            MenuItem::new(
+                tr("Configuración"),
+                "Win+I",
+                Some(Icon::Gear),
+                app(Settings)
+            ),
             MenuItem::new(
                 "Terminal",
                 "Ctrl+Alt+T",
                 Some(Icon::Terminal),
                 app(Terminal)
             ),
-            MenuItem::new("Archivos", "Win+E", Some(Icon::Folder), app(Files)),
-            MenuItem::new("Buscar", "Win+S", Some(Icon::Globe), Action::Search),
+            MenuItem::new(tr("Archivos"), "Win+E", Some(Icon::Folder), app(Files)),
+            MenuItem::new(tr("Buscar"), "Win+S", Some(Icon::Globe), Action::Search),
             MenuItem::new(
-                "Ejecutar (consola JARVIS)",
+                tr("Ejecutar (consola JARVIS)"),
                 "Win+R",
                 Some(Icon::Mic),
                 app(Console)
             ),
             MenuItem::new(
-                "Escritorio nuevo",
+                tr("Escritorio nuevo"),
                 "Win+Ctrl+D",
                 Some(Icon::Screen),
                 Action::NewDesktop
             ),
             MenuItem::new(
-                "Mostrar el escritorio",
+                tr("Mostrar el escritorio"),
                 "Win+D",
                 Some(Icon::Chat),
                 Action::ShowDesktop
             ),
-            MenuItem::new("Bloquear", "Win+L", Some(Icon::Lock), Action::Lock),
+            MenuItem::new(tr("Bloquear"), "Win+L", Some(Icon::Lock), Action::Lock),
             MenuItem::new(
-                "Apagar o reiniciar",
+                tr("Apagar o reiniciar"),
                 "Alt+F4",
                 Some(Icon::Power),
                 Action::PowerMenu
@@ -184,45 +190,45 @@ pub fn window_menu(id: WinId, at: (i32, i32), maximized: bool) -> Menu {
     let mut items = Vec::new();
     if maximized {
         items.push(MenuItem::new(
-            "Restaurar",
-            "Win+Abajo",
+            tr("Restaurar"),
+            tr("Win+Abajo"),
             None,
             Action::Restore(id),
         ));
     } else {
         items.push(MenuItem::new(
-            "Maximizar",
-            "Win+Arriba",
+            tr("Maximizar"),
+            tr("Win+Arriba"),
             None,
             Action::Maximize(id),
         ));
     }
     items.push(MenuItem::new(
-        "Minimizar",
-        "Win+Abajo",
+        tr("Minimizar"),
+        tr("Win+Abajo"),
         None,
         Action::Minimize(id),
     ));
     items.push(MenuItem::new(
-        "Acoplar a la izquierda",
-        "Win+Izq.",
+        tr("Acoplar a la izquierda"),
+        tr("Win+Izq."),
         None,
         Action::Snap(id, Side::Left),
     ));
     items.push(MenuItem::new(
-        "Acoplar a la derecha",
-        "Win+Der.",
+        tr("Acoplar a la derecha"),
+        tr("Win+Der."),
         None,
         Action::Snap(id, Side::Right),
     ));
     items.push(MenuItem::new(
-        "Cerrar",
+        tr("Cerrar"),
         "Alt+F4",
         Some(Icon::Power),
         Action::Close(id),
     ));
     Menu {
-        title: "VENTANA (ALT+ESPACIO)",
+        title: tr("VENTANA (ALT+ESPACIO)"),
         items,
         sel: 0,
         at,
@@ -327,7 +333,7 @@ pub fn draw_quick(c: &mut Canvas<'_>, w: usize, h: usize, cfg: &Config, sel: usi
         c,
         r.x + 16,
         r.y + 16,
-        "CONFIGURACIÓN RÁPIDA",
+        tr("CONFIGURACIÓN RÁPIDA"),
         &label(theme::TEXT_DIM),
     );
     text::draw_right(c, r.x + r.w - 16, r.y + 16, net, &light(theme::CYAN));
@@ -347,7 +353,11 @@ pub fn draw_quick(c: &mut Canvas<'_>, w: usize, h: usize, cfg: &Config, sel: usi
             c,
             t.x + 12,
             t.y + 38,
-            if on { "Activado" } else { "Desactivado" },
+            if on {
+                tr("Activado")
+            } else {
+                tr("Desactivado")
+            },
             &light(if on { theme::TEXT } else { theme::TEXT_DIM }),
         );
     }
@@ -410,17 +420,23 @@ pub fn draw_notices(
         c,
         r.x + 16,
         r.y + 18,
-        "NOTIFICACIONES",
+        tr("NOTIFICACIONES"),
         &label(theme::TEXT_DIM),
     );
-    button(c, clear_button(w, h), "BORRAR TODO", theme::TEXT_DIM, 20);
+    button(
+        c,
+        clear_button(w, h),
+        tr("BORRAR TODO"),
+        theme::TEXT_DIM,
+        20,
+    );
     let mut y = r.y + 56;
     if notices.is_empty() {
         text::draw(
             c,
             r.x + 16,
             y,
-            "No hay notificaciones nuevas.",
+            tr("No hay notificaciones nuevas."),
             &light(theme::TEXT_DIM),
         );
         y += 30;
@@ -442,12 +458,23 @@ pub fn draw_notices(
     let Some(t) = now else { return };
     let top = r.y + r.h - cal_h + 10;
     c.fill_rect(r.x + 12, top - 8, r.w - 24, 1, theme::PANEL_RIM);
-    let title = format!("{} de {}", MONTHS[t.month as usize - 1], t.year);
+    let title = trf(
+        "{} de {}",
+        &[tr(MONTHS[t.month as usize - 1]), &t.year.to_string()],
+    );
     text::draw(c, r.x + 16, top, &title, &s16(theme::TEXT));
     let cw = (r.w - 32) / 7;
-    for (i, d) in ["do", "lu", "ma", "mi", "ju", "vi", "sá"]
-        .iter()
-        .enumerate()
+    for (i, d) in [
+        tr("do"),
+        tr("lu"),
+        tr("ma"),
+        tr("mi"),
+        tr("ju"),
+        tr("vi"),
+        tr("sá"),
+    ]
+    .iter()
+    .enumerate()
     {
         text::draw(
             c,
