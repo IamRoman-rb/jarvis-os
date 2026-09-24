@@ -24,7 +24,7 @@ pub struct Dirty {
 }
 
 impl Dirty {
-    fn push(&mut self, r: Rect) {
+    pub fn push(&mut self, r: Rect) {
         if let Some(slot) = self.rects.iter_mut().find(|s| s.is_none()) {
             *slot = Some(r);
         }
@@ -34,7 +34,7 @@ impl Dirty {
         self.rects.iter().flatten().copied()
     }
 
-    fn touches(&self, r: &Rect) -> bool {
+    pub fn touches(&self, r: &Rect) -> bool {
         self.iter().any(|d| d.intersects(r))
     }
 }
@@ -60,6 +60,12 @@ impl Scene {
             last_clock: None,
             last_message: None,
         }
+    }
+
+    /// El próximo frame se redibuja completo (por ejemplo, al volver de otra app que tapó todo).
+    pub fn invalidate(&mut self) {
+        self.last_clock = None;
+        self.last_message = None;
     }
 
     /// Dibuja la capa estática en el buffer de fondo (una sola vez).
@@ -88,7 +94,8 @@ impl Scene {
         let message_key = (self.assistant.visible_chars(now_ms), speaking);
 
         let mut dirty = Dirty::default();
-        if self.last_clock.is_none() {
+        let full = self.last_clock.is_none();
+        if full {
             dirty.push(Rect::new(0, 0, w as i32, h as i32)); // primer frame: todo
         } else {
             dirty.push(sphere_rect);
@@ -116,6 +123,9 @@ impl Scene {
         }
         if dirty.touches(&message_rect) {
             hud::draw_message(frame, self.assistant.visible_text(now_ms), speaking);
+        }
+        if full {
+            hud::draw_toolbar(frame, hud::TOOLBAR_JARVIS);
         }
         frame.clear_clip();
 

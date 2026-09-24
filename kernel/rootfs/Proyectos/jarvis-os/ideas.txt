@@ -1,0 +1,4 @@
+Ideas para próximos hitos:
+- Puente con Claude (K4): que JARVIS responda de verdad.
+- Editor de texto para abrir estos archivos.
+- Paginación propia (K3).

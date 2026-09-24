@@ -36,10 +36,10 @@ fn date_style() -> Style {
 
 // --- capa estática ----------------------------------------------------------------------------
 
-/// Fondo, grilla, barra de íconos, título "JARVIS" y panel de estado.
+/// Fondo, grilla, título "JARVIS" y panel de estado. La barra de íconos es dinámica (marca la
+/// sección activa): ver [`draw_toolbar`].
 pub fn draw_static(c: &mut Canvas<'_>, info: &[(&str, &str)]) {
     background(c);
-    toolbar(c);
     let right = c.width() as i32 - MARGIN - 8;
     let title = Style::new(Weight::Light, Size::Size32, theme::TEXT_FAINT)
         .scale(3)
@@ -63,16 +63,43 @@ fn background(c: &mut Canvas<'_>) {
     glow(c, w / 2, h / 2, h * 45 / 100, Color::hex(0x0a2a66), 90);
 }
 
-fn toolbar(c: &mut Canvas<'_>) {
-    const SLOT: i32 = 30;
-    const ICONS: i32 = 6;
-    let (x, y, h) = (MARGIN + 6, MARGIN + 2, 34);
-    let w = SLOT * ICONS + 18;
+const TOOLBAR_SLOT: i32 = 30;
+const TOOLBAR_ICONS: i32 = 6;
+/// Ícono de la carpeta (app Archivos) en la barra.
+pub const TOOLBAR_FILES: i32 = 3;
+/// Ícono del chat (JARVIS) en la barra.
+pub const TOOLBAR_JARVIS: i32 = 5;
+
+/// Zona de la barra de íconos de arriba a la izquierda.
+pub fn toolbar_rect() -> Rect {
+    Rect::new(
+        MARGIN + 6,
+        MARGIN + 2,
+        TOOLBAR_SLOT * TOOLBAR_ICONS + 18,
+        34,
+    )
+}
+
+/// Qué ícono de la barra está en (x, y), si hay alguno.
+pub fn toolbar_hit(x: i32, y: i32) -> Option<i32> {
+    let r = toolbar_rect();
+    if !r.contains(x, y) {
+        return None;
+    }
+    let i = (x - r.x - 9) / TOOLBAR_SLOT;
+    (0..TOOLBAR_ICONS).contains(&i).then_some(i)
+}
+
+/// Barra de íconos con el ícono `active` resaltado (la sección que se está usando).
+pub fn draw_toolbar(c: &mut Canvas<'_>, active: i32) {
+    const SLOT: i32 = TOOLBAR_SLOT;
+    const ICONS: i32 = TOOLBAR_ICONS;
+    let Rect { x, y, w, h } = toolbar_rect();
     rounded_rect(c, x, y, w, h, 12, theme::PANEL, 210);
     rounded_outline(c, x, y, w, h, 12, theme::PANEL_RIM);
     for i in 0..ICONS {
         let (ix, iy) = (x + 9 + i * SLOT + SLOT / 2, y + h / 2);
-        let active = i == ICONS - 1; // el asistente: la sección activa
+        let active = i == active;
         if active {
             rounded_rect(c, ix - 12, iy - 12, 24, 24, 6, theme::VECTOR_BLUE, 90);
         }

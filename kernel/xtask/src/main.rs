@@ -1,10 +1,11 @@
 //! `cargo xtask <comando>`: arma la imagen booteable de JARVIS-OS y la corre en QEMU.
 //!
 //! - `build`       compila el kernel y crea `target/jarvis-os-uefi.img`
-//! - `run`         abre QEMU con ventana
-//! - `test`        arranca sin ventana, espera `JARVIS_BOOT_OK`, aprieta Espacio y espera `JARVIS_HABLA` (CI)
-//! - `screenshot`  capturas en reposo y hablando: `target/jarvis-os.png` y `jarvis-os-hablando.png`
+//! - `run`         abre QEMU con ventana y el disco persistente `target/disco.img`
+//! - `test`        de punta a punta sin ventana: teclado, mouse, Archivos y disco (CI)
+//! - `screenshot`  capturas: JARVIS en reposo y hablando, Archivos y un diálogo (en `target/`)
 //! - `vdi`         convierte la imagen a `target/jarvis-os.vdi` para VirtualBox
+//! - `disk`        crea el disco virtual `target/disco.img` si no existe (`--reset` lo regenera)
 
 use std::env;
 use std::fs;
@@ -25,11 +26,15 @@ fn main() -> ExitCode {
     let cmd = env::args().nth(1).unwrap_or_default();
     let result = match cmd.as_str() {
         "build" => build().map(|img| println!("imagen: {}", img.display())),
-        "run" => build().and_then(|img| run(&img)),
-        "test" => build().and_then(|img| test(&img)),
-        "screenshot" => build().and_then(|img| screenshot(&img)),
+        "run" => build().and_then(|img| run(&img, &disk_image(false)?)),
+        "test" => build().and_then(|img| test(&img, &fresh_disk("disco-test.img")?)),
+        "screenshot" => build().and_then(|img| screenshot(&img, &fresh_disk("disco-captura.img")?)),
         "vdi" => build().and_then(|img| vdi(&img)),
-        _ => Err("uso: cargo xtask <build|run|test|screenshot|vdi>".into()),
+        "disk" => {
+            let reset = env::args().any(|a| a == "--reset");
+            disk_image(reset).map(|d| println!("disco: {}", d.display()))
+        }
+        _ => Err("uso: cargo xtask <build|run|test|screenshot|vdi|disk [--reset]>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -129,7 +134,7 @@ fn ovmf() -> Result<(PathBuf, Option<PathBuf>)> {
     Ok((code, vars))
 }
 
-fn qemu(image: &Path, headless: bool) -> Result<Command> {
+fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     let (code, vars) = ovmf()?;
     let mut cmd = Command::new(qemu_binary());
     if cfg!(windows) {
@@ -159,14 +164,22 @@ fn qemu(image: &Path, headless: bool) -> Result<Command> {
     }
     cmd.arg("-drive")
         .arg(format!("format=raw,file={}", image.display()));
+    // Disco de datos: virtio-blk con la interfaz legacy (por puertos de E/S), que es la que
+    // implementa el driver del kernel.
+    cmd.arg("-drive")
+        .arg(format!(
+            "if=none,id=disco,format=raw,file={}",
+            disk.display()
+        ))
+        .args(["-device", "virtio-blk-pci,drive=disco,disable-modern=on"]);
     if headless {
         cmd.args(["-display", "none"]);
     }
     Ok(cmd)
 }
 
-fn run(image: &Path) -> Result<()> {
-    let status = qemu(image, false)?
+fn run(image: &Path, disk: &Path) -> Result<()> {
+    let status = qemu(image, disk, false)?
         .status()
         .map_err(|e| format!("no pude abrir QEMU ({}): {e}", qemu_binary().display()))?;
     if status.success() {
@@ -185,13 +198,13 @@ struct Session {
 }
 
 impl Session {
-    fn start(image: &Path) -> Result<Session> {
+    fn start(image: &Path, disk: &Path) -> Result<Session> {
         // Monitor de QEMU por TCP en un puerto libre.
         let port = TcpListener::bind("127.0.0.1:0")
             .and_then(|l| l.local_addr())
             .map_err(|e| format!("sin puerto libre: {e}"))?
             .port();
-        let mut cmd = qemu(image, true)?;
+        let mut cmd = qemu(image, disk, true)?;
         cmd.arg("-monitor")
             .arg(format!("tcp:127.0.0.1:{port},server,nowait"));
         let mut child = cmd
@@ -283,6 +296,33 @@ impl Session {
     }
 }
 
+impl Session {
+    /// Tipea `text` tecla por tecla (letras minúsculas, dígitos y guiones).
+    fn type_text(&mut self, text: &str) -> Result<()> {
+        for c in text.chars() {
+            let key = if c == '-' {
+                "minus".to_string()
+            } else {
+                c.to_string()
+            };
+            self.monitor(&format!("sendkey {key}"))?;
+        }
+        Ok(())
+    }
+
+    /// Cierra QEMU de forma ordenada (el disco queda escrito).
+    fn quit(&mut self) {
+        let _ = writeln!(self.monitor, "quit");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
 impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -290,28 +330,81 @@ impl Drop for Session {
     }
 }
 
-/// Arranca, verifica que dibuje el HUD y prueba el teclado de punta a punta: Espacio (por el
-/// monitor de QEMU) → IRQ1 → cola de teclado → asistente → `JARVIS_HABLA` por el puerto serie.
-fn test(image: &Path) -> Result<()> {
-    let mut s = Session::start(image)?;
+const STEP: Duration = Duration::from_secs(20);
+
+/// Prueba de punta a punta, como la usaría una persona:
+/// 1. arranca y dibuja el HUD; Espacio → JARVIS habla (IRQ1 → asistente);
+/// 2. Tab → se abre Archivos y el kernel lee la raíz del disco (virtio-blk + FAT32);
+/// 3. F7, "prueba", Enter → se crea una carpeta (escritura en el disco);
+/// 4. el mouse se mueve y hace clic en una fila (IRQ12 → paquetes → selección);
+/// 5. se cierra QEMU y `fatfs` verifica en el archivo del disco que `/prueba` quedó escrita.
+fn test(image: &Path, disk: &Path) -> Result<()> {
+    let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.monitor("sendkey spc")?;
-    s.wait_for("JARVIS_HABLA", Duration::from_secs(15))?;
-    println!("ok: JARVIS-OS arrancó, dibujó el HUD y respondió al teclado");
+    s.wait_for("JARVIS_HABLA", STEP)?;
+    s.monitor("sendkey tab")?;
+    s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
+    s.monitor("sendkey f7")?;
+    s.type_text("prueba")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("ARCHIVOS_CREADO /prueba", STEP)?;
+    // El cursor arranca en el centro (640, 400); la fila 2 de la lista está en y ≈ 350.
+    s.monitor("mouse_move -40 -50")?;
+    thread::sleep(Duration::from_millis(200));
+    s.monitor("mouse_button 1")?;
+    s.monitor("mouse_button 0")?;
+    s.wait_for("ARCHIVOS_SELECCION", STEP)?;
+    s.quit();
+    drop(s);
+    verify_dir_on_disk(disk, "prueba")?;
+    println!("ok: arranque, teclado, mouse, Archivos y escritura en disco verificados");
     Ok(())
 }
 
-/// Dos capturas: en reposo (después del saludo) y hablando.
-fn screenshot(image: &Path) -> Result<()> {
-    let mut s = Session::start(image)?;
+/// Abre el disco con `fatfs` (independiente de nuestro FAT32) y verifica que exista la carpeta.
+fn verify_dir_on_disk(disk: &Path, dir: &str) -> Result<()> {
+    let io = |e: std::io::Error| format!("disco {}: {e}", disk.display());
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(disk)
+        .map_err(io)?;
+    let fs = fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(io)?;
+    fs.root_dir()
+        .open_dir(dir)
+        .map_err(|e| format!("la carpeta /{dir} no quedó en el disco: {e}"))?;
+    println!("[disco] /{dir} existe (verificado con fatfs)");
+    Ok(())
+}
+
+/// Capturas: JARVIS en reposo y hablando, el gestor de archivos y un diálogo.
+fn screenshot(image: &Path, disk: &Path) -> Result<()> {
+    let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.wait_for("JARVIS_REPOSO", Duration::from_secs(30))?;
     thread::sleep(Duration::from_millis(600)); // que termine de apagarse el brillo
     s.screenshot(&target_dir().join("jarvis-os.png"))?;
     s.monitor("sendkey spc")?;
-    s.wait_for("JARVIS_HABLA", Duration::from_secs(15))?;
+    s.wait_for("JARVIS_HABLA", STEP)?;
     thread::sleep(Duration::from_millis(1200)); // a mitad de la frase
-    s.screenshot(&target_dir().join("jarvis-os-hablando.png"))
+    s.screenshot(&target_dir().join("jarvis-os-hablando.png"))?;
+
+    // Archivos: /Documentos con "Bienvenida.txt" seleccionado (vista previa en el inspector).
+    s.monitor("sendkey tab")?;
+    s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("ARCHIVOS_ABIERTO /Documentos", STEP)?;
+    s.monitor("sendkey down")?;
+    s.wait_for("ARCHIVOS_SELECCION Bienvenida.txt", STEP)?;
+    s.monitor("mouse_move 150 80")?; // que se vea el cursor
+    thread::sleep(Duration::from_millis(500));
+    s.screenshot(&target_dir().join("jarvis-os-archivos.png"))?;
+
+    s.monitor("sendkey f7")?;
+    s.type_text("tareas")?;
+    thread::sleep(Duration::from_millis(500));
+    s.screenshot(&target_dir().join("jarvis-os-dialogo.png"))
 }
 
 /// Convierte el PPM binario (P6) que genera QEMU a PNG.
@@ -349,6 +442,80 @@ fn ppm_to_png(ppm: &Path, png_path: &Path) -> Result<()> {
     enc.set_depth(png::BitDepth::Eight);
     let mut writer = enc.write_header().map_err(|e| e.to_string())?;
     writer.write_image_data(pixels).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// --- disco virtual ---------------------------------------------------------------------------
+
+const DISK_MIB: u64 = 64;
+/// Carpetas que se crean aunque estén vacías (git no guarda carpetas vacías).
+const EMPTY_DIRS: [&str; 2] = ["Papelera", "Facultad/Algoritmos"];
+
+/// El disco persistente de `run`. Si ya existe no se toca: así lo que hagas queda guardado.
+fn disk_image(reset: bool) -> Result<PathBuf> {
+    let path = target_dir().join("disco.img");
+    if path.exists() && !reset {
+        return Ok(path);
+    }
+    create_disk(&path)?;
+    println!("disco nuevo: {}", path.display());
+    Ok(path)
+}
+
+/// Un disco recién creado (tests y capturas: siempre parten del mismo estado).
+fn fresh_disk(name: &str) -> Result<PathBuf> {
+    let path = target_dir().join(name);
+    create_disk(&path)?;
+    Ok(path)
+}
+
+/// Crea un disco FAT32 de 64 MiB con `fatfs` y le copia `kernel/rootfs/`.
+fn create_disk(path: &Path) -> Result<()> {
+    let io = |e: std::io::Error| format!("disco {}: {e}", path.display());
+    fs::create_dir_all(target_dir()).map_err(io)?;
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .map_err(io)?;
+    file.set_len(DISK_MIB * 1024 * 1024).map_err(io)?;
+    let opts = fatfs::FormatVolumeOptions::new()
+        .fat_type(fatfs::FatType::Fat32)
+        .bytes_per_cluster(512)
+        .volume_label(*b"JARVIS     ");
+    fatfs::format_volume(&mut file, opts).map_err(io)?;
+    let fs = fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(io)?;
+    copy_tree(&fs.root_dir(), &workspace_root().join("rootfs"))?;
+    for dir in EMPTY_DIRS {
+        let mut current = fs.root_dir();
+        for part in dir.split('/') {
+            current = current.create_dir(part).map_err(io)?;
+        }
+    }
+    fs.unmount().map_err(io)
+}
+
+fn copy_tree<T: fatfs::ReadWriteSeek>(dir: &fatfs::Dir<'_, T>, src: &Path) -> Result<()> {
+    let io = |e: std::io::Error| format!("{}: {e}", src.display());
+    let mut entries: Vec<_> = fs::read_dir(src)
+        .map_err(io)?
+        .filter_map(|e| e.ok())
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        if path.is_dir() {
+            copy_tree(&dir.create_dir(&name).map_err(io)?, &path)?;
+        } else {
+            let data = fs::read(&path).map_err(io)?;
+            let mut file = dir.create_file(&name).map_err(io)?;
+            file.truncate().map_err(io)?;
+            file.write_all(&data).map_err(io)?;
+        }
+    }
     Ok(())
 }
 

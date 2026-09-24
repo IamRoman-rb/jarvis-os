@@ -11,18 +11,25 @@ Autor: Roman (estudiante de Ingeniería en Informática, UADE). Explicá las dec
 el proyecto también es de aprendizaje, sobre todo en el kernel.
 
 ## Estructura
-- kernel/        workspace Rust: gfx (dibujo no_std, testeable), kernel (binario), xtask (build/QEMU)
+- kernel/        workspace Rust (todo no_std y testeable en el host salvo kernel y xtask):
+    - gfx/         dibujo: canvas, texto, esfera, HUD
+    - fs/          FAT32 propio sobre un trait BlockDevice
+    - desktop/     escritorio: eventos, modos, app Archivos, cursor
+    - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles
+    - xtask/       imagen booteable, disco FAT32, QEMU, tests de punta a punta, capturas
+    - rootfs/      contenido inicial del disco virtual
 - src/jarvis/    cerebro en Python: agente, tools, política de permisos, auditoría
 - design/stitch/ design system "Obsidian Kinetic HUD" y mockups (referencia visual del HUD)
 - docs/          investigación, ADRs, kernel.md, permisos.md
 
 ## Comandos
 Kernel (desde kernel/):
-- Tests de lógica:  cargo test -p jarvis-gfx
+- Tests en el host: cargo test                (gfx, fs contra fatfs, desktop)
 - Arrancar:         cargo xtask run            (QEMU con ventana; logs del kernel por la terminal)
-- Test de arranque: cargo xtask test           (sin ventana; arranque + Espacio → JARVIS_HABLA)
-- Captura:          cargo xtask screenshot     (reposo y hablando en target/: miralas si tocás el HUD)
-- Lint:             cargo fmt --all && cargo clippy -p jarvis-gfx -p xtask --all-targets -- -D warnings
+- Punta a punta:    cargo xtask test           (sin ventana: teclado, mouse, Archivos y disco)
+- Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
+- Captura:          cargo xtask screenshot     (JARVIS, Archivos y diálogo en target/: miralas si tocás la UI)
+- Lint:             cargo fmt --all && cargo clippy --workspace --exclude jarvis-kernel --all-targets -- -D warnings
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
 Cerebro (desde la raíz):
 - uv sync ; uv run pytest ; uv run ruff check . ; uv run mypy
@@ -46,6 +53,13 @@ Cerebro (desde la raíz):
 9. El toolchain está fijado en kernel/rust-toolchain.toml. Actualizarlo es un cambio aparte.
 10. Si QEMU está abierto, la imagen de target/ queda bloqueada: compilá con
     `CARGO_TARGET_DIR=target/otra`. Nunca cierres un QEMU que no abriste vos.
+11. FAT32 (fs/): todo cambio lleva un test cruzado contra `fatfs` y `check_consistency`. Un bug ahí
+    corrompe el disco de Roman.
+12. `target/disco.img` es el disco persistente de Roman: nunca lo borres ni lo regeneres sin que te
+    lo pida. Los tests y capturas usan discos propios (disco-test.img, disco-captura.img).
+13. En la app Archivos, borrar = mover a /Papelera. El borrado definitivo solo dentro de la Papelera
+    y con confirmación (la misma regla que el cerebro).
+14. DMA: todo buffer que vea un dispositivo va en el heap (física = virtual − offset). Nunca en el stack.
 
 ## Reglas de seguridad del cerebro (NO negociables)
 1. Jamás permission_mode="bypassPermissions" ni "acceptEdits".

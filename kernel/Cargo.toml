@@ -1,9 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["gfx", "kernel", "xtask"]
+members = ["desktop", "fs", "gfx", "kernel", "xtask"]
 # El kernel solo compila para x86_64-unknown-none (lo hace `cargo xtask`). Sin esto,
 # `cargo test` o `cargo build` a secas intentarían compilarlo para Windows/Linux y fallarían.
-default-members = ["gfx", "xtask"]
+default-members = ["desktop", "fs", "gfx", "xtask"]
 
 [workspace.package]
 version = "0.1.0"

@@ -93,6 +93,25 @@ pub fn draw(c: &mut Canvas<'_>, x: i32, y: i32, text: &str, style: &Style) -> i3
     width(text, style)
 }
 
+/// Recorta `text` para que entre en `max_width` píxeles, terminando en ".." si hubo que cortar.
+pub fn fit(text: &str, style: &Style, max_width: i32) -> alloc::string::String {
+    if width(text, style) <= max_width {
+        return text.into();
+    }
+    let mut out = alloc::string::String::new();
+    for ch in text.chars() {
+        out.push(ch);
+        out.push_str("..");
+        if width(&out, style) > max_width {
+            out.truncate(out.len() - 2 - ch.len_utf8());
+            out.push_str("..");
+            return out;
+        }
+        out.truncate(out.len() - 2);
+    }
+    out
+}
+
 /// Igual que [`draw`], pero alineado a la derecha: `right` es el borde derecho.
 pub fn draw_right(c: &mut Canvas<'_>, right: i32, y: i32, text: &str, style: &Style) -> i32 {
     draw(c, right - width(text, style), y, text, style)
@@ -130,6 +149,18 @@ mod tests {
         assert_eq!(width("", &S), 0);
         assert_eq!(width("JARVIS", &S.scale(2)), base * 2);
         assert_eq!(width("JARVIS", &S.tracking(3)), base + 5 * 3);
+    }
+
+    #[test]
+    fn fit_recorta_con_puntos() {
+        let w = width("abcdefghij", &S);
+        assert_eq!(fit("abcdefghij", &S, w), "abcdefghij");
+        let corto = fit("abcdefghij", &S, w / 2);
+        assert!(
+            corto.ends_with("..") && width(&corto, &S) <= w / 2,
+            "{corto}"
+        );
+        assert_eq!(fit("", &S, 10), "");
     }
 
     #[test]
