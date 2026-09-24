@@ -1,9 +1,9 @@
 # JARVIS-OS
 
 Sistema operativo nuevo, con **kernel propio en Rust** (x86_64, UEFI), cuya interfaz es un HUD
-con el asistente JARVIS en el centro. El "cerebro" de JARVIS (Claude vía Agent SDK, en Python)
-corre en el host y el kernel le habla por un puente (serie en K4, red en K7).
-Decisiones: docs/adr/ (la vigente sobre la base es la 0003). Roadmap y arquitectura del kernel:
+con el asistente JARVIS en el centro y un escritorio con ventanas al estilo Windows. El "cerebro"
+de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va a hablar por la
+red (K4). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -12,11 +12,13 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
 
 ## Estructura
 - kernel/        workspace Rust (todo no_std y testeable en el host salvo kernel y xtask):
-    - gfx/         dibujo: canvas, texto, esfera, HUD
-    - fs/          FAT32 propio sobre un trait BlockDevice
-    - desktop/     escritorio: eventos, modos, app Archivos, cursor
-    - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles
-    - xtask/       imagen booteable, disco FAT32, QEMU, tests de punta a punta, capturas
+    - gfx/         dibujo: canvas, texto, fuente vectorial, íconos, esfera, HUD
+    - fs/          FAT32 propio sobre un trait BlockDevice (+ caché de sectores)
+    - desktop/     escritorio: gestor de ventanas (wm.rs), atajos y composición (desktop.rs),
+                   barra/panel/menús (shell.rs), apps (apps/), web sin red (web/: URL, HTTP, HTML)
+    - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
+    - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
+    - xtask/       imagen booteable, disco FAT32, QEMU, puente HTTPS (puente.rs), tests, capturas
     - rootfs/      contenido inicial del disco virtual
 - src/jarvis/    cerebro en Python: agente, tools, política de permisos, auditoría
 - design/stitch/ design system "Obsidian Kinetic HUD" y mockups (referencia visual del HUD)
@@ -24,11 +26,11 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
 
 ## Comandos
 Kernel (desde kernel/):
-- Tests en el host: cargo test                (gfx, fs contra fatfs, desktop)
-- Arrancar:         cargo xtask run            (QEMU con ventana; logs del kernel por la terminal)
-- Punta a punta:    cargo xtask test           (sin ventana: teclado, mouse, Archivos y disco)
+- Tests en el host: cargo test                (gfx, fs contra fatfs, desktop, net con loopback)
+- Arrancar:         cargo xtask run            (QEMU con ventana, red, sonido y puente HTTPS)
+- Punta a punta:    cargo xtask test           (sin ventana: teclado, mouse, ventanas, disco y red)
 - Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
-- Captura:          cargo xtask screenshot     (JARVIS, Archivos y diálogo en target/: miralas si tocás la UI)
+- Captura:          cargo xtask screenshot     (escritorio, apps y menús en target/: miralas si tocás la UI)
 - Lint:             cargo fmt --all && cargo clippy --workspace --exclude jarvis-kernel --all-targets -- -D warnings
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
 Cerebro (desde la raíz):
@@ -60,6 +62,12 @@ Cerebro (desde la raíz):
 13. En la app Archivos, borrar = mover a /Papelera. El borrado definitivo solo dentro de la Papelera
     y con confirmación (la misma regla que el cerebro).
 14. DMA: todo buffer que vea un dispositivo va en el heap (física = virtual − offset). Nunca en el stack.
+15. Red: el puente HTTPS del anfitrión (xtask/src/puente.rs) escucha solo en 127.0.0.1 y solo
+    acepta GET. Cambiar eso (otros métodos, otra interfaz) requiere un ADR. El puente se elimina
+    cuando haya TLS en el kernel (roadmap K7).
+16. Escritorio: las apps no dibujan en la pantalla ni conocen su posición: dibujan en su zona
+    (`content`) y piden cosas por el `Outbox`. Toda app nueva va en `desktop/src/apps/`, con tests
+    en `desktop/tests/`, y el test "render incremental == redibujar todo" tiene que seguir pasando.
 
 ## Reglas de seguridad del cerebro (NO negociables)
 1. Jamás permission_mode="bypassPermissions" ni "acceptEdits".

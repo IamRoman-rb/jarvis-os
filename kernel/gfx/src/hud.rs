@@ -6,28 +6,48 @@
 //!
 //! - **Capa estática** ([`draw_static`]): se dibuja una sola vez en el buffer de fondo.
 //! - **Capas dinámicas** (esfera, reloj, mensaje): cada una tiene su rectángulo, que es lo único
-//!   que se redibuja cuando cambia. La orquestación está en `scene`.
+//!   que se redibuja cuando cambia. La orquestación está en el escritorio (`jarvis-desktop`).
 
 use core::fmt::Write;
 
 use crate::canvas::Rect;
 use crate::clock::{DateTime, StrBuf};
-use crate::shapes::{circle, glow, line, rect_outline, rounded_outline, rounded_rect};
+use crate::shapes::{circle, glow, line, rect_outline, rounded_outline};
 use crate::sphere::{Pulse, View};
 use crate::text::{self, Size, Style, Weight};
 use crate::trig::FULL_TURN;
+use crate::vfont::VectorText;
 use crate::{Canvas, Color, theme};
 
-const MARGIN: i32 = 28;
+pub const MARGIN: i32 = 28;
 /// Una vuelta de la esfera cada 25 segundos.
 const SPIN_PERIOD_MS: u64 = 25_000;
 /// La fecha más larga posible, para reservar su espacio.
 const LONGEST_DATE: &str = "MIÉRCOLES, 30 DE SEPTIEMBRE DE 2026";
 
-fn time_style() -> Style {
-    Style::new(Weight::Bold, Size::Size32, Color::WHITE)
-        .scale(2)
-        .tracking(4)
+/// Alto de los dígitos de la hora, en píxeles.
+const TIME_HEIGHT: i32 = 58;
+
+/// La hora se dibuja con la fuente vectorial (nítida a cualquier tamaño) y un halo suave: el
+/// mismo texto con un trazo mucho más grueso y casi transparente.
+pub struct ClockFace {
+    digits: VectorText,
+    halo: VectorText,
+}
+
+impl ClockFace {
+    pub const fn new() -> Self {
+        ClockFace {
+            digits: VectorText::new(TIME_HEIGHT, 4 * 64, 10),
+            halo: VectorText::new(TIME_HEIGHT, 14 * 64, 10),
+        }
+    }
+}
+
+impl Default for ClockFace {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn date_style() -> Style {
@@ -36,16 +56,21 @@ fn date_style() -> Style {
 
 // --- capa estática ----------------------------------------------------------------------------
 
-/// Fondo, grilla, título "JARVIS" y panel de estado. La barra de íconos es dinámica (marca la
-/// sección activa): ver [`draw_toolbar`].
-pub fn draw_static(c: &mut Canvas<'_>, info: &[(&str, &str)]) {
+/// Fondo, grilla y título "JARVIS". La barra de íconos y el panel de estado son dinámicos y los
+/// dibuja el escritorio (`jarvis-desktop`).
+pub fn draw_static(c: &mut Canvas<'_>) {
     background(c);
     let right = c.width() as i32 - MARGIN - 8;
-    let title = Style::new(Weight::Light, Size::Size32, theme::TEXT_FAINT)
-        .scale(3)
-        .tracking(10);
-    text::draw_right(c, right, MARGIN - 8, "JARVIS", &title);
-    status_panel(c, info);
+    // Título de fondo, con la fuente vectorial (antes era la bitmap agrandada ×3: borrosa).
+    let mut title = VectorText::new(34, 2 * 64, 16);
+    let tw = title.width("JARVIS");
+    title.draw(
+        c,
+        right - tw,
+        MARGIN - 10,
+        "JARVIS",
+        theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 90),
+    );
 }
 
 fn background(c: &mut Canvas<'_>) {
@@ -63,144 +88,172 @@ fn background(c: &mut Canvas<'_>) {
     glow(c, w / 2, h / 2, h * 45 / 100, Color::hex(0x0a2a66), 90);
 }
 
-const TOOLBAR_SLOT: i32 = 30;
-const TOOLBAR_ICONS: i32 = 6;
-/// Ícono de la carpeta (app Archivos) en la barra.
-pub const TOOLBAR_FILES: i32 = 3;
-/// Ícono del chat (JARVIS) en la barra.
-pub const TOOLBAR_JARVIS: i32 = 5;
-
-/// Zona de la barra de íconos de arriba a la izquierda.
-pub fn toolbar_rect() -> Rect {
-    Rect::new(
-        MARGIN + 6,
-        MARGIN + 2,
-        TOOLBAR_SLOT * TOOLBAR_ICONS + 18,
-        34,
-    )
+/// Íconos de línea de 16×16 px (centrados en el punto que se pasa).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Icon {
+    /// Menú de inicio: cuatro cuadrados, como el botón de Windows.
+    Start,
+    Mic,
+    Screen,
+    Camera,
+    Folder,
+    Music,
+    Globe,
+    Chat,
+    Document,
+    Image,
+    Power,
+    Restart,
+    Lock,
+    Gauge,
 }
 
-/// Qué ícono de la barra está en (x, y), si hay alguno.
-pub fn toolbar_hit(x: i32, y: i32) -> Option<i32> {
-    let r = toolbar_rect();
-    if !r.contains(x, y) {
-        return None;
-    }
-    let i = (x - r.x - 9) / TOOLBAR_SLOT;
-    (0..TOOLBAR_ICONS).contains(&i).then_some(i)
-}
-
-/// Barra de íconos con el ícono `active` resaltado (la sección que se está usando).
-pub fn draw_toolbar(c: &mut Canvas<'_>, active: i32) {
-    const SLOT: i32 = TOOLBAR_SLOT;
-    const ICONS: i32 = TOOLBAR_ICONS;
-    let Rect { x, y, w, h } = toolbar_rect();
-    rounded_rect(c, x, y, w, h, 12, theme::PANEL, 210);
-    rounded_outline(c, x, y, w, h, 12, theme::PANEL_RIM);
-    for i in 0..ICONS {
-        let (ix, iy) = (x + 9 + i * SLOT + SLOT / 2, y + h / 2);
-        let active = i == active;
-        if active {
-            rounded_rect(c, ix - 12, iy - 12, 24, 24, 6, theme::VECTOR_BLUE, 90);
-        }
-        let color = if active {
-            theme::PARTICLE_BRIGHT
-        } else {
-            theme::TEXT_DIM
-        };
-        icon(c, i, ix, iy, color);
-    }
-    // Separador antes del asistente.
-    let sx = x + 9 + (ICONS - 1) * SLOT;
-    line(c, sx, y + 9, sx, y + h - 10, theme::PANEL_RIM);
-}
-
-/// Íconos de 14×14 px dibujados con líneas: micrófono, pantalla, cámara, carpeta, música, chat.
-fn icon(c: &mut Canvas<'_>, which: i32, x: i32, y: i32, col: Color) {
+/// Dibuja el ícono `which` centrado en (x, y).
+pub fn icon(c: &mut Canvas<'_>, which: Icon, x: i32, y: i32, col: Color) {
     match which {
-        0 => {
+        Icon::Start => {
+            for (dx, dy) in [(-7, -7), (1, -7), (-7, 1), (1, 1)] {
+                rect_outline(c, x + dx, y + dy, 6, 6, col);
+            }
+        }
+        Icon::Mic => {
             rounded_outline(c, x - 3, y - 7, 7, 10, 3, col);
             line(c, x - 5, y + 1, x - 5, y + 2, col);
             line(c, x + 5, y + 1, x + 5, y + 2, col);
             line(c, x - 4, y + 4, x + 4, y + 4, col);
             line(c, x, y + 5, x, y + 7, col);
         }
-        1 => {
+        Icon::Screen => {
             rect_outline(c, x - 7, y - 6, 15, 10, col);
             line(c, x, y + 4, x, y + 6, col);
             line(c, x - 3, y + 7, x + 3, y + 7, col);
         }
-        2 => {
+        Icon::Gauge => {
+            // Medio círculo con una aguja (el monitor del sistema).
+            for i in 0..=8 {
+                let (x0, y0) = GAUGE[i];
+                let (x1, y1) = GAUGE[(i + 1).min(8)];
+                line(c, x + x0, y + y0, x + x1, y + y1, col);
+            }
+            line(c, x - 7, y + 4, x + 7, y + 4, col);
+            line(c, x, y + 3, x + 4, y - 3, col);
+        }
+        Icon::Camera => {
             rounded_outline(c, x - 7, y - 4, 15, 11, 2, col);
             line(c, x - 3, y - 6, x + 3, y - 6, col);
             circle(c, x, y + 1, 3, col, false);
         }
-        3 => {
+        Icon::Folder => {
             line(c, x - 7, y - 5, x - 2, y - 5, col);
             line(c, x - 2, y - 5, x, y - 3, col);
             rect_outline(c, x - 7, y - 3, 15, 10, col);
         }
-        4 => {
+        Icon::Music => {
             line(c, x - 2, y - 6, x - 2, y + 4, col);
             line(c, x + 5, y - 7, x + 5, y + 2, col);
             line(c, x - 2, y - 6, x + 5, y - 7, col);
             circle(c, x - 4, y + 4, 2, col, true);
             circle(c, x + 3, y + 3, 2, col, true);
         }
-        _ => {
+        Icon::Globe => {
+            circle(c, x, y, 7, col, false);
+            line(c, x - 7, y, x + 7, y, col);
+            line(c, x - 6, y - 4, x + 6, y - 4, col.scale(160));
+            line(c, x - 6, y + 4, x + 6, y + 4, col.scale(160));
+            rounded_outline(c, x - 3, y - 7, 7, 15, 3, col.scale(200));
+        }
+        Icon::Chat => {
             rounded_outline(c, x - 7, y - 6, 15, 11, 3, col);
             line(c, x - 4, y + 5, x - 4, y + 7, col);
             line(c, x - 4, y + 7, x - 1, y + 5, col);
         }
+        Icon::Document => {
+            line(c, x - 5, y - 7, x + 2, y - 7, col);
+            line(c, x + 2, y - 7, x + 6, y - 3, col);
+            line(c, x + 6, y - 3, x + 6, y + 7, col);
+            line(c, x - 5, y + 7, x + 6, y + 7, col);
+            line(c, x - 5, y - 7, x - 5, y + 7, col);
+            for row in [-1, 2, 5] {
+                line(c, x - 3, y + row, x + 3, y + row, col.scale(170));
+            }
+        }
+        Icon::Image => {
+            rounded_outline(c, x - 7, y - 6, 15, 13, 2, col);
+            line(c, x - 5, y + 4, x - 1, y - 1, col);
+            line(c, x - 1, y - 1, x + 2, y + 2, col);
+            line(c, x + 2, y + 2, x + 5, y - 1, col);
+            circle(c, x + 3, y - 3, 1, col, true);
+        }
+        Icon::Power => {
+            // Círculo abierto arriba y una raya vertical.
+            for i in 0..=10 {
+                let (x0, y0) = POWER[i];
+                let (x1, y1) = POWER[(i + 1).min(10)];
+                line(c, x + x0, y + y0, x + x1, y + y1, col);
+            }
+            line(c, x, y - 7, x, y, col);
+        }
+        Icon::Restart => {
+            for i in 0..=10 {
+                let (x0, y0) = POWER[i];
+                let (x1, y1) = POWER[(i + 1).min(10)];
+                line(c, x + x0, y + y0, x + x1, y + y1, col);
+            }
+            line(c, x + 3, y - 5, x + 6, y - 7, col);
+            line(c, x + 3, y - 5, x + 6, y - 2, col);
+        }
+        Icon::Lock => {
+            rounded_outline(c, x - 4, y - 7, 9, 9, 4, col);
+            rect_outline(c, x - 6, y - 1, 13, 9, col);
+            line(c, x, y + 2, x, y + 4, col);
+        }
     }
 }
 
-fn status_panel(c: &mut Canvas<'_>, rows: &[(&str, &str)]) {
-    let h = c.height() as i32;
-    let row_h = 22;
-    let (w, ph) = (300, 44 + rows.len() as i32 * row_h + 8);
-    let (x, y) = (MARGIN - 6, h - MARGIN - 44 - ph);
+/// Puntos de un semicírculo de radio 7 (de izquierda a derecha, por arriba).
+const GAUGE: [(i32, i32); 9] = [
+    (-7, 4),
+    (-7, 1),
+    (-5, -3),
+    (-3, -5),
+    (0, -6),
+    (3, -5),
+    (5, -3),
+    (7, 1),
+    (7, 4),
+];
 
-    rounded_rect(c, x, y, w, ph, 8, theme::PANEL, 200);
-    rounded_outline(c, x, y, w, ph, 8, theme::PANEL_RIM);
-
-    let label = Style::new(Weight::Regular, Size::Size16, theme::TEXT_DIM).tracking(2);
-    text::draw(c, x + 12, y + 10, "ESTADO", &label);
-    let faint = label.color(theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 120));
-    text::draw_right(c, x + w - 12, y + 10, "JARVIS-OS", &faint);
-    line(c, x + 1, y + 34, x + w - 2, y + 34, theme::PANEL_RIM);
-
-    let key = Style::new(Weight::Light, Size::Size16, theme::TEXT_DIM);
-    let value = Style::new(Weight::Regular, Size::Size16, theme::TEXT);
-    for (i, (k, v)) in rows.iter().enumerate() {
-        let ry = y + 44 + i as i32 * row_h;
-        text::draw(c, x + 12, ry, k, &key);
-        text::draw_right(c, x + w - 12, ry, v, &value);
-    }
-
-    // Píldora "Control de misión" debajo del panel.
-    let (px, py, pw, phh) = (x, h - MARGIN - 30, 210, 30);
-    rounded_rect(c, px, py, pw, phh, 15, theme::PANEL, 200);
-    rounded_outline(c, px, py, pw, phh, 15, theme::PANEL_RIM);
-    circle(c, px + 16, py + phh / 2, 3, theme::CYAN, true);
-    let pill = Style::new(Weight::Regular, Size::Size16, theme::TEXT_DIM).tracking(2);
-    text::draw(c, px + 28, py + 7, "CONTROL DE MISIÓN", &pill);
-}
+/// Círculo de radio 6 abierto arriba (ícono de encendido).
+const POWER: [(i32, i32); 11] = [
+    (-3, -5),
+    (-6, -2),
+    (-6, 2),
+    (-4, 5),
+    (-1, 7),
+    (1, 7),
+    (4, 5),
+    (6, 2),
+    (6, -2),
+    (3, -5),
+    (3, -5),
+];
 
 // --- reloj ------------------------------------------------------------------------------------
 
 /// Zona que ocupan la hora y la fecha (incluido el halo de la hora).
 pub fn clock_rect(width: usize, _height: usize) -> Rect {
     let right = width as i32 - MARGIN - 8;
-    let ty = MARGIN + 34;
+    let face = ClockFace::new();
+    let ty = MARGIN + 38;
+    let pad = face.halo.overhang();
     let date_w = text::width(LONGEST_DATE, &date_style());
-    let time_w = text::width("00:00", &time_style()) + 18;
+    let time_w = face.digits.width("00:00") + 10 + pad;
     let x0 = (right - date_w.max(time_w) - 14).max(0);
-    let y1 = ty + time_style().line_height() + 6 + date_style().line_height() + 4;
-    Rect::new(x0, ty - 4, right + 4 - x0, y1 - (ty - 4))
+    let y1 = ty + TIME_HEIGHT + 14 + date_style().line_height() + 4;
+    Rect::new(x0, ty - pad, right + pad - x0, y1 - (ty - pad))
 }
 
-pub fn draw_clock(c: &mut Canvas<'_>, now: Option<DateTime>) {
+pub fn draw_clock(c: &mut Canvas<'_>, face: &mut ClockFace, now: Option<DateTime>) {
     let right = c.width() as i32 - MARGIN - 8;
     let mut time = StrBuf::<8>::new();
     let mut date = StrBuf::<48>::new();
@@ -214,21 +267,16 @@ pub fn draw_clock(c: &mut Canvas<'_>, now: Option<DateTime>) {
             let _ = date.write_str("RELOJ NO DISPONIBLE");
         }
     }
-    let big = time_style();
-    let tw = text::width(time.as_str(), &big);
-    let ty = MARGIN + 34;
-    text::draw_glowing(
-        c,
-        right - tw - 18,
-        ty,
-        time.as_str(),
-        &big,
-        theme::CYAN.scale(40),
-    );
+    let tw = face.digits.width(time.as_str());
+    let ty = MARGIN + 38;
+    let tx = right - tw - 10;
+    face.halo
+        .draw_alpha(c, tx, ty, time.as_str(), theme::CYAN, 22);
+    face.digits.draw(c, tx, ty, time.as_str(), Color::WHITE);
     text::draw_right(
         c,
         right - 10,
-        ty + big.line_height() + 6,
+        ty + TIME_HEIGHT + 14,
         date.as_str(),
         &date_style(),
     );
@@ -302,10 +350,7 @@ mod tests {
         for (w, h) in [(1280, 800), (1024, 768), (1920, 1080), (640, 480)] {
             let mut buf = vec![0u8; w * h * 4];
             let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Bgr).unwrap();
-            draw_static(
-                &mut c,
-                &[("NÚCLEO", "jarvis 0.1.0"), ("MEMORIA", "511 MiB")],
-            );
+            draw_static(&mut c);
             assert_ne!(c.get(w as i32 - 1, h as i32 - 1), Some(Color::BLACK));
         }
     }
@@ -323,7 +368,7 @@ mod tests {
         };
         let mut buf = vec![0u8; w * h * 4];
         let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Rgb).unwrap();
-        draw_clock(&mut c, Some(now));
+        draw_clock(&mut c, &mut ClockFace::new(), Some(now));
         draw_message(&mut c, "Sistema en línea. ¿En qué te ayudo?", true);
         let (cr, mr) = (clock_rect(w, h), message_rect(w, h));
         for y in 0..h as i32 {

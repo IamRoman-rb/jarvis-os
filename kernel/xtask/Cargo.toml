@@ -10,6 +10,8 @@ publish.workspace = true
 bootloader = { version = "0.11.17", default-features = false, features = ["uefi"] }
 fatfs = "0.3.6"
 png = "0.18"
+# Puente HTTPS del anfitrión: el kernel todavía no tiene TLS (ver xtask/src/puente.rs).
+ureq = "3"
 
 [lints]
 workspace = true

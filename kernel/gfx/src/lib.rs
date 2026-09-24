@@ -14,11 +14,11 @@ pub mod assistant;
 pub mod canvas;
 pub mod clock;
 pub mod hud;
-pub mod scene;
 pub mod shapes;
 pub mod sphere;
 pub mod text;
 pub mod theme;
 pub mod trig;
+pub mod vfont;
 
-pub use canvas::{Canvas, Color, PixelFormat, Rect};
+pub use canvas::{Canvas, Color, MAX_CLIP, PixelFormat, Rect};

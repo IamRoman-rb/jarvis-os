@@ -1,17 +1,28 @@
 # Kernel de JARVIS-OS
 
 Kernel propio en Rust para x86_64 con arranque UEFI. Decisión y motivos: [ADR 0003](adr/0003-kernel-propio-rust.md).
+Red y navegador: [ADR 0004](adr/0004-red-y-navegador-propio.md).
 
-| JARVIS hablando | Archivos |
+| Escritorio | Ventanas |
 |---|---|
-| ![JARVIS hablando](img/k1-hablando.png) | ![Gestor de archivos](img/k2-archivos.png) |
+| ![JARVIS](img/k3-escritorio.png) | ![Archivos y monitor](img/k3-monitor.png) |
+| **Navegador (HTTPS)** | **Alt+Tab** |
+| ![Navegador](img/k3-web.png) | ![Alt+Tab](img/k3-alt-tab.png) |
 
-- **JARVIS**: la esfera gira en tiempo real y, cuando JARVIS habla, late con las sílabas, le corren
-  ondas y brilla más mientras el mensaje se escribe letra por letra. Por ahora "habla" al arrancar
-  y con **Espacio** (frases de demo): todavía no hay audio ni conexión con Claude.
-- **Archivos** (**Tab**, o clic en la carpeta de la barra): gestor de archivos sobre un **disco
-  virtual persistente** con **FAT32 escrito desde cero**. Crear carpetas (F7) y archivos (F6),
-  renombrar (F2), mandar a la Papelera (Supr), vaciarla; teclado y mouse.
+- **JARVIS**: la esfera gira en tiempo real y late cuando JARVIS habla. El reloj usa una fuente
+  vectorial propia (nítida a cualquier tamaño).
+- **Ventanas como en Windows**: barra de título con minimizar, maximizar y cerrar; arrastrar para
+  mover, esquina para cambiar el tamaño, doble clic para maximizar. Alt+Tab, Win+D, Win+flechas,
+  Alt+F4, menú de inicio, vista de tareas y pantalla de bloqueo.
+- **Barra de arriba a la izquierda** (lanzador y barra de tareas): inicio, consola de JARVIS
+  (micrófono), monitor del sistema, captura de pantalla, Archivos, música, navegador y JARVIS.
+  Un puntito marca las apps abiertas; la que tiene el foco se resalta.
+- **Panel de estado** (abajo a la izquierda) con gráficos en vivo de CPU, memoria, disco y red.
+  Clic: abre el monitor. "Control de misión": la vista de tareas.
+- **Apps**: Archivos (FAT32 propio), Monitor del sistema, Consola JARVIS, Editor de texto, Música
+  (parlante de la PC), Visor de imágenes (BMP) y Navegador.
+- **Red propia**: driver virtio-net, TCP/IP (smoltcp), DHCP y DNS. El navegador baja páginas
+  `http://` directo y `https://` por un puente en el anfitrión (el kernel todavía no tiene TLS).
 
 ## Cómo correrlo
 
@@ -21,38 +32,82 @@ solo la primera vez, porque está fijado en `kernel/rust-toolchain.toml`.
 
 ```bash
 cd kernel
-cargo xtask run          # compila, arma la imagen UEFI y abre QEMU con el disco persistente
+cargo xtask run          # QEMU con ventana, disco persistente, red, sonido y el puente HTTPS
 cargo xtask test         # sin ventana, de punta a punta (lo usa la CI)
-cargo xtask screenshot   # capturas: reposo, hablando, Archivos y un diálogo
+cargo xtask screenshot   # capturas del escritorio, las apps y los menús (en target/)
 cargo xtask disk --reset # vuelve el disco a su contenido inicial (kernel/rootfs/)
 cargo xtask vdi          # target/jarvis-os.vdi para bootear en VirtualBox (VM con EFI)
-cargo test               # tests en el host: FAT32 (contra fatfs), escritorio y gráficos
+cargo test               # tests en el host: FAT32, red, escritorio y gráficos
 ```
 
 - **El disco** es `kernel/target/disco.img` (64 MiB, FAT32, etiqueta `JARVIS`). Se crea la primera
   vez con el contenido de `kernel/rootfs/` y después **no se toca**: lo que hagas queda guardado
   entre reinicios. Se puede abrir desde Windows con 7-Zip para ver lo que creaste.
-- **El mouse**: hacé clic en la ventana de QEMU para que lo "capture"; Ctrl+Alt+G lo libera.
+- **Mouse y teclado**: hacé clic en la ventana de QEMU para que los "capture" (Ctrl+Alt+G los
+  libera). Mientras están capturados, la tecla Windows y Alt+Tab van a JARVIS-OS y no a Windows.
+  Si Windows igual se queda con alguna combinación (Ctrl+Alt+Supr siempre es de Windows), usá el
+  ícono de inicio, el menú de inicio o "Control de misión".
+- **Sonido**: el parlante de la PC suena por DirectSound en Windows. En Linux, definí
+  `QEMU_AUDIO=pa` (o `alsa`) antes de `cargo xtask run`.
+- **Red**: QEMU da una red privada con DHCP (JARVIS-OS queda en 10.0.2.15) y sale a internet por
+  la computadora anfitriona. El puente HTTPS escucha solo en 127.0.0.1:8118 mientras dura `run`.
 - Los logs del kernel (puerto serie) salen en la terminal donde corriste `cargo xtask run`.
 - En Windows, `xtask` usa la aceleración por hardware (WHPX) si está disponible.
 - Para compilar mientras tenés QEMU abierto (la imagen queda bloqueada), usá otra carpeta de
   salida: `CARGO_TARGET_DIR=target/otra cargo xtask test`.
 
-### Teclas
+### Atajos de teclado (como en Windows)
 
-| Tecla | JARVIS | Archivos |
+| Atajo | Qué hace |
+|---|---|
+| Win (sola) | menú de inicio: escribí para buscar apps o una dirección web |
+| Alt+Tab / Alt+Shift+Tab | cambiar de ventana (con Alt apretado se ve el selector) |
+| Win+D | mostrar el escritorio (JARVIS); otra vez, volver |
+| Win+M | minimizar todo |
+| Win+E | Archivos |
+| Win+R | Consola de JARVIS ("Ejecutar") |
+| Win+X / Ctrl+Shift+Esc | Monitor del sistema |
+| Win+Tab | vista de tareas ("Control de misión") |
+| Win+↑ / Win+↓ | maximizar / restaurar o minimizar |
+| Win+← / Win+→ | acoplar a la mitad izquierda / derecha |
+| Win+1 … Win+8 | el ícono número N de la barra |
+| Win+L | bloquear |
+| Alt+F4 | cerrar la ventana; sin ventanas, apagar o reiniciar |
+| F11 | maximizar la ventana |
+| Impr Pant / Win+Shift+S | captura de pantalla a /Imágenes (BMP) |
+
+En el escritorio (sin ventana con foco): Espacio o clic en la esfera hace hablar a JARVIS, Tab
+abre Archivos.
+
+| Archivos | |
+|---|---|
+| Enter / doble clic | abrir la carpeta, o el archivo (texto → editor, BMP → visor, HTML → navegador) |
+| Retroceso / Alt+↑ | subir una carpeta · Alt+← atrás |
+| F7 o Ctrl+Shift+N / F6 | nueva carpeta / nuevo archivo de texto |
+| F2 | renombrar |
+| Ctrl+C / Ctrl+X / Ctrl+V | copiar / cortar / pegar (también carpetas enteras) |
+| Supr | a la Papelera (adentro de la Papelera: borrar definitivo, con confirmación) |
+| RESTAURAR (en la Papelera) | vuelve a la carpeta de donde vino |
+| Clic en NOMBRE / TAMAÑO / MODIFICADO | ordenar por esa columna |
+| Letras | ir al primer elemento que empieza así |
+| F5 | recargar |
+
+| Navegador | |
+|---|---|
+| Ctrl+L / F6 / clic en la barra | escribir una dirección o una búsqueda; Enter va |
+| Tab / Shift+Tab, Enter | recorrer los enlaces y abrir el elegido (o clic) |
+| Alt+← / Retroceso · Alt+→ | atrás · adelante |
+| F5 / Ctrl+R · Ctrl+H | recargar · inicio |
+| Flechas, RePág, AvPág, Espacio, rueda | moverse por la página |
+
+| Editor | Consola JARVIS | Música |
 |---|---|---|
-| Tab | abrir Archivos | volver a JARVIS |
-| Espacio / Enter | JARVIS dice una frase | Enter: abrir carpeta |
-| ↑ ↓ Inicio Fin RePág AvPág | | moverse por la lista |
-| Retroceso / ← | | subir una carpeta / atrás en el historial |
-| F7 / F6 | | nueva carpeta / nuevo archivo de texto |
-| F2 | | renombrar |
-| Supr | | mandar a la Papelera (adentro de la Papelera: borrar definitivo) |
-| Esc | | cerrar el diálogo, o volver a JARVIS |
+| Ctrl+S guarda (si es nuevo, pide la ruta) | `ayuda` lista las órdenes | ↑ ↓ elegir, Enter reproducir |
+| Ctrl+Inicio / Ctrl+Fin | `abrir`, `ir`, `buscar`, `ls`, `cat`, `editar` | Esc detener |
+| Cerrar con cambios avisa una vez | `hora`, `estado`, `red`, `captura`, `apagar` | |
 
-El teclado usa la distribución de EE. UU.: los nombres con acentos se leen bien, pero no se
-pueden tipear todavía.
+El teclado usa la distribución de EE. UU.: los nombres con acentos se leen bien, pero todavía no
+se pueden tipear.
 
 ## Arquitectura
 
@@ -67,27 +122,56 @@ firmware UEFI (OVMF en QEMU)
             ├─ pit.rs         PIT: despierta al bucle (250 Hz) y calibra el TSC
             ├─ time.rs        reloj en ms con el TSC
             ├─ queue.rs       cola de bytes sin locks (interrupción → bucle)
-            ├─ keyboard.rs    teclado PS/2 → eventos del escritorio
-            ├─ mouse.rs       mouse PS/2 (puerto auxiliar del 8042)
-            ├─ allocator.rs   heap de 64 MiB (alloc: Vec, String)
+            ├─ keyboard.rs    teclado PS/2 → teclas y modificadores (Alt, Ctrl, Win…)
+            ├─ mouse.rs       mouse PS/2 con rueda (puerto auxiliar del 8042)
+            ├─ allocator.rs   heap de 256 MiB (alloc: Vec, String)
             ├─ pci.rs         enumeración del bus PCI
             ├─ virtio_blk.rs  driver de disco virtio-blk (DMA, virtqueue, polling)
+            ├─ virtio_net.rs  driver de placa de red virtio-net (dos virtqueues, polling)
+            ├─ speaker.rs     parlante de la PC (canal 2 del PIT)
+            ├─ power.rs       apagar (ACPI de QEMU) y reiniciar (8042)
+            ├─ cpu.rs         nombre de la CPU (cpuid)
             ├─ rtc.rs         reloj CMOS → fecha y hora
-            └─ bucle          hlt → eventos → Desktop::render → Desktop::present
-                 └─ jarvis-desktop  modos, app Archivos, cursor
-                      ├─ jarvis-fs   FAT32 sobre el disco
-                      └─ jarvis-gfx  dibujo: HUD, esfera, texto, figuras
+            └─ bucle          hlt → red → eventos → render → present → pedidos → estadísticas
+                 ├─ jarvis-net      TCP/IP (smoltcp), DHCP, DNS, descargas HTTP
+                 └─ jarvis-desktop  ventanas, atajos, apps, barra, panel, menús
+                      ├─ jarvis-fs   FAT32 sobre el disco (con caché de sectores)
+                      └─ jarvis-gfx  dibujo: HUD, esfera, texto, fuente vectorial, figuras
 ```
 
 | Crate | Qué es | Cómo se prueba |
 |---|---|---|
-| `gfx` (`jarvis-gfx`) | Dibujo: canvas con recorte, paleta, texto, figuras, trigonometría en punto fijo, esfera, asistente, escena del HUD con doble buffer. | `cargo test`: 35 tests |
-| `fs` (`jarvis-fs`) | FAT32 propio: montaje, FAT (dos copias), nombres largos, lectura, escritura, carpetas, renombrar, mover, borrar. Sobre un trait `BlockDevice`. | 17 tests, 11 de ellos **cruzados contra `fatfs`**: cada uno lee lo que escribe el otro, y el espacio libre se cuenta sobre la FAT cruda |
-| `desktop` (`jarvis-desktop`) | Escritorio: eventos, decodificador del mouse, modos, app Archivos (estado, vista, diálogos), cursor. | 16 tests: la app manejada con teclas y clics sobre un disco en memoria, verificado después con `fatfs` |
+| `gfx` (`jarvis-gfx`) | Dibujo: canvas con recorte y `blit`, paleta, texto, **fuente vectorial**, figuras, íconos, trigonometría en punto fijo, esfera, asistente, HUD. | `cargo test`: 37 tests |
+| `fs` (`jarvis-fs`) | FAT32 propio: montaje, FAT (dos copias), nombres largos, lectura, escritura, carpetas, renombrar, mover, **copiar**, borrar, **caché de sectores**. Sobre un trait `BlockDevice`. | 22 tests, 14 de ellos **cruzados contra `fatfs`**: cada uno lee lo que escribe el otro, y el espacio libre se cuenta sobre la FAT cruda |
+| `desktop` (`jarvis-desktop`) | Escritorio: gestor de ventanas, atajos, barra, panel de estado, menús, composición; apps (Archivos, Monitor, Consola, Editor, Música, Visor, Navegador); URL, HTTP y HTML. | 65 tests: el escritorio manejado con teclas y clics sobre un disco en memoria, verificado con `fatfs`; incluye "render incremental == redibujar todo" |
+| `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente. | 3 tests de punta a punta en memoria (placa "loopback" + servidor HTTP de juguete) |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
-| `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor), test de punta a punta, capturas. | Se usa en cada `cargo xtask` |
+| `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente HTTPS, test de punta a punta, capturas. | Se usa en cada `cargo xtask` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K3: ventanas, red y navegador
+- **Composición por ventana**: cada ventana tiene su propio buffer y solo se redibuja cuando su
+  app cambia. En cada frame se juntan las zonas que cambiaron (la esfera siempre, el reloj una vez
+  por minuto, una ventana que se movió…), se restauran desde el fondo y se pintan las capas de
+  atrás hacia adelante con **recorte**. Mover una ventana cuesta copiar dos rectángulos, no
+  redibujar su contenido. Si una ventana maximizada tapa la esfera, la esfera ni se anima.
+- **Qué cambió = comparar antes y después**: en vez de que cada acción avise qué redibujar, el
+  escritorio saca una foto de la geometría de las ventanas antes de cada evento y la compara con
+  la de después. Así no se puede olvidar un caso (y el test de render incremental lo verifica).
+- **Modificadores como eventos**: Alt+Tab necesita saber cuándo se *suelta* Alt, y la tecla
+  Windows sola abre el menú solo si no se usó en un atajo. Por eso el teclado manda un evento
+  cada vez que cambian Shift, Ctrl, Alt o Win, y el escritorio lleva la cuenta.
+- **Red por capas**: el driver (virtio-net) solo mueve tramas Ethernet; smoltcp arma IP, TCP,
+  DHCP y DNS; `jarvis-net` hace las descargas; el navegador solo ve "pedí esta URL" y "llegó
+  esta respuesta" (por el `Outbox`). Cada capa se prueba sola: la red, con una placa "loopback".
+- **DNS con respaldo**: en la máquina donde se desarrolló, el DNS no resolvía algunos nombres
+  (tampoco desde Windows: el problema era de esa red). Por eso hay DNS públicos de respaldo y,
+  si igual falla, la página se pide por el puente.
+- **Fuente vectorial**: la hora era la fuente bitmap agrandada ×2 (bordes borrosos). Ahora cada
+  dígito son trazos que se rasterizan al tamaño exacto, midiendo la distancia de cada píxel al
+  trazo, con 1 px de suavizado. Se rasteriza una vez y queda en caché.
+- **Uso de CPU**: es el tiempo que el bucle **no** pasó dormido en `hlt`, medido con el TSC.
 
 ### K2: disco, FAT32 y Archivos
 - **DMA y direcciones físicas**: el disco virtio lee y escribe la memoria por su cuenta, con
@@ -129,21 +213,22 @@ firmware UEFI (OVMF en QEMU)
 
 ## Roadmap
 
-El orden cambió: el gestor de archivos (disco, FAT32, mouse, ventanas) se adelantó a pedido.
+El orden cambió dos veces a pedido: el gestor de archivos (K2) y el escritorio con red (K3) se
+adelantaron.
 
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
 | **K0** ✅ | Arranca en QEMU y dibuja el HUD | Arranque UEFI, framebuffer, E/S por puertos, `no_std` |
 | **K1** ✅ | Interrupciones, timer + TSC, teclado, heap. Esfera animada y pulsaciones al hablar | Interrupciones, PIC, calibración de tiempo, concurrencia sin locks |
-| **K2** ✅ | **Archivos**: PCI, virtio-blk, FAT32 propio, mouse PS/2, escritorio con modos y ventana | Drivers con DMA, sistemas de archivos, UI dirigida por eventos |
-| K3 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
-| K4 | **Puente con el cerebro**: escribís en el HUD → puerto serie → `jarvis` en el host → Claude → respuesta (y la esfera pulsa con ella). JARVIS podría usar el disco con las tools de la Fase 1a | Protocolos, el sistema "piensa" |
-| K5 | Multitarea: scheduler y tareas del kernel. Disco por interrupciones en vez de polling | Cambio de contexto, sincronización |
-| K6 | Editor de texto y visor de imágenes; teclado latinoamericano | Apps sobre el escritorio |
-| K7 | Red: virtio-net + TCP/IP (smoltcp). El puente pasa a red | Drivers de red, pila TCP/IP |
-| K8 | Espacio de usuario: ring 3, syscalls, cargador ELF | Aislamiento, ABI |
+| **K2** ✅ | **Archivos**: PCI, virtio-blk, FAT32 propio, mouse PS/2 | Drivers con DMA, sistemas de archivos, UI dirigida por eventos |
+| **K3** ✅ | **Escritorio y red**: ventanas y atajos como Windows, monitor, apps, virtio-net + TCP/IP, navegador | Composición, gestores de ventanas, redes, HTTP/HTML |
+| K4 | **Puente con el cerebro**: la consola de JARVIS le habla a Claude (por la red, al `jarvis` del anfitrión) y la esfera pulsa con la respuesta | Protocolos, el sistema "piensa" |
+| K5 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
+| K6 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
+| K7 | **TLS en el kernel** (sin puente) y teclado latinoamericano | Criptografía, certificados |
+| K8 | Espacio de usuario: ring 3, syscalls, cargador ELF. Recién ahí se puede pensar en portar un navegador más completo | Aislamiento, ABI |
 | K9 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio | Drivers de audio |
-| K10 | Hardware real: AHCI/NVMe, USB, GPU básica, arranque en la PC | Drivers reales |
+| K10 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe, USB, ACPI, arranque en la PC | Drivers reales |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),
 la especificación de virtio y la especificación "Microsoft FAT32 File System".

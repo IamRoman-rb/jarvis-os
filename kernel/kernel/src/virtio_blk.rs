@@ -21,7 +21,7 @@
 
 use alloc::alloc::{Layout, alloc_zeroed};
 use core::ptr::{read_volatile, write_volatile};
-use core::sync::atomic::{Ordering, fence};
+use core::sync::atomic::{AtomicU64, Ordering, fence};
 
 use jarvis_fs::{BlockDevice, IoError, SECTOR_SIZE};
 use x86_64::instructions::port::Port;
@@ -50,6 +50,10 @@ const DESC_WRITE: u16 = 2; // el dispositivo escribe en este buffer
 
 const REQUEST_IN: u32 = 0; // leer del disco
 const REQUEST_OUT: u32 = 1; // escribir al disco
+
+/// Bytes leídos y escritos desde el arranque (para el monitor).
+pub static READ_BYTES: AtomicU64 = AtomicU64::new(0);
+pub static WRITTEN_BYTES: AtomicU64 = AtomicU64::new(0);
 
 /// Tamaño del buffer intermedio: los pedidos más grandes se parten.
 const BOUNCE_SECTORS: usize = 128; // 64 KiB
@@ -284,6 +288,7 @@ impl BlockDevice for VirtioBlk {
     }
 
     fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), IoError> {
+        READ_BYTES.fetch_add(buf.len() as u64, Ordering::Relaxed);
         for (i, chunk) in buf.chunks_mut(BOUNCE_SECTORS * SECTOR_SIZE).enumerate() {
             let sectors = chunk.len().div_ceil(SECTOR_SIZE);
             self.request(REQUEST_IN, lba + (i * BOUNCE_SECTORS) as u64, sectors)?;
@@ -295,6 +300,7 @@ impl BlockDevice for VirtioBlk {
     }
 
     fn write(&mut self, lba: u64, buf: &[u8]) -> Result<(), IoError> {
+        WRITTEN_BYTES.fetch_add(buf.len() as u64, Ordering::Relaxed);
         for (i, chunk) in buf.chunks(BOUNCE_SECTORS * SECTOR_SIZE).enumerate() {
             // SAFETY: ídem `read`.
             let dst = unsafe { core::slice::from_raw_parts_mut(self.bounce, chunk.len()) };

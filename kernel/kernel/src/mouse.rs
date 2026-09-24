@@ -71,8 +71,21 @@ fn mouse_command(byte: u8) -> bool {
     read_data() == Some(ACK)
 }
 
-/// Habilita el mouse. Se llama con las interrupciones deshabilitadas. `false` si no responde.
-pub fn init() -> bool {
+/// Activa la rueda: el "golpe secreto" de los mouse IntelliMouse es fijar la frecuencia de
+/// muestreo en 200, 100 y 80 seguidas. Si el mouse lo entiende, pasa a identificarse como tipo 3
+/// y manda paquetes de 4 bytes (el cuarto, la rueda).
+fn enable_wheel() -> bool {
+    for rate in [200, 100, 80] {
+        if !(mouse_command(0xF3) && mouse_command(rate)) {
+            return false;
+        }
+    }
+    mouse_command(0xF2) && read_data() == Some(3)
+}
+
+/// Habilita el mouse. Se llama con las interrupciones deshabilitadas. `None` si no responde;
+/// `Some(true)` si tiene rueda.
+pub fn init() -> Option<bool> {
     // Descartar bytes viejos que hayan quedado en el controlador.
     while status() & 0x01 != 0 {
         // SAFETY: hay un byte pendiente en el puerto de datos (bit 0 del estado).
@@ -80,12 +93,14 @@ pub fn init() -> bool {
     }
     command(0xA8); // habilitar el puerto auxiliar
     command(0x20); // leer el byte de configuración
-    let Some(config) = read_data() else {
-        return false;
-    };
+    let config = read_data()?;
     // Bit 1: interrupción del puerto auxiliar (IRQ12). Bit 5 en 0: reloj del mouse encendido.
     let config = (config | 0x02) & !0x20;
     command(0x60);
     write_data(config);
-    mouse_command(0xF6) && mouse_command(0xF4) // valores por defecto + empezar a mandar datos
+    if !mouse_command(0xF6) {
+        return None; // valores por defecto
+    }
+    let wheel = enable_wheel();
+    mouse_command(0xF4).then_some(wheel) // empezar a mandar datos
 }
