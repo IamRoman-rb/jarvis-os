@@ -296,6 +296,33 @@ impl Session {
     }
 }
 
+impl Session {
+    /// Tipea `text` tecla por tecla (letras minúsculas, dígitos y guiones).
+    fn type_text(&mut self, text: &str) -> Result<()> {
+        for c in text.chars() {
+            let key = if c == '-' {
+                "minus".to_string()
+            } else {
+                c.to_string()
+            };
+            self.monitor(&format!("sendkey {key}"))?;
+        }
+        Ok(())
+    }
+
+    /// Cierra QEMU de forma ordenada (el disco queda escrito).
+    fn quit(&mut self) {
+        let _ = writeln!(self.monitor, "quit");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
 impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -303,18 +330,55 @@ impl Drop for Session {
     }
 }
 
-/// Arranca, verifica que dibuje el HUD y prueba el teclado de punta a punta: Espacio (por el
-/// monitor de QEMU) → IRQ1 → cola de teclado → asistente → `JARVIS_HABLA` por el puerto serie.
+const STEP: Duration = Duration::from_secs(20);
+
+/// Prueba de punta a punta, como la usaría una persona:
+/// 1. arranca y dibuja el HUD; Espacio → JARVIS habla (IRQ1 → asistente);
+/// 2. Tab → se abre Archivos y el kernel lee la raíz del disco (virtio-blk + FAT32);
+/// 3. F7, "prueba", Enter → se crea una carpeta (escritura en el disco);
+/// 4. el mouse se mueve y hace clic en una fila (IRQ12 → paquetes → selección);
+/// 5. se cierra QEMU y `fatfs` verifica en el archivo del disco que `/prueba` quedó escrita.
 fn test(image: &Path, disk: &Path) -> Result<()> {
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.monitor("sendkey spc")?;
-    s.wait_for("JARVIS_HABLA", Duration::from_secs(15))?;
-    println!("ok: JARVIS-OS arrancó, dibujó el HUD y respondió al teclado");
+    s.wait_for("JARVIS_HABLA", STEP)?;
+    s.monitor("sendkey tab")?;
+    s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
+    s.monitor("sendkey f7")?;
+    s.type_text("prueba")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("ARCHIVOS_CREADO /prueba", STEP)?;
+    // El cursor arranca en el centro (640, 400); la fila 2 de la lista está en y ≈ 350.
+    s.monitor("mouse_move -40 -50")?;
+    thread::sleep(Duration::from_millis(200));
+    s.monitor("mouse_button 1")?;
+    s.monitor("mouse_button 0")?;
+    s.wait_for("ARCHIVOS_SELECCION", STEP)?;
+    s.quit();
+    drop(s);
+    verify_dir_on_disk(disk, "prueba")?;
+    println!("ok: arranque, teclado, mouse, Archivos y escritura en disco verificados");
     Ok(())
 }
 
-/// Dos capturas: en reposo (después del saludo) y hablando.
+/// Abre el disco con `fatfs` (independiente de nuestro FAT32) y verifica que exista la carpeta.
+fn verify_dir_on_disk(disk: &Path, dir: &str) -> Result<()> {
+    let io = |e: std::io::Error| format!("disco {}: {e}", disk.display());
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(disk)
+        .map_err(io)?;
+    let fs = fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(io)?;
+    fs.root_dir()
+        .open_dir(dir)
+        .map_err(|e| format!("la carpeta /{dir} no quedó en el disco: {e}"))?;
+    println!("[disco] /{dir} existe (verificado con fatfs)");
+    Ok(())
+}
+
+/// Capturas: JARVIS en reposo y hablando, el gestor de archivos y un diálogo.
 fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
@@ -322,9 +386,25 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     thread::sleep(Duration::from_millis(600)); // que termine de apagarse el brillo
     s.screenshot(&target_dir().join("jarvis-os.png"))?;
     s.monitor("sendkey spc")?;
-    s.wait_for("JARVIS_HABLA", Duration::from_secs(15))?;
+    s.wait_for("JARVIS_HABLA", STEP)?;
     thread::sleep(Duration::from_millis(1200)); // a mitad de la frase
-    s.screenshot(&target_dir().join("jarvis-os-hablando.png"))
+    s.screenshot(&target_dir().join("jarvis-os-hablando.png"))?;
+
+    // Archivos: /Documentos con "Bienvenida.txt" seleccionado (vista previa en el inspector).
+    s.monitor("sendkey tab")?;
+    s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("ARCHIVOS_ABIERTO /Documentos", STEP)?;
+    s.monitor("sendkey down")?;
+    s.wait_for("ARCHIVOS_SELECCION Bienvenida.txt", STEP)?;
+    s.monitor("mouse_move 150 80")?; // que se vea el cursor
+    thread::sleep(Duration::from_millis(500));
+    s.screenshot(&target_dir().join("jarvis-os-archivos.png"))?;
+
+    s.monitor("sendkey f7")?;
+    s.type_text("tareas")?;
+    thread::sleep(Duration::from_millis(500));
+    s.screenshot(&target_dir().join("jarvis-os-dialogo.png"))
 }
 
 /// Convierte el PPM binario (P6) que genera QEMU a PNG.

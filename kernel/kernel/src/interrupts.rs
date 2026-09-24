@@ -15,7 +15,7 @@ use spin::{Mutex, Once};
 use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
-use crate::{gdt, keyboard, serial_println};
+use crate::{gdt, keyboard, mouse, serial_println};
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -25,6 +25,8 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 enum Irq {
     Timer = PIC_1_OFFSET,
     Keyboard = PIC_1_OFFSET + 1,
+    /// IRQ12: la línea 4 del PIC esclavo.
+    Mouse = PIC_2_OFFSET + 4,
 }
 
 // SAFETY: 32 y 40 no se superponen con las excepciones de la CPU (0–31).
@@ -48,16 +50,18 @@ pub fn init() {
         }
         idt[Irq::Timer as u8].set_handler_fn(timer);
         idt[Irq::Keyboard as u8].set_handler_fn(keyboard_irq);
+        idt[Irq::Mouse as u8].set_handler_fn(mouse_irq);
         idt
     });
     idt.load();
 
     let mut pics = PICS.lock();
     // SAFETY: se inicializa una sola vez, antes de habilitar interrupciones. Después se enmascara
-    // todo menos el timer (IRQ0) y el teclado (IRQ1): los demás dispositivos todavía no tienen driver.
+    // todo menos el timer (IRQ0), el teclado (IRQ1), la cascada al PIC esclavo (IRQ2) y el mouse
+    // (IRQ12). Los demás dispositivos no tienen driver o se usan por polling (el disco).
     unsafe {
         pics.initialize();
-        pics.write_masks(0b1111_1100, 0b1111_1111);
+        pics.write_masks(0b1111_1000, 0b1110_1111);
     }
 }
 
@@ -93,6 +97,13 @@ extern "x86-interrupt" fn keyboard_irq(_frame: InterruptStackFrame) {
     let scancode: u8 = unsafe { Port::new(0x60).read() };
     keyboard::push_scancode(scancode);
     end_of_interrupt(Irq::Keyboard);
+}
+
+extern "x86-interrupt" fn mouse_irq(_frame: InterruptStackFrame) {
+    // SAFETY: en IRQ12 el byte del puerto 0x60 viene del mouse; hay que leerlo siempre.
+    let byte: u8 = unsafe { Port::new(0x60).read() };
+    mouse::push_byte(byte);
+    end_of_interrupt(Irq::Mouse);
 }
 
 fn end_of_interrupt(irq: Irq) {

@@ -1,12 +1,15 @@
-//! Kernel de JARVIS-OS — hito K1: HUD animado en tiempo real.
+//! Kernel de JARVIS-OS — hito K2: escritorio con la app Archivos sobre un disco propio.
 //!
 //! No hay sistema operativo debajo: este código corre directamente sobre el hardware (o QEMU).
 //! El crate `bootloader` se encarga de lo previo: pasar la CPU a modo 64 bits, armar las tablas
 //! de páginas iniciales, mapear la memoria física y pedirle al firmware UEFI un framebuffer.
 //! Después salta a `kernel_main`.
 //!
-//! Orden de arranque: serie → GDT → IDT/PIC → PIT → TSC → heap → disco → pantalla → interrupciones
-//! → bucle.
+//! El kernel es "fino": maneja el hardware (interrupciones, reloj, teclado, mouse, disco,
+//! pantalla) y le pasa todo al escritorio (`jarvis-desktop`), que tiene la lógica de la interfaz.
+//!
+//! Orden de arranque: serie → GDT → IDT/PIC → PIT → TSC → heap → disco → mouse → pantalla →
+//! interrupciones → bucle.
 
 #![no_std]
 #![no_main]
@@ -18,8 +21,10 @@ mod allocator;
 mod gdt;
 mod interrupts;
 mod keyboard;
+mod mouse;
 mod pci;
 mod pit;
+mod queue;
 mod rtc;
 mod serial;
 mod time;
@@ -32,12 +37,12 @@ use core::panic::PanicInfo;
 use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::info::{MemoryRegionKind, PixelFormat as BootPixelFormat};
 use bootloader_api::{BootInfo, entry_point};
+use jarvis_desktop::{Desktop, Event, MouseDecoder};
 use jarvis_fs::FileSystem;
 use jarvis_gfx::clock::{DateTime, StrBuf};
-use jarvis_gfx::scene::Scene;
 use jarvis_gfx::{Canvas, Color, PixelFormat, text};
-use pc_keyboard::DecodedKey;
 use spin::Mutex;
+use virtio_blk::VirtioBlk;
 
 /// Hora local de Argentina respecto de UTC (el reloj del hardware guarda UTC).
 const UTC_OFFSET_HOURS: i8 = -3;
@@ -48,19 +53,10 @@ const FRAME_MS: u64 = 16;
 /// Cada cuánto se loguea el rendimiento por el puerto serie.
 const REPORT_MS: u64 = 5_000;
 
-const GREETING: &str = "Sistema en línea. ¿En qué te ayudo?";
-/// Frases de demo (Espacio o Enter). En K4 las respuestas van a venir de Claude.
-const DEMO_PHRASES: [&str; 4] = [
-    "Todos los sistemas funcionan con normalidad.",
-    "Mido el tiempo con el contador de ciclos de la CPU, calibrado al arrancar.",
-    "Todavía no tengo voz propia, pero ya sé cómo moverme cuando hable.",
-    "Cuando me conectes con Claude, voy a poder responderte de verdad.",
-];
-
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.kernel_stack_size = 256 * 1024;
-    // Mapear toda la memoria física: el heap la usa (ver allocator.rs).
+    // Mapear toda la memoria física: el heap la usa (ver allocator.rs) y el disco hace DMA.
     config.mappings.physical_memory = Some(Mapping::Dynamic);
     // Sin pedir resolución mínima: el bootloader deja el modo de video que eligió el firmware
     // (1280×800 en QEMU, la nativa del monitor en una PC real). Si se pide un mínimo, salta al
@@ -106,41 +102,34 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     );
 
     // Disco: virtio-blk + FAT32. Si no hay disco o no se puede montar, el sistema arranca igual.
-    let disk =
-        virtio_blk::VirtioBlk::init(phys_offset).and_then(|blk| match FileSystem::mount(blk) {
-            Ok(fs) => Some(fs),
-            Err(e) => {
-                serial_println!("disco: no se pudo montar: {}", e);
-                None
-            }
-        });
+    let disk = VirtioBlk::init(phys_offset).and_then(|blk| match FileSystem::mount(blk) {
+        Ok(fs) => Some(fs),
+        Err(e) => {
+            serial_println!("disco: no se pudo montar: {}", e);
+            None
+        }
+    });
     let mut disk_row = StrBuf::<32>::new();
-    match disk {
-        Some(mut fs) => {
-            let _ = write!(
-                disk_row,
-                "{} · {} MiB libres",
-                fs.label(),
-                fs.free_bytes() / (1024 * 1024)
-            );
-            serial_println!(
-                "disco: FAT32 \"{}\", {} MiB libres",
-                fs.label(),
-                fs.free_bytes() / (1024 * 1024)
-            );
-            if let Ok(entries) = fs.list("/") {
-                let mut names = StrBuf::<256>::new();
-                for e in &entries {
-                    let _ = write!(names, "{}{} ", e.name, if e.is_dir { "/" } else { "" });
-                }
-                serial_println!("ARCHIVOS_RAIZ: {}", names.as_str());
-            }
-            let _ = fs; // la app Archivos lo va a usar
+    match &disk {
+        Some(fs) => {
+            let free = fs.free_bytes() / (1024 * 1024);
+            let _ = write!(disk_row, "{} · {} MiB libres", fs.label(), free);
+            serial_println!("disco: FAT32 \"{}\", {} MiB libres", fs.label(), free);
         }
         None => {
             let _ = write!(disk_row, "sin disco");
         }
     }
+
+    let mouse_ok = mouse::init();
+    serial_println!(
+        "mouse: {}",
+        if mouse_ok {
+            "PS/2 listo"
+        } else {
+            "no responde"
+        }
+    );
 
     let Some(fb) = boot_info.framebuffer.as_mut() else {
         serial_println!("sin framebuffer: el firmware no dio pantalla gráfica");
@@ -185,30 +174,29 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ("NÚCLEO", concat!("jarvis ", env!("CARGO_PKG_VERSION"))),
         ("MEMORIA", mem.as_str()),
         ("PANTALLA", res.as_str()),
-        ("RELOJ", "RTC CMOS · UTC-3"),
         ("DISCO", disk_row.as_str()),
         ("CEREBRO", "sin conectar"),
-        ("DEMO", "ESPACIO = HABLAR"),
+        ("TECLAS", "TAB ARCHIVOS · ESPACIO"),
     ];
-    let mut scene = Scene::new(info.width, info.height, PARTICLES);
-    scene.draw_background(&mut bg, &rows);
+    let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
+    desktop.draw_background(&mut bg, &rows);
     *SCREEN.lock() = Some(screen);
 
     x86_64::instructions::interrupts::enable();
-    run(&mut scene, &mut frame, &bg)
+    run(&mut desktop, &mut frame, &bg)
 }
 
-/// Bucle principal: dormir hasta el próximo tick, atender el teclado y dibujar un frame.
-fn run(scene: &mut Scene, frame: &mut Canvas<'static>, bg: &Canvas<'static>) -> ! {
+/// Bucle principal: dormir hasta el próximo tick, pasarle la entrada al escritorio y dibujar.
+fn run(desktop: &mut Desktop<VirtioBlk>, frame: &mut Canvas<'static>, bg: &Canvas<'static>) -> ! {
     let mut keyboard = keyboard::Keyboard::new();
+    let mut mouse_decoder = MouseDecoder::new();
     let mut clock = local_time();
     let mut last_rtc = 0;
     let mut next_frame = 0;
-    let mut phrase = 0;
     let mut first = true;
     let (mut frames, mut render_ms, mut last_report) = (0u64, 0u64, 0u64);
 
-    scene.assistant.say(GREETING, time::millis());
+    desktop.start(time::millis());
     loop {
         x86_64::instructions::hlt(); // duerme hasta la próxima interrupción (≤ 4 ms)
         let now = time::millis();
@@ -216,32 +204,30 @@ fn run(scene: &mut Scene, frame: &mut Canvas<'static>, bg: &Canvas<'static>) -> 
             continue;
         }
         next_frame = now + FRAME_MS;
-
-        while let Some(key) = keyboard.next_key() {
-            if matches!(key, DecodedKey::Unicode(' ' | '\n')) {
-                let text = DEMO_PHRASES[phrase % DEMO_PHRASES.len()];
-                phrase += 1;
-                scene.assistant.say(text, now);
-                serial_println!("JARVIS_HABLA: {}", text);
-            }
-        }
-        if scene.assistant.take_finished(now) {
-            serial_println!("JARVIS_REPOSO");
-        }
         if now - last_rtc >= 1000 {
             clock = local_time();
             last_rtc = now;
         }
 
-        let start = time::millis();
-        let dirty = scene.render(frame, bg, now, clock);
-        if let Some(screen) = SCREEN.lock().as_mut() {
-            for r in dirty.iter() {
-                screen.copy_from(frame, r);
+        while let Some(key) = keyboard.next_key() {
+            desktop.handle(Event::Key(key), now, clock);
+        }
+        while let Some(byte) = mouse::pop_byte() {
+            if let Some(packet) = mouse_decoder.push(byte) {
+                desktop.handle(Event::Mouse(packet), now, clock);
             }
+        }
+
+        let start = time::millis();
+        let dirty = desktop.render(frame, bg, now, clock);
+        if let Some(screen) = SCREEN.lock().as_mut() {
+            desktop.present(screen, frame, &dirty);
         }
         render_ms += time::millis() - start;
         frames += 1;
+        for line in desktop.take_logs() {
+            serial_println!("{}", line);
+        }
 
         if first {
             // La CI busca esta línea para saber que el kernel arrancó y dibujó sin errores.
