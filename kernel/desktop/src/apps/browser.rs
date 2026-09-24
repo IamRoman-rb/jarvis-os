@@ -22,7 +22,6 @@ use super::{Click, Ctx};
 use crate::bmp;
 use crate::config::Config;
 use crate::i18n::{tr, trf};
-use crate::i18n::{tr, trf};
 use crate::input::{Key, Mods};
 use crate::system::{FetchKind, HttpResponse};
 use crate::text_input::TextInput;
@@ -473,7 +472,7 @@ impl Browser {
         self.dirty = true;
         if self.doc().needs_js {
             self.status = tr(
-                tr("Esta página se arma con JavaScript, que JARVIS-OS todavía no ejecuta: puede verse incompleta."),
+                "Esta página se arma con JavaScript, que JARVIS-OS todavía no ejecuta: puede verse incompleta.",
             )
             .into();
         }
