@@ -2,6 +2,12 @@
 
 *Informe de investigación preparado para el proyecto JARVIS-OS. Fecha: septiembre 2026.*
 
+> **Nota (23/09/2026):** el proyecto cambió de rumbo y ahora usa un **kernel propio en Rust**
+> ([ADR 0003](adr/0003-kernel-propio-rust.md), [docs/kernel.md](kernel.md)). Las secciones 2 a 4
+> (Debian, filesystem, escritorio) y la fase 4 (ISO con live-build) quedan como registro. Siguen
+> vigentes la capa JARVIS (§6 y §12, ahora como "cerebro" en el host), la sincronización (§5) y
+> Android (§7).
+
 ## 1. Resumen ejecutivo
 
 La conclusión general de esta investigación es que **no conviene construir un sistema operativo desde cero**: el camino realista, usado por prácticamente todas las distros "custom" exitosas (desde Ubuntu hasta las decenas de respins que corren sobre Debian), es partir de una base Debian o Ubuntu ya probada y agregar tres capas encima:

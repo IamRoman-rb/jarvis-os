@@ -1,0 +1,21 @@
+[package]
+name = "jarvis-kernel"
+description = "Kernel de JARVIS-OS."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "jarvis-kernel"
+test = false
+bench = false
+
+[dependencies]
+bootloader_api = "0.11.17"
+jarvis-gfx = { path = "../gfx" }
+spin = "0.12.3"
+x86_64 = { version = "0.15.5", default-features = false, features = ["instructions"] }
+
+[lints]
+workspace = true

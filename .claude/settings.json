@@ -18,7 +18,13 @@
       "Edit(/docs/**)",
       "Edit(/packaging/**)",
       "Edit(/sync/**)",
-      "Edit(/android/termux/**)"
+      "Edit(/android/termux/**)",
+      "Bash(cargo test *)",
+      "Bash(cargo build *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo xtask *)",
+      "Edit(/kernel/**)"
     ],
     "ask": [
       "Bash(git commit *)",
@@ -30,7 +36,8 @@
       "Edit(/image/**)",
       "Edit(/.claude/**)",
       "Edit(/CLAUDE.md)",
-      "Edit(/pyproject.toml)"
+      "Edit(/pyproject.toml)",
+      "Edit(/kernel/rust-toolchain.toml)"
     ],
     "deny": [
       "Bash(sudo *)",
@@ -48,7 +55,10 @@
       {
         "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/no-secrets.sh" }
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/no-secrets.sh"
+          }
         ]
       }
     ]

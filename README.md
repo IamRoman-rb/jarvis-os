@@ -1,73 +1,56 @@
 # JARVIS-OS
 
-Sistema operativo basado en **Debian 13 + XFCE** con un asistente IA integrado (**JARVIS**,
-impulsado por Claude) que ejecuta acciones reales sobre el sistema bajo un modelo de permisos
-explícito, sincroniza carpetas entre máquinas en tiempo real (**Syncthing + Tailscale**) y se
-puede usar desde un **Android 11** (Termux).
+Un sistema operativo nuevo, con **kernel propio escrito en Rust**, cuya interfaz es un HUD con el
+asistente **JARVIS** en el centro. JARVIS piensa con Claude: el "cerebro" corre en Python en el host
+y el kernel le habla por un puente (puerto serie primero, red después).
 
-![Mockup del escritorio](design/stitch/debian_jarvis_workstation_desktop/screen.png)
+![JARVIS-OS arrancando en QEMU — hito K0](docs/img/k0.png)
 
-## Arquitectura en una línea
-
-`jarvisd` (demonio systemd de usuario, D-Bus `org.jarvis.Assistant`) → voz local
-(openWakeWord → faster-whisper) → **Claude Agent SDK** con tools propias vía MCP in-process →
-política de permisos de 3 niveles + auditoría → TTS local (Piper).
-
-Detalle completo, alternativas evaluadas y fuentes: [docs/investigacion.md](docs/investigacion.md).
+*Hito K0: el kernel arranca por UEFI y dibuja el HUD directamente en el framebuffer (la esfera de
+22.000 partículas, la hora real leída del reloj de la placa y el panel de estado), sin ningún
+sistema operativo debajo.*
 
 ## Estado
 
-| Fase | Descripción | Estado |
+| Parte | Qué hay | Dónde |
 |---|---|---|
-| 0 | Esqueleto del repo, CI | ✅ |
-| 1a | Núcleo por texto (agente, tools, permisos, auditoría) | ⏳ |
-| 1b | Demonio systemd + D-Bus + confirmación gráfica | ⏳ |
-| 1c | Voz (wake word, STT, TTS) | ⏳ |
-| 2 | Sincronización Syncthing + Tailscale | ⏳ |
-| 3a | Android vía Termux | ⏳ |
-| 4 | Imagen ISO (live-build + Calamares) | ⏳ |
-| 5 | Endurecimiento de permisos y errores | ⏳ |
-| 6 | Paquete .deb y guía de instalación | ⏳ |
+| Kernel | K0 ✅: arranque UEFI, puerto serie, RTC, HUD. Siguiente: K1 (interrupciones, timer, teclado) | [docs/kernel.md](docs/kernel.md) |
+| Cerebro | Núcleo por texto: agente con Claude, 4 tools, permisos de 3 niveles, auditoría | `src/jarvis/` ([PR #1](https://github.com/IamRoman-rb/jarvis-os/pull/1)) |
+| Puente kernel ↔ cerebro | Hito K4 | — |
 
-Los prompts para desarrollar cada fase con Claude Code están en
-[docs/investigacion.md §13.4](docs/investigacion.md#134-prompts-por-fase-para-pegar-en-claude-code).
+## Probarlo
 
-## Desarrollo
-
-Requisitos: [uv](https://docs.astral.sh/uv/), `git` y `jq` (lo usa el hook de Claude Code).
-El núcleo corre en cualquier SO para tests, pero D-Bus, audio y control de ventanas necesitan
-un Linux con escritorio: una VM Debian 13 + XFCE. Cómo armarla en ~30 minutos:
-[docs/entorno-vm.md](docs/entorno-vm.md).
+Requisitos: [rustup](https://rustup.rs), [QEMU](https://www.qemu.org) y, en Windows, el compilador
+de C++ de Visual Studio. El toolchain nightly correcto se instala solo.
 
 ```bash
-uv sync                     # instala dependencias (sin las de voz)
-uv sync --extra voice       # + dependencias de voz (fase 1c)
-uv run pytest               # tests (no llaman a la API real)
-uv run ruff check . && uv run ruff format --check .
-uv run mypy
-uv run jarvis version
+cd kernel
+cargo xtask run      # compila, arma la imagen UEFI y abre JARVIS-OS en QEMU
 ```
 
-La API key de Anthropic (`ANTHROPIC_API_KEY`) se toma **solo** del entorno o de una credencial
-de systemd. Nunca se commitea.
+Más comandos (tests, capturas, disco para VirtualBox): [docs/kernel.md](docs/kernel.md).
+
+El cerebro (Python, con [uv](https://docs.astral.sh/uv/)):
+
+```bash
+uv sync && uv run pytest
+```
 
 ## Estructura
 
 ```
-CLAUDE.md          instrucciones para Claude Code
-.claude/           permisos y hooks de Claude Code para este repo
-docs/              investigación, permisos (fuente de verdad), ADRs
-design/            mockups y design system "Obsidian Kinetic HUD"
-src/jarvis/        core, agent, tools, policy, voice, service, remote, cli
-tests/             unit, policy, integration
-packaging/         systemd, D-Bus, .deb
-sync/              Syncthing + Tailscale
-image/             live-build (fase 4)
-android/           Termux (fase 3a), app Kotlin (fase 3b)
+kernel/            workspace Rust
+  gfx/             dibujo del HUD (no_std, testeable en el host)
+  kernel/          el kernel: arranque, drivers, integración
+  xtask/           build de la imagen, QEMU, capturas
+src/jarvis/        cerebro: agente, tools, política de permisos, auditoría
+design/            design system "Obsidian Kinetic HUD" y mockups
+docs/              kernel.md, ADRs, permisos, investigación inicial
+CLAUDE.md          instrucciones para desarrollar con Claude Code
 ```
 
-## Seguridad
+## Decisiones
 
-Las reglas no negociables (sin `bypassPermissions`, default deny, borrado solo a la papelera,
-sin `shell=True`, nivel 3 solo con click y nunca desde el celular, etc.) están en
-[CLAUDE.md](CLAUDE.md#reglas-de-seguridad-no-negociables).
+- [ADR 0003](docs/adr/0003-kernel-propio-rust.md): kernel propio en Rust (reemplaza la base Debian + XFCE).
+- ADR 0002: el cerebro usa el Claude Agent SDK, aislado y con una sola compuerta de permisos (llega con el [PR #1](https://github.com/IamRoman-rb/jarvis-os/pull/1)).
+- [Investigación inicial](docs/investigacion.md): la capa JARVIS, la sincronización y Android siguen vigentes.

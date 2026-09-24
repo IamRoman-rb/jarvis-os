@@ -1,3 +1,6 @@
+# Rust (kernel/target: builds, imagen de disco, capturas)
+target/
+
 # Python / uv
 __pycache__/
 *.py[cod]
