@@ -1731,7 +1731,7 @@ pub fn parse_len(v: &str, u: Units) -> Option<Len> {
         Calc::Px(p) => Some(Len::Px(p)),
         Calc::Pct(p) => Some(Len::Pct(p)),
         // Un número sin unidad solo vale si es 0.
-        Calc::Num(n) if n == 0.0 => Some(Len::Px(0.0)),
+        Calc::Num(0.0) => Some(Len::Px(0.0)),
         _ => None,
     }
 }

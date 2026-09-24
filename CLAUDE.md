@@ -3,8 +3,9 @@
 Sistema operativo nuevo, con **kernel propio en Rust** (x86_64, UEFI), cuya interfaz es un HUD
 con el asistente JARVIS en el centro y un escritorio con ventanas al estilo Windows. El "cerebro"
 de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va a hablar por la
-red (K5). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
-terminal, paquetes y programas de otros sistemas, la 0005). Roadmap y arquitectura del kernel:
+red (K6). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
+terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
+idiomas, la 0006). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -13,17 +14,20 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
 
 ## Estructura
 - kernel/        workspace Rust (todo no_std y testeable en el host salvo kernel y xtask):
-    - gfx/         dibujo: canvas, texto, fuente vectorial, íconos, esfera, HUD
+    - gfx/         dibujo: canvas, texto, fuente vectorial, fuente de las páginas (webfont.rs,
+                   DejaVu en gfx/fonts/), íconos, esfera, HUD
     - fs/          FAT32 propio sobre un trait BlockDevice (+ caché de sectores)
     - desktop/     escritorio: gestor de ventanas (wm.rs), atajos y composición (desktop.rs),
                    barra/panel/menús (shell.rs), paneles Win+X/A/N (panels.rs), configuración
-                   (config.rs), teclado latino (keymap.rs), apps (apps/), shell y apt (term/),
-                   web sin red (web/: URL, HTTP, DOM, CSS, HTML)
+                   (config.rs), firewall (firewall.rs), idiomas (i18n.rs), teclado latino
+                   (keymap.rs), apps (apps/), shell, apt, snap y winget (term/), web sin red
+                   (web/: URL, HTTP, DOM, CSS y estilos, maquetación en cajas, JSON, adaptadores)
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
     - xtask/       imagen booteable, disco FAT32, QEMU, puente (puente.rs: HTTPS, paquetes,
-                   imágenes → BMP), tests, capturas
-    - paquetes/    repositorio de `apt` (lo sirve el puente en http://paquetes.jarvis/)
+                   imágenes y SVG → BMP), tests, capturas
+    - paquetes/    repositorio de `apt`, tienda de snaps (snaps/) y lista de winget (lo sirve el
+                   puente en http://paquetes.jarvis/)
     - rootfs/      contenido inicial del disco virtual
 - src/jarvis/    cerebro en Python: agente, tools, política de permisos, auditoría
 - design/stitch/ design system "Obsidian Kinetic HUD" y mockups (referencia visual del HUD)
@@ -37,7 +41,10 @@ Kernel (desde kernel/):
 - Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
 - Captura:          cargo xtask screenshot     (escritorio, apps y menús en target/: miralas si tocás la UI)
 - Vista previa web: JARVIS_URL=https://… cargo test -p jarvis-desktop --test vista_previa -- --ignored
-                    (arma una página real sin QEMU y la guarda en target/vista-previa.bmp)
+                    (arma una página real sin QEMU, con sus imágenes, y la guarda en
+                    target/vista-previa.bmp; JARVIS_PUNTO=x,y dice qué elemento pintó ese punto,
+                    JARVIS_ID=id su estilo, JARVIS_IDIOMA=en la interfaz en inglés,
+                    JARVIS_URL=config:N abre la Configuración)
 - Lint:             cargo fmt --all && cargo clippy --workspace --exclude jarvis-kernel --all-targets -- -D warnings
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
 Cerebro (desde la raíz):
@@ -71,9 +78,10 @@ Cerebro (desde la raíz):
 14. DMA: todo buffer que vea un dispositivo va en el heap (física = virtual − offset). Nunca en el stack.
 15. Red: el puente del anfitrión (xtask/src/puente.rs) escucha solo en 127.0.0.1 y solo acepta
     GET. Además del HTTPS, sirve el repositorio de paquetes (solo lectura, sin salir de
-    kernel/paquetes/) y convierte imágenes a BMP (ADR 0005). Cambiar eso (otros métodos, otra
-    interfaz, otras carpetas) requiere un ADR. El HTTPS y la conversión se van con TLS y
-    decodificadores en el kernel (roadmap K8).
+    kernel/paquetes/), convierte imágenes y SVG a BMP (ADR 0005) y pasa solo dos cabeceras más
+    (las de la API de snaps, ADR 0006). Cambiar eso (otros métodos, otra interfaz, otras
+    carpetas, otras cabeceras) requiere un ADR. El HTTPS y la conversión se van con TLS y
+    decodificadores en el kernel (roadmap K9).
 16. Escritorio: las apps no dibujan en la pantalla ni conocen su posición: dibujan en su zona
     (`content`) y piden cosas por el `Outbox`. Toda app nueva va en `desktop/src/apps/`, con tests
     en `desktop/tests/`, y el test "render incremental == redibujar todo" tiene que seguir pasando.
@@ -82,8 +90,20 @@ Cerebro (desde la raíz):
     test en desktop/tests/terminal.rs. Un paquete nuevo: carpeta en kernel/paquetes/ con su
     manifiesto y un renglón en indice.txt; que el test de apt lo instale.
 18. Programas de Windows/Linux: no se simula que corren. Se descargan e inspeccionan; ejecutarlos
-    espera al espacio de usuario (K9). Los textos al usuario usan solo caracteres de Latin-1 (la
-    fuente no tiene otros: salen como `?`).
+    espera al espacio de usuario (K10). Los textos al usuario usan solo caracteres de Latin-1 (la
+    fuente no tiene otros: salen como `?`); las páginas web usan su propia fuente (Unicode).
+19. Idiomas: todo texto nuevo de la interfaz pasa por `i18n::tr("…")` (o `trf` si tiene datos),
+    escrito en castellano, con su traducción al inglés y al portugués en las tablas de
+    desktop/src/i18n.rs (ordenadas: el test lo verifica). La terminal y los logs del puerto serie
+    quedan en castellano (los leen los tests).
+20. Firewall: ninguna app habla con la red salvo por el `Outbox` (`fetch`/`fetch_kind`, o
+    `fetch_as(…, "apt")` para herramientas que corren adentro de otra app). Así cada pedido pasa
+    por las reglas con el nombre de quién lo hizo. Una app nueva que use la red va en
+    `firewall::APPS` y en `app_tag` (desktop.rs).
+21. Navegador: un cambio de maquetación o de CSS lleva un test en web/layout.rs o web/style.rs, y
+    se mira con la vista previa sobre páginas reales (Wikipedia, Google) antes de darlo por bueno.
+    Los adaptadores de sitios (web/sites.rs) no inventan contenido: solo reordenan lo que trae la
+    página.
 
 ## Reglas de seguridad del cerebro (NO negociables)
 1. Jamás permission_mode="bypassPermissions" ni "acceptEdits".

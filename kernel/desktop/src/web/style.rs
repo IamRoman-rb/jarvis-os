@@ -750,7 +750,7 @@ impl Ctx<'_> {
             st.vars = Rc::new(vars);
         }
         // `font-size` primero: los `em` de todo lo demás dependen de él.
-        let decls: Vec<&css::Decl> = ua.iter().copied().collect();
+        let decls: Vec<&css::Decl> = ua.to_vec();
         self.apply_all(&mut st, parent, &decls, n, true);
         self.presentational(&mut st, parent, n, name);
         let decls: Vec<&css::Decl> = author.iter().copied().chain(inline.iter()).collect();
@@ -1511,7 +1511,7 @@ impl Ctx<'_> {
             "aspect-ratio" => {
                 let r: Vec<f32> = lower
                     .split('/')
-                    .filter_map(|p| p.trim().split_whitespace().next()?.parse().ok())
+                    .filter_map(|p| p.split_whitespace().next()?.parse().ok())
                     .collect();
                 st.aspect_ratio = match r.as_slice() {
                     [a, b] if *b > 0.0 => Some(a / b),

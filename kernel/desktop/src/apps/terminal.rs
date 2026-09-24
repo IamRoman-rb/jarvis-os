@@ -93,7 +93,7 @@ impl Terminal {
             blink_on: true,
             last_blink: 0,
         };
-        t.write("\x1b[1;96mJARVIS-OS 0.1\x1b[0m (hito K4) · shell jsh\n\
+        t.write("\x1b[1;96mJARVIS-OS 0.1\x1b[0m (hito K5) · shell jsh\n\
              Escribí \x1b[1mhelp\x1b[0m para ver los comandos. Para instalar tu primer programa: \x1b[1mapt install neofetch\x1b[0m\n\n");
         t
     }

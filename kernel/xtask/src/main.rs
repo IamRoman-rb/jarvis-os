@@ -336,6 +336,21 @@ impl Session {
                 '|' => "shift-backslash".to_string(),
                 '"' => "shift-apostrophe".to_string(),
                 '=' => "equal".to_string(),
+                '?' => "shift-slash".to_string(),
+                '&' => "shift-7".to_string(),
+                '+' => "shift-equal".to_string(),
+                '*' => "shift-8".to_string(),
+                '(' => "shift-9".to_string(),
+                ')' => "shift-0".to_string(),
+                '!' => "shift-1".to_string(),
+                '@' => "shift-2".to_string(),
+                '#' => "shift-3".to_string(),
+                '$' => "shift-4".to_string(),
+                '%' => "shift-5".to_string(),
+                ',' => "comma".to_string(),
+                ';' => "semicolon".to_string(),
+                '\'' => "apostrophe".to_string(),
+                '<' => "shift-comma".to_string(),
                 c if c.is_ascii_uppercase() => format!("shift-{}", c.to_ascii_lowercase()),
                 c => c.to_string(),
             };
@@ -439,6 +454,19 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey ret")?;
     s.wait_for("TERMINAL hola", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // snap: un programa de la tienda de JARVIS-OS (también la sirve el puente).
+    s.type_text("snap install saludo")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("SNAP_INSTALADO saludo", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // Firewall: una regla de ufw frena a wget antes de que salga un solo paquete.
+    s.type_text("sudo ufw deny out to example.com")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("FIREWALL ufw deny out to example.com", STEP)?;
+    s.type_text("wget http://example.com/")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("FIREWALL_BLOQUEO terminal example.com", STEP)?;
+    s.wait_for("TERMINAL_FIN", STEP)?;
     // Configuración (Win+I).
     s.monitor("sendkey meta_l-i")?;
     s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
@@ -451,8 +479,10 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     verify_capture_on_disk(disk)?;
     verify_file_on_disk(disk, "saludo.txt", b"hola terminal\n")?;
     verify_file_exists(disk, "Programas/bin/hola")?;
+    verify_file_exists(disk, "snap/bin/saludo")?;
+    verify_file_exists(disk, "Sistema/firewall.log")?;
     println!(
-        "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, configuración y disco verificados"
+        "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, snap, firewall, configuración y disco verificados"
     );
     Ok(())
 }
@@ -597,7 +627,10 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     shot(&mut s, "jarvis-os-navegador.png")?;
 
     // Internet de verdad (si hay): http:// directo (DNS + TCP) y https:// por el puente.
-    // Si no hay conexión, se sigue igual: estas dos capturas son opcionales.
+    // Si no hay conexión, se sigue igual: estas capturas son opcionales. El navegador,
+    // maximizado (como se usa para leer).
+    s.monitor("sendkey meta_l-up")?;
+    thread::sleep(Duration::from_millis(300));
     for (url, name) in [
         (
             "http://info.cern.ch/hypertext/WWW/TheProject.html",
@@ -613,11 +646,24 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
         s.monitor("sendkey ret")?;
         match s.wait_for("RED_RESPUESTA", Duration::from_secs(30)) {
             Ok(()) => {
-                thread::sleep(Duration::from_millis(800));
+                // Hojas de estilo, imágenes y la maquetación.
+                thread::sleep(Duration::from_secs(10));
                 shot(&mut s, name)?;
             }
             Err(e) => println!("(sin internet para {url}: {e})"),
         }
+    }
+
+    // YouTube: se arma con JavaScript; el navegador usa los datos que trae la página.
+    s.monitor("sendkey ctrl-l")?;
+    s.type_text("https://www.youtube.com/results?search_query=rust+kernel")?;
+    s.monitor("sendkey ret")?;
+    match s.wait_for("RED_RESPUESTA", Duration::from_secs(40)) {
+        Ok(()) => {
+            thread::sleep(Duration::from_secs(12));
+            shot(&mut s, "jarvis-os-youtube.png")?;
+        }
+        Err(e) => println!("(sin internet para YouTube: {e})"),
     }
 
     // Google con sus estilos (internet de verdad, opcional).
@@ -649,6 +695,18 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("TERMINAL_FIN", STEP)?;
     thread::sleep(Duration::from_millis(600));
     shot(&mut s, "jarvis-os-terminal.png")?;
+    // snap y el firewall desde la terminal.
+    s.type_text("clear")?;
+    s.monitor("sendkey ret")?;
+    s.type_text("snap install saludo --beta && saludo && snap list")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("SNAP_INSTALADO saludo", STEP)?;
+    s.wait_for("TERMINAL_FIN", STEP)?;
+    s.type_text("sudo ufw deny out to tiktok.com && ufw status numbered")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN", STEP)?;
+    thread::sleep(Duration::from_millis(600));
+    shot(&mut s, "jarvis-os-snap-ufw.png")?;
 
     // Configuración: Personalización, con un fondo de pantalla instalado.
     s.monitor("sendkey meta_l-i")?;
@@ -661,6 +719,11 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("CONFIG_GUARDADA", STEP)?;
     thread::sleep(Duration::from_millis(800));
     shot(&mut s, "jarvis-os-configuracion.png")?;
+    // La sección Firewall (la última: RePág desde Personalización da la vuelta dos veces).
+    s.monitor("sendkey pgup")?;
+    s.monitor("sendkey pgup")?;
+    thread::sleep(Duration::from_millis(600));
+    shot(&mut s, "jarvis-os-firewall.png")?;
 
     // Paneles: Win+X, Win+A, Win+N (sobre el escritorio con el fondo nuevo).
     s.monitor("sendkey meta_l-d")?;

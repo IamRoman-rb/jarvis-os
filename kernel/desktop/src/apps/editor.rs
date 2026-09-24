@@ -123,7 +123,7 @@ impl Editor {
             .unwrap_or(tr("Sin título"));
         trf(
             "{}{} · Editor",
-            &[if self.modified { "* " } else { "" }, &name],
+            &[if self.modified { "* " } else { "" }, name],
         )
     }
 

@@ -1,4 +1,4 @@
-//! Kernel de JARVIS-OS — hito K4: terminal, paquetes, configuración y navegador con CSS.
+//! Kernel de JARVIS-OS — hito K5: motor web, firewall, snap/winget e idiomas.
 //!
 //! No hay sistema operativo debajo: este código corre directamente sobre el hardware (o QEMU).
 //! El crate `bootloader` se encarga de lo previo: pasar la CPU a modo 64 bits, armar las tablas

@@ -2,15 +2,16 @@
 
 Kernel propio en Rust para x86_64 con arranque UEFI. Decisión y motivos: [ADR 0003](adr/0003-kernel-propio-rust.md).
 Red y navegador: [ADR 0004](adr/0004-red-y-navegador-propio.md). Terminal, paquetes y programas de
-otros sistemas: [ADR 0005](adr/0005-terminal-paquetes-y-programas.md).
+otros sistemas: [ADR 0005](adr/0005-terminal-paquetes-y-programas.md). Motor web, firewall, snap,
+winget e idiomas: [ADR 0006](adr/0006-motor-web-firewall-tiendas-e-idiomas.md).
 
-| Escritorio | Terminal y `apt` |
+| Wikipedia en el navegador | YouTube (sin JavaScript) |
 |---|---|
+| ![Wikipedia](img/k5-wikipedia.png) | ![YouTube](img/k5-youtube.png) |
+| **snap y ufw en la terminal** | **Firewall en la Configuración** |
+| ![snap y ufw](img/k5-snap-ufw.png) | ![Firewall](img/k5-firewall.png) |
+| **Escritorio** | **Terminal y `apt`** |
 | ![JARVIS](img/k4-escritorio.png) | ![Terminal](img/k4-terminal.png) |
-| **Navegador con CSS (Google)** | **Configuración** |
-| ![Google](img/k4-google.png) | ![Configuración](img/k4-configuracion.png) |
-| **Win+X** | **Win+N: notificaciones y calendario** |
-| ![Win+X](img/k4-win-x.png) | ![Win+N](img/k4-win-n.png) |
 
 - **JARVIS**: la esfera gira en tiempo real y late cuando JARVIS habla. El reloj usa una fuente
   vectorial propia (nítida a cualquier tamaño), en 24 o 12 horas.
@@ -22,12 +23,22 @@ otros sistemas: [ADR 0005](adr/0005-terminal-paquetes-y-programas.md).
   comodines, historial, Tab y colores; ~80 comandos de Linux sobre el FAT32 propio y un `/proc`.
 - **`apt`**: instala, actualiza y desinstala programas de JARVIS-OS desde el repositorio del
   proyecto (`kernel/paquetes/`). `neofetch`, `cowsay`, `fortune`, fondos de pantalla…
-- **Programas de Windows y Linux**: se descargan (navegador o `wget`) y se inspeccionan (`file`,
-  `strings`, `xxd`); todavía no se pueden ejecutar (hace falta espacio de usuario: K9).
-- **Configuración** (Win+I): fondo de pantalla, zona horaria, reloj, red, navegador, sonido,
-  mouse, teclado, programas, almacenamiento y PIN de bloqueo. Se guarda en `/Sistema/config.ini`.
-- **Navegador con CSS**: colores, fondos, tamaños, alineación, `display`, variables, formularios
-  (GET) e imágenes (el puente las convierte a BMP). Modo lectura con F9. Descargas a /Descargas.
+- **Programas de Windows y Linux**: se descargan (navegador, `wget`, `winget`, `snap download`) y
+  se inspeccionan (`file`, `strings`, `xxd`); todavía no se pueden ejecutar (hace falta espacio de
+  usuario: K10).
+- **Configuración** (Win+I): fondo de pantalla, idioma, zona horaria, reloj, red, navegador,
+  sonido, mouse, teclado, programas, almacenamiento, PIN de bloqueo y firewall. Se guarda en
+  `/Sistema/config.ini`.
+- **Navegador con motor de maquetación propio**: cajas con márgenes y bordes, flotantes, flex,
+  grid, tablas, posiciones, `@media`, `calc()`, variables; fuente proporcional (DejaVu) en
+  cualquier tamaño; imágenes, SVG, fondos e íconos con transparencia (el puente los convierte a
+  BMP). Formularios (GET), modo lectura (F9) y descargas a /Descargas. Sin JavaScript: YouTube se
+  arma con los datos que trae la página; otras páginas así avisan que pueden verse incompletas.
+- **Firewall**: reglas por sitio, puerto y app (`ufw` en la terminal o Configuración →
+  Firewall). Lo bloqueado queda en `/Sistema/firewall.log`.
+- **`snap`** (tienda propia con canales y revisiones; búsqueda y descarga en Snapcraft) y
+  **`winget`** (instaladores de Windows del repositorio oficial de Microsoft, a /Descargas).
+- **Idiomas**: castellano, inglés o portugués (Configuración → Hora e idioma).
 - **Teclado latinoamericano** (ñ, tildes con tecla muerta, AltGr+Q = @) o de EE. UU.
 - **Panel de estado** (abajo a la izquierda) con gráficos en vivo de CPU, memoria, disco y red.
 - **Apps**: Archivos, Terminal, Configuración, Monitor, Consola JARVIS, Editor, Música, Visor y
@@ -66,7 +77,8 @@ cargo test               # tests en el host: FAT32, red, escritorio, terminal y 
   `QEMU_AUDIO=pa` (o `alsa`) antes de `cargo xtask run`.
 - **Red**: QEMU da una red privada con DHCP (JARVIS-OS queda en 10.0.2.15) y sale a internet por
   la computadora anfitriona. El puente (HTTPS, imágenes y paquetes) escucha solo en
-  127.0.0.1:8118 mientras dura `run`: sin `cargo xtask run`, no hay `https://` ni `apt`.
+  127.0.0.1:8118 mientras dura `run`: sin `cargo xtask run`, no hay `https://`, `apt`, `snap` ni
+  `winget`.
 - Los logs del kernel (puerto serie) salen en la terminal donde corriste `cargo xtask run`.
 - En Windows, `xtask` usa la aceleración por hardware (WHPX) si está disponible.
 - Para compilar mientras tenés QEMU abierto (la imagen queda bloqueada), usá otra carpeta de
@@ -127,6 +139,7 @@ abre Archivos.
 | Alt+← / Retroceso · Alt+→ | atrás · adelante |
 | F5 / Ctrl+R · Ctrl+H | recargar · inicio |
 | F9 | modo lectura (solo el contenido) |
+| Clic en un enlace `#sección` | baja hasta esa parte de la página |
 | Flechas, RePág, AvPág, Espacio, rueda | moverse por la página |
 
 | Terminal | |
@@ -156,8 +169,9 @@ roman@jarvis:~$ apt update && apt install neofetch && neofetch
 
 - **Comandos**: `ls cd pwd cat head tail wc grep sed sort uniq cut tr rev tee seq expr echo
   printf find tree du df free stat file xxd strings touch mkdir rmdir rm cp mv ps kill top uname
-  whoami hostname id date cal uptime ip ping curl wget apt dpkg history alias export env which
-  test sleep sh open nano jarvis screenshot reboot shutdown exit` y más (`help`, `man <comando>`).
+  whoami hostname id date cal uptime ip ping curl wget apt dpkg snap winget ufw history alias
+  export env which test sleep sh open nano jarvis screenshot reboot shutdown exit` y más (`help`,
+  `man <comando>`).
 - **Shell**: `|`, `>`, `>>`, `<`, `2>`, `2>&1`, `&&`, `||`, `;`, `'…'`, `"…$VAR…"`, `$(…)`, `$?`,
   `*.txt`, `~`, alias (`ll`, `la`, `dir`, `cls`, `ipconfig`…), `VAR=valor`.
 - **`/proc`**: `cpuinfo`, `meminfo`, `uptime`, `version`, `loadavg`.
@@ -180,6 +194,49 @@ El repositorio es la carpeta `kernel/paquetes/` (lo sirve el puente en `http://p
 archivos y su manifiesto (`origen -> /destino`, `[bmp]` si es una imagen a convertir), y un
 renglón en el índice. Paquetes de ejemplo: `neofetch`, `cowsay`, `fortune`, `sl`, `calc`, `hola`,
 `fondos`, `manual` y `esenciales` (instala varios de una vez).
+
+### `snap`
+
+```
+roman@jarvis:~$ snap find                     # la tienda de JARVIS-OS
+roman@jarvis:~$ snap find vlc                 # también busca en la tienda real (Snapcraft)
+roman@jarvis:~$ snap install saludo && saludo Ana
+roman@jarvis:~$ snap refresh saludo --beta    # al canal beta (revisión 5)
+roman@jarvis:~$ snap revert saludo            # vuelve a la revisión 3
+roman@jarvis:~$ snap list · snap info saludo · snap remove saludo
+roman@jarvis:~$ snap download hello-world     # un .snap de Linux a /Descargas (no se ejecuta)
+```
+
+Cada revisión queda en `/snap/<nombre>/<revisión>/`; `/snap/bin` está en el `PATH`. La tienda es
+`kernel/paquetes/snaps/`: `indice.txt` (`nombre|versión|revisión|canal|editor|resumen|tamaño|comando`)
+y una carpeta por revisión con su `manifiesto.txt`. Snaps de ejemplo: `saludo` (con canal beta),
+`notas`, `dado` y `reloj`.
+
+### `winget` (programas de Windows)
+
+```
+roman@jarvis:~$ winget search zip
+roman@jarvis:~$ winget show 7zip.7zip          # del repositorio oficial de Microsoft (GitHub)
+roman@jarvis:~$ winget install 7zip.7zip       # baja el instalador de 64 bits a /Descargas
+roman@jarvis:~$ file /Descargas/7z2408-x64.exe
+```
+
+`winget search` busca en `kernel/paquetes/winget.txt`; con el Id exacto, `show` e `install` van
+al repositorio real. Los instaladores no se ejecutan (ADR 0005); hasta 32 MB por descarga.
+
+### Firewall: `ufw`
+
+```
+roman@jarvis:~$ sudo ufw deny out to tiktok.com          # también sus subdominios
+roman@jarvis:~$ sudo ufw deny out port 80 app navegador  # el navegador, sin http://
+roman@jarvis:~$ sudo ufw default deny outgoing && sudo ufw allow out to wikipedia.org
+roman@jarvis:~$ ufw status numbered · ufw delete 1 · ufw show blocked · ufw app list
+```
+
+Las reglas se evalúan en orden (gana la primera). Las apps que se pueden nombrar: `navegador`,
+`terminal`, `apt`, `snap`, `winget`, `configuracion`, `jarvis` y `sistema`. Lo mismo se maneja
+desde Configuración → Firewall. Lo que entra ya está cerrado: JARVIS-OS no escucha en ningún
+puerto.
 
 ## Arquitectura
 
@@ -208,28 +265,56 @@ firmware UEFI (OVMF en QEMU)
             └─ bucle          hlt → red → eventos → render → present → pedidos → estadísticas
                  ├─ jarvis-net      TCP/IP (smoltcp), DHCP, DNS, descargas HTTP
                  └─ jarvis-desktop  ventanas, atajos, apps, barra, panel, menús, configuración,
-                    │               terminal (jsh + apt), web (DOM, CSS, HTML, HTTP)
+                    │               firewall, idiomas, terminal (jsh, apt, snap, winget, ufw),
+                    │               web (DOM, CSS, estilos, maquetación en cajas, HTTP)
                       ├─ jarvis-fs   FAT32 sobre el disco (con caché de sectores)
-                      └─ jarvis-gfx  dibujo: HUD, esfera, texto, fuente vectorial, figuras
+                      └─ jarvis-gfx  dibujo: HUD, esfera, texto, fuente vectorial, fuente de las
+                                     páginas (DejaVu + fontdue), figuras
 ```
 
 | Crate | Qué es | Cómo se prueba |
 |---|---|---|
-| `gfx` (`jarvis-gfx`) | Dibujo: canvas con recorte y `blit`, paleta, texto, **fuente vectorial**, figuras, íconos, trigonometría en punto fijo, esfera, asistente, HUD. | `cargo test`: 37 tests |
+| `gfx` (`jarvis-gfx`) | Dibujo: canvas con recorte (anidado) y `blit`, paleta, texto, **fuente vectorial**, **fuente proporcional de las páginas** (DejaVu, cualquier tamaño), figuras, íconos, trigonometría en punto fijo, esfera, asistente, HUD. | `cargo test`: 39 tests |
 | `fs` (`jarvis-fs`) | FAT32 propio: montaje, FAT (dos copias), nombres largos, lectura, escritura, carpetas, renombrar, mover, **copiar**, borrar, **caché de sectores**. Sobre un trait `BlockDevice`. | 22 tests, 14 de ellos **cruzados contra `fatfs`**: cada uno lee lo que escribe el otro, y el espacio libre se cuenta sobre la FAT cruda |
-| `desktop` (`jarvis-desktop`) | Escritorio: gestor de ventanas (con escritorios virtuales), atajos, barra, panel de estado, menús y paneles, configuración, composición; apps (Archivos, Terminal, Configuración, Monitor, Consola, Editor, Música, Visor, Navegador); shell `jsh`, `apt`, formatos PE/ELF; web: URL, HTTP, DOM, CSS y HTML; teclado latinoamericano. | 98 tests: el escritorio manejado con teclas y clics sobre un disco en memoria, verificado con `fatfs`; la terminal y `apt` contra el repositorio real; incluye "render incremental == redibujar todo". Más `vista_previa` (a mano): arma una página real y la guarda en BMP |
+| `desktop` (`jarvis-desktop`) | Escritorio: gestor de ventanas (con escritorios virtuales), atajos, barra, panel de estado, menús y paneles, configuración, firewall, idiomas, composición; apps (Archivos, Terminal, Configuración, Monitor, Consola, Editor, Música, Visor, Navegador); shell `jsh`, `apt`, `snap`, `winget`, `ufw`, formatos PE/ELF/squashfs; web: URL, HTTP, DOM, selectores y cascada, maquetación en cajas (flujo, flotantes, flex, grid, tablas), JSON, adaptador de YouTube; teclado latinoamericano. | 116 tests: el escritorio manejado con teclas y clics sobre un disco en memoria, verificado con `fatfs`; la terminal, `apt`, `snap` y `winget` contra el repositorio real y respuestas grabadas; el firewall; la maquetación sobre HTML de prueba; incluye "render incremental == redibujar todo". Más `vista_previa` (a mano): arma una página real, con imágenes, y la guarda en BMP |
 | `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente. | 3 tests de punta a punta en memoria (placa "loopback" + servidor HTTP de juguete) |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
-| `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG → BMP) y `cargo xtask test` |
+| `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K5: motor web, firewall, tiendas e idiomas
+- **Un navegador son cuatro etapas**: HTML → árbol, árbol + CSS → estilo de cada elemento
+  (cascada y herencia), estilos → cajas con posición (maquetación), cajas → píxeles. En K4 se
+  saltaba la tercera y por eso todo salía en una columna. Separarlas hizo que cada una se pueda
+  probar sola: la maquetación se prueba con HTML chico y se mira con páginas reales en el host.
+- **Armar en (0, 0) y correr después**: en un renglón o una fila flex no se sabe dónde va una
+  caja hasta medir a sus vecinas. Cada caja se arma aparte con su esquina en (0, 0) y después se
+  corre todo lo que dibujó. Si se armara dos veces (medir y ubicar), las filas flex anidadas
+  costarían el doble por cada nivel.
+- **Tamaños intrínsecos**: para flex, tablas, `inline-block` y flotantes hace falta saber cuánto
+  mediría el contenido "sin cortar renglones" y "lo más angosto posible" (la palabra más larga).
+  Se calculan una vez por elemento y quedan en caché.
+- **Lo que esconde una página**: menús cerrados con `display:none`, textos "solo para lectores de
+  pantalla" con `clip`, cosas fuera de la pantalla con `left:-9999px`, íconos hechos con
+  `mask-image`. Sin entender cada truco, la página se llenaba de basura; con `:not()`, atributos
+  y `@media` bien evaluados (con el ancho real de la ventana) desaparece sola.
+- **Variables que se nombran a sí mismas**: Wikipedia define `--font-size-medium:
+  var(--font-size-medium, 1rem)`. Resolverla contra sí misma daba un ciclo; en CSS eso vale lo del
+  padre o el respaldo.
+- **El firewall donde pasa todo**: como ninguna app abre sockets, el lugar más simple y más
+  seguro es el `Outbox`: se decide antes del DNS y se sabe qué app lo pidió (un filtro de
+  paquetes no lo sabría). Cuando haya sockets de verdad, bajará a la pila de red.
+- **Idiomas con el texto original como clave**: `tr("Papelera")` en vez de `tr(TRASH_LABEL)`.
+  Se lee igual que antes, un texto sin traducir no rompe nada, y la búsqueda es binaria sobre
+  tablas ordenadas (un test verifica el orden y que todo sea Latin-1).
 
 ### K4: terminal, paquetes, configuración y CSS
 - **Una shell sin procesos**: `jsh` es una biblioteca del escritorio, no un programa. Cada comando
   recibe sus argumentos y la entrada estándar y devuelve texto: una tubería es pasar el texto de
   uno al siguiente. Lo que tiene que esperar a la red no puede bloquear (hay un solo hilo): el
   comando devuelve un "trabajo pendiente", la shell guarda en qué parte de la línea quedó y sigue
-  cuando llega la respuesta. Es un planificador cooperativo en miniatura (K7 lo hace de verdad).
+  cuando llega la respuesta. Es un planificador cooperativo en miniatura (K8 lo hace de verdad).
 - **Las palabras se expanden al ejecutar**, no al leer: por eso `false || echo $?` dice 1. Y las
   asignaciones (`N=$(wc -l < x)`) no se parten en palabras, como en bash.
 - **Programas = scripts**: sin espacio de usuario no hay dónde cargar un ELF o un `.exe`. Los
@@ -310,8 +395,8 @@ firmware UEFI (OVMF en QEMU)
 
 ## Roadmap
 
-El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritorio con red (K3) y la
-terminal con paquetes (K4) se adelantaron.
+El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritorio con red (K3), la
+terminal con paquetes (K4) y el motor web con firewall e idiomas (K5) se adelantaron.
 
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
@@ -320,13 +405,14 @@ terminal con paquetes (K4) se adelantaron.
 | **K2** ✅ | **Archivos**: PCI, virtio-blk, FAT32 propio, mouse PS/2 | Drivers con DMA, sistemas de archivos, UI dirigida por eventos |
 | **K3** ✅ | **Escritorio y red**: ventanas y atajos como Windows, monitor, apps, virtio-net + TCP/IP, navegador | Composición, gestores de ventanas, redes, HTTP/HTML |
 | **K4** ✅ | **Terminal y sistema**: shell `jsh`, `apt`, Configuración, más atajos, escritorios virtuales, navegador con CSS e imágenes, teclado latinoamericano | Intérpretes, gestión de paquetes, CSS y la cascada |
-| K5 | **Puente con el cerebro**: la consola de JARVIS le habla a Claude (por la red, al `jarvis` del anfitrión) y la esfera pulsa con la respuesta | Protocolos, el sistema "piensa" |
-| K6 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
-| K7 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
-| K8 | **TLS en el kernel** (sin puente) y decodificadores PNG/JPEG | Criptografía, certificados, compresión |
-| K9 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; después, un navegador más completo | Aislamiento, ABI |
-| K10 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio | Drivers de audio |
-| K11 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe, USB, ACPI, arranque en la PC | Drivers reales |
+| **K5** ✅ | **Motor web y sistema**: maquetación en cajas (flex, grid, tablas, flotantes), fuente proporcional, SVG y transparencias, YouTube sin JavaScript, firewall (`ufw`), `snap`, `winget`, idiomas | Motores de maquetación, tipografía, filtrado de red, internacionalización |
+| K6 | **Puente con el cerebro**: la consola de JARVIS le habla a Claude (por la red, al `jarvis` del anfitrión) y la esfera pulsa con la respuesta | Protocolos, el sistema "piensa" |
+| K7 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
+| K8 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
+| K9 | **TLS en el kernel** (sin puente) y decodificadores PNG/JPEG | Criptografía, certificados, compresión |
+| K10 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript | Aislamiento, ABI |
+| K11 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
+| K12 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe, USB, ACPI, arranque en la PC | Drivers reales |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),
 la especificación de virtio y la especificación "Microsoft FAT32 File System".

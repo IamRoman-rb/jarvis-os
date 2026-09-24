@@ -367,9 +367,9 @@ impl StartMenu {
         if !q.is_empty() {
             let text = self.query.text.trim();
             let label = if text.contains('.') && !text.contains(' ') {
-                trf("Abrir {}", &[&text])
+                trf("Abrir {}", &[text])
             } else {
-                trf("Buscar en la web: {}", &[&text])
+                trf("Buscar en la web: {}", &[text])
             };
             out.push((StartItem::Web(text.into()), label, Icon::Globe));
         }

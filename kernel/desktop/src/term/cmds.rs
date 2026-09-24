@@ -830,7 +830,7 @@ impl Shell {
                     alloc::vec![
                         "JARVIS-OS".into(),
                         host,
-                        "0.1-k4".into(),
+                        "0.1-k5".into(),
                         "#1 SMP".into(),
                         "x86_64".into(),
                         "JARVIS".into()
@@ -844,7 +844,7 @@ impl Shell {
                         v.push(host);
                     }
                     if flags.contains(&'r') {
-                        v.push("0.1-k4".into());
+                        v.push("0.1-k5".into());
                     }
                     if flags.contains(&'m') || flags.contains(&'p') {
                         v.push("x86_64".into());
@@ -2132,7 +2132,7 @@ fn proc_file<D: BlockDevice>(path: &str, ctx: &Ctx<'_, D>) -> Option<String> {
             s.heap_used / 1024
         ),
         "uptime" => format!("{secs}.{:02} 0.00\n", s.uptime_ms % 1000 / 10),
-        "version" => "JARVIS-OS versión 0.1-k4 (Rust nightly, no_std) #1 SMP x86_64\n".into(),
+        "version" => "JARVIS-OS versión 0.1-k5 (Rust nightly, no_std) #1 SMP x86_64\n".into(),
         "loadavg" => format!(
             "{}.{:02} 0.00 0.00 1/1 1\n",
             s.cpu_pct / 100,

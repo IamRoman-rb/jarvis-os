@@ -701,6 +701,17 @@ pub fn canvas_color(p: &Prepared) -> Option<Color> {
     body_bg.map(|c| c.c)
 }
 
+impl Options {
+    pub const READER: Options = Options {
+        reader: true,
+        images: false,
+    };
+    pub const STYLED: Options = Options {
+        reader: false,
+        images: true,
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,15 +810,4 @@ mod tests {
         ));
         assert!(!q.doc.needs_js);
     }
-}
-
-impl Options {
-    pub const READER: Options = Options {
-        reader: true,
-        images: false,
-    };
-    pub const STYLED: Options = Options {
-        reader: false,
-        images: true,
-    };
 }

@@ -6,7 +6,7 @@
 //! versión en HTML simple que el navegador sí puede mostrar.
 //!
 //! - **YouTube**: búsquedas (`/results`), videos (`/watch`) e inicio. Los videos no se
-//!   reproducen: haría falta decodificar H.264/VP9 y audio (roadmap K10); se muestran la
+//!   reproducen: haría falta decodificar H.264/VP9 y audio (roadmap K11); se muestran la
 //!   miniatura, el título, el canal, las vistas y la descripción.
 
 use alloc::format;
@@ -261,7 +261,7 @@ fn group(n: &str) -> String {
     let digits: Vec<char> = n.chars().filter(char::is_ascii_digit).collect();
     let mut out = String::new();
     for (i, c) in digits.iter().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push('.');
         }
         out.push(*c);

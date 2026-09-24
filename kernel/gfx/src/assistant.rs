@@ -2,7 +2,7 @@
 //!
 //! La **envolvente de voz** es la "fuerza" del habla en cada instante (0 = silencio, `ONE` =
 //! máximo). Por ahora se sintetiza: un ritmo de sílabas de ~4,5 por segundo que baja en los
-//! espacios y signos de puntuación, como las pausas al hablar. Cuando haya audio real (hito K9),
+//! espacios y signos de puntuación, como las pausas al hablar. Cuando haya audio real (hito K11),
 //! `level` se va a calcular desde las muestras de audio y el resto no cambia.
 //!
 //! Todo el tiempo se mide en milisegundos desde el arranque (lo da el timer del kernel).

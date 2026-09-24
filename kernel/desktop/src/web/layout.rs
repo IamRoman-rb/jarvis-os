@@ -803,13 +803,11 @@ impl<'a> L<'a> {
                 .mask_image_of(n)
                 .and_then(|i| Some((i, self.natural(i)?)))
             {
-                Some((img, nat)) => match self.dest_rect(st.mask_size, &st.mask_pos, r, nat) {
-                    dest => Paint::Mask {
-                        bx: r,
-                        dest,
-                        img: img as u32,
-                        color: self.color(color, false),
-                    },
+                Some((img, nat)) => Paint::Mask {
+                    bx: r,
+                    dest: self.dest_rect(st.mask_size, &st.mask_pos, r, nat),
+                    img: img as u32,
+                    color: self.color(color, false),
                 },
                 None => Paint::None,
             };
@@ -3532,8 +3530,8 @@ impl<'a> L<'a> {
                     if occ[r].len() < col + cs {
                         occ[r].resize(col + cs, false);
                     }
-                    for k in col..col + cs {
-                        occ[r][k] = true;
+                    for cell in &mut occ[r][col..col + cs] {
+                        *cell = true;
                     }
                 }
                 cells.push((c.clone(), ri, col, rs, cs));

@@ -89,6 +89,8 @@ pub struct Click {
     pub right: bool,
 }
 
+// Una sola por ventana: que el navegador sea más grande que las demás no importa.
+#[allow(clippy::large_enum_variant)]
 pub enum App {
     Files(files::FilesWindow),
     Monitor(monitor::Monitor),

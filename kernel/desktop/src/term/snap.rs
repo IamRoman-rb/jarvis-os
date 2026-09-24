@@ -166,6 +166,8 @@ fn launcher(name: &str, rev: u32, version: &str, command: &str) -> String {
 
 // --- trabajos que esperan la red --------------------------------------------------------------
 
+// Hay uno solo por comando en curso: el tamaño no importa.
+#[allow(clippy::large_enum_variant)]
 enum Step {
     /// `snap find`: índice propio, después la tienda de Snapcraft.
     Find { query: String, stage: u8 },
@@ -476,7 +478,7 @@ impl SnapJob {
                 ctx.log.push(format!("SNAP_DESCARGADO {name}"));
                 out.info(&format!(
                     "Guardado {path} ({}).\nEs un paquete snap de Linux (squashfs): miralo con `file {path}`. \
-                     Ejecutarlo necesita el espacio de usuario de Linux (hito K9).",
+                     Ejecutarlo necesita el espacio de usuario de Linux (hito K10).",
                     format_size(r.body.len() as u64)
                 ));
                 Some((0, String::new()))

@@ -285,7 +285,7 @@ impl Settings {
                         Opt::Info,
                         tr("Versión"),
                         tr("Kernel propio en Rust (x86_64, UEFI)"),
-                        Value("JARVIS-OS 0.1 · hito K4".into())
+                        Value("JARVIS-OS 0.1 · hito K5".into())
                     ),
                     Row::new(
                         Opt::Info,

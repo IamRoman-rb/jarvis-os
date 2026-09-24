@@ -1,6 +1,6 @@
 //! Consola de JARVIS: le escribís una orden y JARVIS responde (y la esfera "habla").
 //!
-//! Es el lugar del micrófono de la barra: hasta que haya audio (K9) y conexión con Claude (K4),
+//! Es el lugar del micrófono de la barra: hasta que haya audio (K11) y conexión con Claude (K6),
 //! a JARVIS se le habla escribiendo. Entiende un puñado de órdenes locales (abrir apps, ver
 //! archivos, navegar, estado de la máquina); lo demás lo va a responder Claude.
 
