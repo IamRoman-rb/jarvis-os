@@ -16,6 +16,7 @@ pub mod cursor;
 pub mod desktop;
 pub mod files;
 pub mod files_view;
+pub mod firewall;
 pub mod input;
 pub mod keymap;
 pub mod panels;

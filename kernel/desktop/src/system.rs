@@ -200,6 +200,8 @@ pub struct NetRequest {
     pub id: u32,
     pub url: String,
     pub kind: FetchKind,
+    /// Quién lo pide (para el firewall): `navegador`, `terminal`, `apt`…
+    pub app: String,
 }
 
 /// La respuesta ya completa (el kernel sigue las redirecciones).
@@ -239,6 +241,9 @@ pub struct Outbox {
     pub close_self: bool,
     /// Número del último pedido de red (los números no se repiten).
     pub(crate) next_net: u32,
+    /// La app que está trabajando ahora (el escritorio lo pone antes de llamarla): los
+    /// pedidos de red salen a su nombre.
+    pub app: &'static str,
 }
 
 impl Outbox {
@@ -248,11 +253,23 @@ impl Outbox {
     }
 
     pub fn fetch_kind(&mut self, url: &str, kind: FetchKind) -> u32 {
+        let app = if self.app.is_empty() {
+            "sistema"
+        } else {
+            self.app
+        };
+        self.fetch_as(url, kind, app)
+    }
+
+    /// Un pedido a nombre de otra "app" (apt, snap y winget corren en la terminal pero el
+    /// firewall los distingue).
+    pub fn fetch_as(&mut self, url: &str, kind: FetchKind, app: &str) -> u32 {
         self.next_net += 1;
         self.net.push(NetRequest {
             id: self.next_net,
             url: url.into(),
             kind,
+            app: app.into(),
         });
         self.next_net
     }

@@ -10,6 +10,8 @@ use alloc::vec::Vec;
 
 use jarvis_gfx::Color;
 
+use crate::firewall::Firewall;
+
 pub const PATH: &str = "/Sistema/config.ini";
 
 /// Colores lisos para el fondo de pantalla.
@@ -106,6 +108,8 @@ pub struct Config {
     pub pin: String,
     /// Bloquear solo después de estos minutos sin usar (0 = nunca).
     pub lock_minutes: u32,
+    /// Qué conexiones se permiten (ver [`crate::firewall`]).
+    pub firewall: Firewall,
 }
 
 impl Default for Config {
@@ -130,6 +134,7 @@ impl Default for Config {
             hostname: "jarvis".into(),
             pin: String::new(),
             lock_minutes: 0,
+            firewall: Firewall::default(),
         }
     }
 }
@@ -193,7 +198,9 @@ impl Config {
                     c.pin = v.into()
                 }
                 "bloquear_minutos" => c.lock_minutes = v.parse::<u32>().unwrap_or(0).min(240),
-                _ => {}
+                k => {
+                    c.firewall.parse_key(k, v);
+                }
             }
         }
         c
@@ -230,6 +237,8 @@ impl Config {
             format!("pin={}", self.pin),
             format!("bloquear_minutos={}", self.lock_minutes),
         ];
+        let mut lines = lines;
+        lines.extend(self.firewall.serialize());
         let mut s = lines.join("\n");
         s.push('\n');
         s
@@ -278,6 +287,10 @@ mod tests {
             lock_minutes: 5,
             ..Config::default()
         };
+        let mut c = c;
+        c.firewall
+            .ufw(&["deny", "out", "to", "ejemplo.com", "port", "443"])
+            .unwrap();
         assert_eq!(Config::parse(&c.serialize()), c);
     }
 

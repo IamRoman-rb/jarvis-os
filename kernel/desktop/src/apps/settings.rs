@@ -21,6 +21,7 @@ use jarvis_gfx::{Canvas, Rect, theme};
 use super::{Click, Ctx, SysView};
 use crate::config::{Config, SOLID_COLORS, SearchEngine, Wallpaper, valid_name};
 use crate::files::{TRASH, format_size, join};
+use crate::firewall::{Action, Dir, Rule};
 use crate::input::{Key, Mods};
 use crate::system::{Launch, Power};
 use crate::text_input::TextInput;
@@ -45,9 +46,10 @@ pub enum Section {
     Apps,
     Storage,
     Security,
+    Firewall,
 }
 
-pub const SECTIONS: [Section; 10] = [
+pub const SECTIONS: [Section; 11] = [
     Section::System,
     Section::Personalization,
     Section::DateTime,
@@ -58,6 +60,7 @@ pub const SECTIONS: [Section; 10] = [
     Section::Apps,
     Section::Storage,
     Section::Security,
+    Section::Firewall,
 ];
 
 impl Section {
@@ -73,6 +76,7 @@ impl Section {
             Section::Apps => "Aplicaciones",
             Section::Storage => "Almacenamiento",
             Section::Security => "Privacidad y seguridad",
+            Section::Firewall => "Firewall",
         }
     }
 
@@ -88,6 +92,7 @@ impl Section {
             Section::Apps => Icon::Package,
             Section::Storage => Icon::Folder,
             Section::Security => Icon::Lock,
+            Section::Firewall => Icon::Globe,
         }
     }
 }
@@ -123,6 +128,14 @@ pub enum Opt {
     Pin,
     LockAfter,
     LockNow,
+    FwEnabled,
+    FwDefaultOut,
+    FwLog,
+    /// Permitir o no a una app de [`crate::firewall::APPS`].
+    FwApp(usize),
+    FwAddSite,
+    FwRule(usize),
+    FwShowLog,
     Info,
 }
 
@@ -606,6 +619,75 @@ impl Settings {
                     ),
                 ]
             }
+            Section::Firewall => {
+                let fw = &c.firewall;
+                let mut rows = alloc::vec![
+                    Row::new(
+                        Opt::FwEnabled,
+                        "Firewall",
+                        "Revisa cada conexión que sale antes de que llegue a la red",
+                        on(fw.enabled)
+                    ),
+                    Row::new(
+                        Opt::FwDefaultOut,
+                        "Conexiones salientes",
+                        "Lo que no dice ninguna regla",
+                        Choice(
+                            if fw.default_out == Action::Allow {
+                                "Permitir"
+                            } else {
+                                "Denegar"
+                            }
+                            .into()
+                        )
+                    ),
+                    Row::new(
+                        Opt::Info,
+                        "Conexiones entrantes",
+                        "JARVIS-OS no ofrece servicios: se rechaza lo que no pidió",
+                        Value("Bloqueadas".into())
+                    ),
+                    Row::new(
+                        Opt::FwLog,
+                        "Anotar lo bloqueado",
+                        "En /Sistema/firewall.log (ufw show blocked)",
+                        on(fw.log)
+                    ),
+                    Row::new(
+                        Opt::FwShowLog,
+                        "Ver lo bloqueado",
+                        "Abre la terminal con: ufw show blocked",
+                        Button("VER")
+                    ),
+                ];
+                for (i, (name, desc)) in crate::firewall::APPS.iter().enumerate() {
+                    let blocked = fw.rules.contains(&app_rule(name));
+                    rows.push(Row::new(
+                        Opt::FwApp(i),
+                        format!("Permitir: {desc}"),
+                        format!("Regla: deny out app {name}"),
+                        on(!blocked),
+                    ));
+                }
+                rows.push(Row::new(
+                    Opt::FwAddSite,
+                    "Bloquear un sitio",
+                    "Ejemplo: tiktok.com (también bloquea sus subdominios)",
+                    Text {
+                        value: String::new(),
+                        secret: false,
+                    },
+                ));
+                for (i, r) in fw.rules.iter().enumerate() {
+                    rows.push(Row::new(
+                        Opt::FwRule(i),
+                        format!("Regla {}", i + 1),
+                        r.to_line(),
+                        Button("BORRAR"),
+                    ));
+                }
+                rows
+            }
         }
     }
 
@@ -840,7 +922,10 @@ impl Settings {
             Control::Button(t) => {
                 let w = crate::widgets::button_width(t).max(110);
                 let b = Rect::new(cr.x + cr.w - w, cr.y, w, cr.h);
-                let danger = matches!(row.opt, Opt::Shutdown | Opt::Remove(_) | Opt::EmptyTrash);
+                let danger = matches!(
+                    row.opt,
+                    Opt::Shutdown | Opt::Remove(_) | Opt::EmptyTrash | Opt::FwRule(_)
+                );
                 button(
                     c,
                     b,
@@ -877,12 +962,13 @@ impl Settings {
         self.dirty = true;
         let c = &mut self.cfg;
         match opt {
-            Opt::Hostname | Opt::User | Opt::Homepage | Opt::Pin => {
+            Opt::Hostname | Opt::User | Opt::Homepage | Opt::Pin | Opt::FwAddSite => {
                 if delta == 0 {
                     let (value, max) = match opt {
                         Opt::Hostname => (c.hostname.clone(), 24),
                         Opt::User => (c.user.clone(), 24),
                         Opt::Homepage => (c.homepage.clone(), 200),
+                        Opt::FwAddSite => (String::new(), 100),
                         _ => (String::new(), 8),
                     };
                     self.editing = Some((opt, TextInput::new(&value, max)));
@@ -983,6 +1069,40 @@ impl Settings {
                 ctx.out.lock = true;
                 return;
             }
+            Opt::FwEnabled => c.firewall.enabled = !c.firewall.enabled,
+            Opt::FwDefaultOut => {
+                c.firewall.default_out = if c.firewall.default_out == Action::Allow {
+                    Action::Deny
+                } else {
+                    Action::Allow
+                }
+            }
+            Opt::FwLog => c.firewall.log = !c.firewall.log,
+            Opt::FwApp(i) => {
+                let Some((name, _)) = crate::firewall::APPS.get(i) else {
+                    return;
+                };
+                let rule = app_rule(name);
+                match c.firewall.rules.iter().position(|r| *r == rule) {
+                    Some(k) => {
+                        c.firewall.rules.remove(k);
+                    }
+                    // Al principio: le gana a cualquier otra regla.
+                    None => c.firewall.rules.insert(0, rule),
+                }
+            }
+            Opt::FwRule(i) => {
+                if i < c.firewall.rules.len() {
+                    c.firewall.rules.remove(i);
+                    self.selected = self.selected.saturating_sub(1);
+                }
+            }
+            Opt::FwShowLog => {
+                ctx.out
+                    .launch
+                    .push(Launch::Terminal(Some("ufw show blocked".into())));
+                return;
+            }
             Opt::Info => return,
         }
         self.commit(ctx);
@@ -1009,6 +1129,20 @@ impl Settings {
             Opt::Pin if v.len() <= 8 && v.chars().all(|c| c.is_ascii_digit()) => {
                 self.cfg.pin = v;
                 true
+            }
+            Opt::FwAddSite if !v.is_empty() => {
+                match Rule::parse(&format!(
+                    "deny out to {}",
+                    v.trim_start_matches("https://")
+                        .trim_start_matches("http://")
+                        .trim_end_matches('/')
+                )) {
+                    Ok(r) if !self.cfg.firewall.rules.contains(&r) => {
+                        self.cfg.firewall.rules.push(r);
+                        true
+                    }
+                    _ => false,
+                }
             }
             _ => false,
         };
@@ -1131,6 +1265,17 @@ impl Settings {
             };
             self.dirty = true;
         }
+    }
+}
+
+/// La regla que bloquea todo lo de una app.
+fn app_rule(name: &str) -> Rule {
+    Rule {
+        action: Action::Deny,
+        dir: Dir::Out,
+        host: None,
+        port: None,
+        app: Some(name.to_string()),
     }
 }
 

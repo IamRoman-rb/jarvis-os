@@ -1,0 +1,7 @@
+# Tienda de snaps de JARVIS-OS (la sirve el puente de `cargo xtask run`).
+# Formato: nombre|versión|revisión|canal|editor|resumen|tamaño|comando
+saludo|1.0|3|stable|jarvis|Te saluda por tu nombre (el ejemplo de canales: probá --beta)|1 KB|saludo.sh
+saludo|1.1|5|beta|jarvis|Te saluda y te dice la fecha (canal beta)|1 KB|saludo.sh
+notas|1.0|1|stable|jarvis|Notas rápidas: notas comprar pan · notas (las lista)|1 KB|notas.sh
+dado|1.0|2|stable|jarvis|Tira un dado (o dos: dado 2)|1 KB|dado.sh
+reloj|1.0|1|stable|jarvis|La hora y el calendario del mes|1 KB|reloj.sh

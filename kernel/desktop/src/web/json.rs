@@ -233,8 +233,10 @@ mod tests {
 
     #[test]
     fn lee_objetos_listas_y_escapes() {
-        let v = parse(r#" {"a": [1, -2.5e3, true, null], "b": {"c": "hóla\n\"x\" 😀"}} resto"#)
-            .unwrap();
+        let v = parse(
+            " {\"a\": [1, -2.5e3, true, null], \"b\": {\"c\": \"h\\u00f3la\\n\\\"x\\\" \\ud83d\\ude00\"}} resto",
+        )
+        .unwrap();
         assert_eq!(
             v.path(&["b", "c"]).and_then(Json::str),
             Some("hóla\n\"x\" 😀")

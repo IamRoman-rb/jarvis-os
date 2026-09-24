@@ -68,7 +68,14 @@ fn serve(t: &mut Driver) {
                         body: b"no existe".to_vec(),
                     }),
                 }
-            } else if r.url.ends_with("programa.exe") {
+            } else if let Some(body) = fake_internet(&r.url) {
+                Ok(HttpResponse {
+                    status: 200,
+                    content_type: "text/plain".into(),
+                    url: r.url.clone(),
+                    body,
+                })
+            } else if r.url.ends_with("programa.exe") || r.url.ends_with("7z2408-x64.exe") {
                 assert_eq!(r.kind, FetchKind::Download);
                 Ok(HttpResponse {
                     status: 200,
@@ -82,6 +89,36 @@ fn serve(t: &mut Driver) {
             t.d.net_response(r.id, resp);
         }
     }
+}
+
+/// Respuestas de sitios de verdad (la tienda de snaps, GitHub), para probar sin red.
+fn fake_internet(url: &str) -> Option<Vec<u8>> {
+    let body: &str = if url.starts_with("https://api.snapcraft.io/v2/snaps/find") {
+        r#"{"results":[{"name":"vlc","revision":{"version":"3.0.20"},"snap":{"publisher":{"username":"videolan","validation":"verified"},"summary":"The ultimate media player","title":"VLC"}}]}"#
+    } else if url.starts_with("https://api.snapcraft.io/v2/snaps/info/vlc") {
+        r#"{"name":"vlc","snap":{"summary":"The ultimate media player","publisher":{"display-name":"VideoLAN"}},"channel-map":[]}"#
+    } else if url.ends_with("/manifests/7/7zip/7zip") {
+        r#"[{"name":".validation","type":"file"},{"name":"23.01","type":"dir"},{"name":"24.08","type":"dir"},{"name":"9.20","type":"dir"}]"#
+    } else if url.ends_with("/7zip/7zip/24.08/7zip.7zip.locale.en-US.yaml") {
+        "PackageIdentifier: 7zip.7zip
+PackageName: 7-Zip
+Publisher: Igor Pavlov
+ShortDescription: Free and open source file archiver
+License: LGPL-2.1
+"
+    } else if url.ends_with("/7zip/7zip/24.08/7zip.7zip.installer.yaml") {
+        "PackageIdentifier: 7zip.7zip
+InstallerType: exe
+Installers:
+- Architecture: x86
+  InstallerUrl: https://7-zip.org/a/7z2408.exe
+- Architecture: x64
+  InstallerUrl: https://7-zip.org/a/7z2408-x64.exe
+"
+    } else {
+        return None;
+    };
+    Some(body.as_bytes().to_vec())
 }
 
 /// Un .exe de Windows mínimo (cabeceras MZ y PE de 64 bits, programa de consola).
@@ -226,4 +263,115 @@ fn la_configuracion_puede_abrir_la_terminal_con_un_comando() {
     t.type_text("exit");
     t.key(Key::Enter);
     assert!(t.d.window_of(AppKind::Terminal).is_none());
+}
+
+#[test]
+fn ufw_bloquea_conexiones_y_lo_anota() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let out = run(
+        &mut t,
+        "sudo ufw deny out to example.com && ufw deny out port 8080 app apt && ufw status numbered",
+    );
+    assert!(out.contains("Estado: activo"), "{out}");
+    assert!(out.contains("[ 1] example.com"), "{out}");
+    assert!(out.contains("[ 2] 8080/tcp"), "{out}");
+    // wget no llega a salir: lo frena el firewall (con el número de regla).
+    let out = run(&mut t, "wget http://www.example.com/");
+    assert!(out.contains("firewall") && out.contains("regla 1"), "{out}");
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l.contains("FIREWALL_BLOQUEO terminal www.example.com"))
+    );
+    let out = run(&mut t, "ufw show blocked");
+    assert!(
+        out.contains("BLOQUEADO terminal -> http://www.example.com/"),
+        "{out}"
+    );
+    // Las reglas quedan en la configuración del disco.
+    let out = run(&mut t, "grep firewall_regla /Sistema/config.ini");
+    assert!(out.contains("denegar salida a example.com"), "{out}");
+    // apt usa otro sitio: sigue andando.
+    let out = run(&mut t, "apt install hola");
+    assert!(out.contains("hola"), "{out}");
+    // Borrar la regla vuelve a dejar pasar.
+    run(&mut t, "ufw delete 1");
+    let out = run(&mut t, "ufw status");
+    assert!(!out.contains("example.com"), "{out}");
+    assert!(run(&mut t, "ufw bailar").contains("ERROR"));
+}
+
+#[test]
+fn snap_instala_actualiza_de_canal_y_vuelve_atras() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let out = run(&mut t, "snap find saludo");
+    assert!(
+        out.contains("Tienda de JARVIS-OS") && out.contains("saludo"),
+        "{out}"
+    );
+    assert!(
+        out.contains("Tienda de Snapcraft") && out.contains("vlc"),
+        "{out}"
+    );
+    let out = run(&mut t, "sudo snap install saludo");
+    assert!(out.contains("saludo 1.0 de jarvis instalado"), "{out}");
+    let out = run(&mut t, "saludo Ana");
+    assert!(out.contains("¡Hola, Ana!"), "{out}");
+    let out = run(&mut t, "snap list");
+    assert!(
+        out.contains("saludo") && out.contains("latest/stable"),
+        "{out}"
+    );
+    // Al canal beta: queda la revisión vieja en el disco.
+    let out = run(&mut t, "snap refresh saludo --beta");
+    assert!(out.contains("actualizado (revisión 5)"), "{out}");
+    assert!(run(&mut t, "saludo").contains("(beta)"));
+    let out = run(&mut t, "snap revert saludo");
+    assert!(out.contains("revisión 3"), "{out}");
+    assert!(!run(&mut t, "saludo").contains("(beta)"));
+    // Uno de Linux (de Snapcraft) no se puede instalar: se explica por qué.
+    let out = run(&mut t, "snap install vlc");
+    assert!(
+        out.contains("snap de Linux") && out.contains("snap download vlc"),
+        "{out}"
+    );
+    let out = run(&mut t, "snap remove saludo && ls /snap/bin");
+    assert!(out.contains("desinstalado"), "{out}");
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l.contains("SNAP_INSTALADO saludo 1.1 5")),
+        "{:?}",
+        t.logs()
+    );
+}
+
+#[test]
+fn winget_baja_instaladores_de_windows_del_repositorio_oficial() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let out = run(&mut t, "winget search zip");
+    assert!(out.contains("7zip.7zip"), "{out}");
+    // En minúsculas también (se corrige con la lista conocida).
+    let out = run(&mut t, "winget install 7ZIP.7zip");
+    assert!(out.contains("Encontrado") && out.contains("7-Zip"), "{out}");
+    assert!(
+        out.contains("Versión: 24.08"),
+        "la más nueva, no la 9.20: {out}"
+    );
+    assert!(out.contains("7z2408-x64.exe"), "el de 64 bits: {out}");
+    assert!(
+        out.contains("Descargado /Descargas/7z2408-x64.exe"),
+        "{out}"
+    );
+    assert!(out.contains("PE32+ de Windows"), "{out}");
+    let out = run(&mut t, "winget list");
+    assert!(out.contains("7zip.7zip") && out.contains("24.08"), "{out}");
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l.contains("WINGET_DESCARGADO 7zip.7zip"))
+    );
 }

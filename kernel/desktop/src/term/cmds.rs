@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use jarvis_fs::{BlockDevice, DirEntry, FileSystem};
 
 use super::regex::Regex;
-use super::{BIN, Job, Out, Res, Shell, ansi, apt, binfmt, child};
+use super::{BIN, Job, Out, PATH, Res, Shell, ansi, apt, binfmt, child, snap, winget};
 use crate::apps::Ctx;
 use crate::files::{FilesApp, basename, format_size, parent};
 use crate::system::{AppKind, FetchKind, HttpResponse, Launch, Power};
@@ -73,6 +73,10 @@ pub const NAMES: &[(&str, &str)] = &[
     ("sh", "ejecuta un script"),
     ("shutdown", "apaga (también poweroff)"),
     ("sleep", "espera N segundos"),
+    (
+        "snap",
+        "snaps: snap find, snap install clima, snap refresh, snap revert",
+    ),
     ("sort", "ordena líneas (-r -n -u)"),
     ("stat", "datos de un archivo"),
     ("strings", "texto adentro de un binario"),
@@ -85,6 +89,7 @@ pub const NAMES: &[(&str, &str)] = &[
     ("tree", "árbol de carpetas"),
     ("true", "sale bien"),
     ("type", "qué es un comando"),
+    ("ufw", "firewall: ufw status, ufw deny out to sitio.com"),
     ("uname", "datos del sistema (-a)"),
     ("uniq", "saca líneas repetidas seguidas (-c)"),
     ("unset", "borra una variable"),
@@ -93,6 +98,10 @@ pub const NAMES: &[(&str, &str)] = &[
     ("wget", "baja una dirección a un archivo (-O nombre)"),
     ("which", "dónde está un comando"),
     ("whoami", "tu usuario"),
+    (
+        "winget",
+        "programas de Windows: winget search zip, winget install 7zip.7zip",
+    ),
     ("xdg-open", "abre con la app que corresponde"),
     ("xxd", "volcado hexadecimal (-l N)"),
 ];
@@ -863,6 +872,35 @@ impl Shell {
                 ));
                 0
             }
+            "ufw" => {
+                let args: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
+                if matches!(args.as_slice(), ["show", "blocked" | "log"]) {
+                    let Some(fs) = Self::fs(ctx, e) else {
+                        return Res::Code(1);
+                    };
+                    match fs.read_file(crate::firewall::LOG_PATH) {
+                        Ok(b) if !b.is_empty() => o.push_str(&String::from_utf8_lossy(&b)),
+                        _ => o.push_str("Todavía no se bloqueó nada.\n"),
+                    }
+                    return Res::Code(0);
+                }
+                // Si un comando anterior de la misma línea ya cambió algo, se parte de eso.
+                let mut cfg = ctx.out.config.clone().unwrap_or_else(|| ctx.config.clone());
+                match cfg.firewall.ufw(&args) {
+                    Ok((text, changed)) => {
+                        o.push_str(&text);
+                        if changed {
+                            ctx.log.push(format!("FIREWALL ufw {}", args.join(" ")));
+                            ctx.out.config = Some(cfg);
+                        }
+                        0
+                    }
+                    Err(msg) => {
+                        e.push_str(&format!("ERROR: {msg}\n"));
+                        1
+                    }
+                }
+            }
             "sudo" => {
                 if argv.len() == 1 {
                     e.push_str("sudo: decime qué ejecutar\n");
@@ -1220,6 +1258,27 @@ impl Shell {
                 return match apt::run(argv, ctx, o, e, out) {
                     Ok(code) => Res::Code(code),
                     Err(job) => Res::Wait(Job::Apt(job)),
+                };
+            }
+            "snap" if argv.get(1).is_some_and(|a| a == "run") => {
+                let Some(name) = argv.get(2) else {
+                    e.push_str("error: decime qué snap ejecutar\n");
+                    return Res::Code(1);
+                };
+                let mut cmd = alloc::vec![format!("{}/{name}", snap::BIN)];
+                cmd.extend(argv[3..].iter().cloned());
+                return self.exec(&cmd, stdin, o, e, ctx, out);
+            }
+            "snap" => {
+                return match snap::run(argv, ctx, o, e) {
+                    Ok(code) => Res::Code(code),
+                    Err(job) => Res::Wait(Job::Snap(job)),
+                };
+            }
+            "winget" | "winget.exe" => {
+                return match winget::run(argv, ctx, o, e) {
+                    Ok(code) => Res::Code(code),
+                    Err(job) => Res::Wait(Job::Winget(job)),
                 };
             }
             "dpkg" => {
@@ -1966,7 +2025,7 @@ impl Shell {
             let p = self.abs(name);
             return is_file(fs, &p).then_some(p);
         }
-        let path = self.var("PATH").unwrap_or(BIN).to_string();
+        let path = self.var("PATH").unwrap_or(PATH).to_string();
         for dir in path.split(':').filter(|d| !d.is_empty()) {
             for candidate in [child(dir, name), child(dir, &format!("{name}.sh"))] {
                 if is_file(fs, &candidate) {
