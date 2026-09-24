@@ -15,6 +15,7 @@ use jarvis_gfx::trig::{FULL_TURN, ONE, sin};
 use jarvis_gfx::{Canvas, Rect, theme};
 
 use super::{Click, Ctx};
+use crate::i18n::{tr, trf};
 use crate::input::Key;
 use crate::widgets::{SELECTED_BG, WINDOW_BG, bar, button, label, light, s16};
 
@@ -160,8 +161,8 @@ impl Music {
 
     pub fn title(&self) -> String {
         match &self.playing {
-            Some((i, _, _)) => format!("Música · {}", SONGS[*i].title),
-            None => "Música".into(),
+            Some((i, _, _)) => trf("Música · {}", &[SONGS[*i].title]),
+            None => tr("Música").into(),
         }
     }
 
@@ -265,7 +266,7 @@ impl Music {
             c,
             r.x + 16,
             r.y + 16,
-            "CANCIONES · PARLANTE DE LA PC",
+            tr("CANCIONES · PARLANTE DE LA PC"),
             &label(theme::CYAN),
         );
         for (i, song) in SONGS.iter().enumerate() {
@@ -289,7 +290,7 @@ impl Music {
                     c,
                     row.x + row.w - 12,
                     row.y + 12,
-                    "SONANDO",
+                    tr("SONANDO"),
                     &label(theme::CYAN),
                 );
             }
@@ -335,9 +336,9 @@ impl Music {
             theme::CYAN,
         );
         let label_text = if self.playing.is_some() {
-            "DETENER"
+            tr("DETENER")
         } else {
-            "REPRODUCIR"
+            tr("REPRODUCIR")
         };
         button(c, play_button(r), label_text, theme::CYAN, 40);
     }

@@ -569,7 +569,10 @@ impl Terminal {
             c.fill_rect(x, y, 2, lh - 2, FG.scale(120));
         }
         if self.scroll > 0 {
-            let msg = format!("{} renglones más arriba · AvPág vuelve", self.scroll);
+            let msg = crate::i18n::trf(
+                "{} renglones más arriba · AvPág vuelve",
+                &[&self.scroll.to_string()],
+            );
             let st = Style::new(Weight::Regular, Size::Size16, Color::hex(0x6b7689));
             text::draw_right(c, r.x + r.w - PAD, r.y + PAD, &msg, &st);
         }

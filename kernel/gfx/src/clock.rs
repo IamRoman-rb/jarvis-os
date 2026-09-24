@@ -1,6 +1,15 @@
-//! Fecha y hora: zona horaria fija y formato en castellano, sin `std` ni reservas de memoria.
+//! Fecha y hora: zona horaria fija y formato en castellano (o inglés o portugués, según
+//! [`set_language`]), sin `std` ni reservas de memoria.
 
 use core::fmt::{self, Write};
+use core::sync::atomic::{AtomicU8, Ordering};
+
+/// Idioma de la fecha: 0 = castellano, 1 = inglés, 2 = portugués.
+static LANGUAGE: AtomicU8 = AtomicU8::new(0);
+
+pub fn set_language(lang: u8) {
+    LANGUAGE.store(lang.min(2), Ordering::Relaxed);
+}
 
 /// Fecha y hora de pared (sin zona horaria).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +30,52 @@ const WEEKDAYS: [&str; 7] = [
     "JUEVES",
     "VIERNES",
     "SÁBADO",
+];
+const WEEKDAYS_EN: [&str; 7] = [
+    "SUNDAY",
+    "MONDAY",
+    "TUESDAY",
+    "WEDNESDAY",
+    "THURSDAY",
+    "FRIDAY",
+    "SATURDAY",
+];
+const WEEKDAYS_PT: [&str; 7] = [
+    "DOMINGO",
+    "SEGUNDA-FEIRA",
+    "TERÇA-FEIRA",
+    "QUARTA-FEIRA",
+    "QUINTA-FEIRA",
+    "SEXTA-FEIRA",
+    "SÁBADO",
+];
+const MONTHS_EN: [&str; 12] = [
+    "JANUARY",
+    "FEBRUARY",
+    "MARCH",
+    "APRIL",
+    "MAY",
+    "JUNE",
+    "JULY",
+    "AUGUST",
+    "SEPTEMBER",
+    "OCTOBER",
+    "NOVEMBER",
+    "DECEMBER",
+];
+const MONTHS_PT: [&str; 12] = [
+    "JANEIRO",
+    "FEVEREIRO",
+    "MARÇO",
+    "ABRIL",
+    "MAIO",
+    "JUNHO",
+    "JULHO",
+    "AGOSTO",
+    "SETEMBRO",
+    "OUTUBRO",
+    "NOVEMBRO",
+    "DEZEMBRO",
 ];
 const MONTHS: [&str; 12] = [
     "ENERO",
@@ -116,16 +171,26 @@ impl DateTime {
         self
     }
 
-    /// "MIÉRCOLES, 23 DE SEPTIEMBRE DE 2026"
+    /// "MIÉRCOLES, 23 DE SEPTIEMBRE DE 2026" (o "WEDNESDAY, SEPTEMBER 23, 2026").
     pub fn write_date(&self, out: &mut impl Write) -> fmt::Result {
-        write!(
-            out,
-            "{}, {} DE {} DE {}",
-            WEEKDAYS[self.weekday()],
-            self.day,
-            MONTHS[self.month as usize - 1],
-            self.year
-        )
+        let (wd, m) = (self.weekday(), self.month as usize - 1);
+        match LANGUAGE.load(Ordering::Relaxed) {
+            1 => write!(
+                out,
+                "{}, {} {}, {}",
+                WEEKDAYS_EN[wd], MONTHS_EN[m], self.day, self.year
+            ),
+            2 => write!(
+                out,
+                "{}, {} DE {} DE {}",
+                WEEKDAYS_PT[wd], self.day, MONTHS_PT[m], self.year
+            ),
+            _ => write!(
+                out,
+                "{}, {} DE {} DE {}",
+                WEEKDAYS[wd], self.day, MONTHS[m], self.year
+            ),
+        }
     }
 
     /// "15:25"

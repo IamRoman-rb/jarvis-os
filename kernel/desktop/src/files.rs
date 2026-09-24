@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 
 use jarvis_fs::{BlockDevice, DirEntry, FileSystem, FsError, Timestamp};
 
+use crate::i18n::{tr, trf};
 use crate::input::{Key, Mods};
 use crate::text_input::TextInput;
 
@@ -70,14 +71,14 @@ impl Kind {
 
     pub fn description(self, entry: &DirEntry) -> &'static str {
         match self {
-            Kind::Folder => "carpeta",
-            Kind::Trash => "papelera",
+            Kind::Folder => tr("carpeta"),
+            Kind::Trash => tr("papelera"),
             Kind::Text if entry.name.to_ascii_lowercase().ends_with(".md") => "markdown",
-            Kind::Text => "texto",
-            Kind::Code => "código",
-            Kind::Image => "imagen",
-            Kind::Archive => "archivo comprimido",
-            Kind::Binary => "archivo",
+            Kind::Text => tr("texto"),
+            Kind::Code => tr("código"),
+            Kind::Image => tr("imagen"),
+            Kind::Archive => tr("archivo comprimido"),
+            Kind::Binary => tr("archivo"),
         }
     }
 }
@@ -102,21 +103,21 @@ pub enum Dialog {
 impl Dialog {
     pub fn title(&self) -> &'static str {
         match self {
-            Dialog::NewFolder(_) => "NUEVA CARPETA",
-            Dialog::NewFile(_) => "NUEVO ARCHIVO DE TEXTO",
-            Dialog::Rename { .. } => "RENOMBRAR",
-            Dialog::ConfirmTrash(_) => "MOVER A LA PAPELERA",
-            Dialog::ConfirmDelete(_) => "BORRAR DEFINITIVAMENTE",
-            Dialog::ConfirmEmptyTrash => "VACIAR LA PAPELERA",
+            Dialog::NewFolder(_) => tr("NUEVA CARPETA"),
+            Dialog::NewFile(_) => tr("NUEVO ARCHIVO DE TEXTO"),
+            Dialog::Rename { .. } => tr("RENOMBRAR"),
+            Dialog::ConfirmTrash(_) => tr("MOVER A LA PAPELERA"),
+            Dialog::ConfirmDelete(_) => tr("BORRAR DEFINITIVAMENTE"),
+            Dialog::ConfirmEmptyTrash => tr("VACIAR LA PAPELERA"),
         }
     }
 
     pub fn accept_label(&self) -> &'static str {
         match self {
-            Dialog::NewFolder(_) | Dialog::NewFile(_) => "CREAR",
-            Dialog::Rename { .. } => "RENOMBRAR",
-            Dialog::ConfirmTrash(_) => "MOVER",
-            Dialog::ConfirmDelete(_) | Dialog::ConfirmEmptyTrash => "BORRAR",
+            Dialog::NewFolder(_) | Dialog::NewFile(_) => tr("CREAR"),
+            Dialog::Rename { .. } => tr("RENOMBRAR"),
+            Dialog::ConfirmTrash(_) => tr("MOVER"),
+            Dialog::ConfirmDelete(_) | Dialog::ConfirmEmptyTrash => tr("BORRAR"),
         }
     }
 
@@ -134,11 +135,13 @@ impl Dialog {
 
     pub fn message(&self) -> String {
         match self {
-            Dialog::NewFolder(_) | Dialog::NewFile(_) | Dialog::Rename { .. } => "Nombre:".into(),
-            Dialog::ConfirmTrash(n) => format!("¿Mover \"{n}\" a la Papelera?"),
-            Dialog::ConfirmDelete(n) => format!("\"{n}\" se borra para siempre."),
+            Dialog::NewFolder(_) | Dialog::NewFile(_) | Dialog::Rename { .. } => {
+                tr("Nombre:").into()
+            }
+            Dialog::ConfirmTrash(n) => trf("¿Mover \"{}\" a la Papelera?", &[n]),
+            Dialog::ConfirmDelete(n) => trf("\"{}\" se borra para siempre.", &[n]),
             Dialog::ConfirmEmptyTrash => {
-                "Todo lo que está en la Papelera se borra para siempre.".into()
+                tr("Todo lo que está en la Papelera se borra para siempre.").into()
             }
         }
     }
@@ -507,9 +510,9 @@ impl FilesApp {
             return;
         };
         let name = e.name.clone();
-        if self.cwd == "/" && name.eq_ignore_ascii_case("Papelera") {
+        if self.cwd == "/" && name.eq_ignore_ascii_case(tr("Papelera")) {
             self.notify(
-                "La Papelera no se puede mover a la Papelera.",
+                tr("La Papelera no se puede mover a la Papelera."),
                 true,
                 now_ms,
                 log,
@@ -613,7 +616,7 @@ impl FilesApp {
                 result.map(|()| {
                     Self::index_remove(fs, None, now);
                     log.push("ARCHIVOS_PAPELERA_VACIA".into());
-                    ("La Papelera está vacía.".into(), None)
+                    (tr("La Papelera está vacía.").into(), None)
                 })
             }
         };
@@ -767,7 +770,7 @@ impl FilesApp {
         log: &mut Vec<String>,
     ) {
         let Some((src, cut)) = self.clipboard.clone() else {
-            self.notify("No hay nada copiado.", false, now_ms, log);
+            self.notify(tr("No hay nada copiado."), false, now_ms, log);
             return;
         };
         let name = basename(&src).to_string();

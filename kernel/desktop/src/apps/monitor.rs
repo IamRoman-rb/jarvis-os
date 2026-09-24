@@ -2,7 +2,7 @@
 //! con gráficos del último minuto, y la lista de apps abiertas con "Finalizar tarea".
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use jarvis_fs::BlockDevice;
@@ -12,6 +12,7 @@ use jarvis_gfx::{Canvas, Rect, theme};
 
 use super::{Click, Ctx, SysView, icon_of};
 use crate::files::format_size;
+use crate::i18n::{tr, trf};
 use crate::input::Key;
 use crate::widgets::{
     WINDOW_BG, bar, big, button, card, draw_fit, duration, graph, ip, label, light, rate, s16,
@@ -80,7 +81,7 @@ impl Monitor {
     }
 
     pub fn title(&self) -> String {
-        "Monitor del sistema".into()
+        tr("Monitor del sistema").into()
     }
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect, sys: &SysView<'_>) {
@@ -89,12 +90,20 @@ impl Monitor {
         let h = sys.history;
         let l = Layout::new(r);
 
-        text::draw(c, r.x + 16, r.y + 16, "RENDIMIENTO", &label(theme::CYAN));
-        let summary = format!(
+        text::draw(
+            c,
+            r.x + 16,
+            r.y + 16,
+            tr("RENDIMIENTO"),
+            &label(theme::CYAN),
+        );
+        let summary = trf(
             "ENCENDIDO HACE {} · {} FPS · {} MS POR FRAME",
-            duration(st.uptime_ms).to_uppercase(),
-            st.fps,
-            st.frame_ms
+            &[
+                &duration(st.uptime_ms).to_uppercase(),
+                &st.fps.to_string(),
+                &st.frame_ms.to_string(),
+            ],
         );
         text::draw_right(
             c,
@@ -105,7 +114,7 @@ impl Monitor {
         );
 
         // CPU
-        let inner = card(c, l.cards[0], "PROCESADOR");
+        let inner = card(c, l.cards[0], tr("PROCESADOR"));
         text::draw(
             c,
             inner.x,
@@ -130,7 +139,7 @@ impl Monitor {
         graph(c, g, &h.cpu, 100, theme::CYAN);
 
         // Memoria
-        let inner = card(c, l.cards[1], "MEMORIA (HEAP DEL NÚCLEO)");
+        let inner = card(c, l.cards[1], tr("MEMORIA (HEAP DEL NÚCLEO)"));
         let pct = (st.heap_used * 100).checked_div(st.heap_total).unwrap_or(0) as u32;
         text::draw(
             c,
@@ -157,7 +166,7 @@ impl Monitor {
         graph(c, g, &h.mem, 100, theme::PARTICLE_BRIGHT);
 
         // Disco
-        let inner = card(c, l.cards[2], "DISCO");
+        let inner = card(c, l.cards[2], tr("DISCO"));
         match sys.disk {
             Some((name, free, total)) => {
                 let used = total.saturating_sub(free);
@@ -185,18 +194,27 @@ impl Monitor {
                 );
             }
             None => {
-                text::draw(c, inner.x, inner.y + 8, "Sin disco", &s16(theme::TEXT_DIM));
+                text::draw(
+                    c,
+                    inner.x,
+                    inner.y + 8,
+                    tr("Sin disco"),
+                    &s16(theme::TEXT_DIM),
+                );
             }
         }
         let g = Rect::new(inner.x, inner.y + 52, inner.w, inner.h - 52);
         graph(c, g, &h.disk, 0, theme::AMBER);
 
         // Red
-        let inner = card(c, l.cards[3], "RED");
+        let inner = card(c, l.cards[3], tr("RED"));
         let net = &st.net;
         let (headline, color) = match (net.present, net.ip) {
-            (false, _) => (String::from("Sin placa de red"), theme::TEXT_DIM),
-            (true, None) => (String::from("Pidiendo dirección (DHCP)..."), theme::AMBER),
+            (false, _) => (String::from(tr("Sin placa de red")), theme::TEXT_DIM),
+            (true, None) => (
+                String::from(tr("Pidiendo dirección (DHCP)...")),
+                theme::AMBER,
+            ),
             (true, Some(a)) => (ip(a), theme::CYAN),
         };
         text::draw(c, inner.x, inner.y + 2, &headline, &s16(color));
@@ -242,14 +260,14 @@ impl Monitor {
         overlay_line(c, g, h.tx.iter().collect(), h.tx.capacity(), max);
 
         // Apps abiertas
-        let inner = card(c, l.list, "APLICACIONES");
+        let inner = card(c, l.list, tr("APLICACIONES"));
         let _ = inner;
         if sys.tasks.is_empty() {
             text::draw(
                 c,
                 l.list.x + 16,
                 l.list.y + 40,
-                "No hay apps abiertas.",
+                tr("No hay apps abiertas."),
                 &s16(theme::TEXT_DIM),
             );
         }
@@ -267,9 +285,9 @@ impl Monitor {
                 theme::CYAN,
             );
             let state = if t.minimized {
-                "minimizada"
+                tr("minimizada")
             } else {
-                "en ejecución"
+                tr("en ejecución")
             };
             draw_fit(
                 c,
@@ -286,7 +304,7 @@ impl Monitor {
                 state,
                 &light(theme::TEXT_DIM),
             );
-            button(c, l.end_button(i), "FINALIZAR", theme::CRIMSON, 25);
+            button(c, l.end_button(i), tr("FINALIZAR"), theme::CRIMSON, 25);
         }
     }
 

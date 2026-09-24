@@ -22,6 +22,7 @@ use super::{Click, Ctx, SysView};
 use crate::config::{Config, SOLID_COLORS, SearchEngine, Wallpaper, valid_name};
 use crate::files::{TRASH, format_size, join};
 use crate::firewall::{Action, Dir, Rule};
+use crate::i18n::{Lang, tr, trf};
 use crate::input::{Key, Mods};
 use crate::system::{Launch, Power};
 use crate::text_input::TextInput;
@@ -66,17 +67,17 @@ pub const SECTIONS: [Section; 11] = [
 impl Section {
     pub fn name(self) -> &'static str {
         match self {
-            Section::System => "Sistema",
-            Section::Personalization => "Personalización",
-            Section::DateTime => "Fecha y hora",
-            Section::Network => "Red e Internet",
-            Section::Browser => "Navegador",
-            Section::Sound => "Sonido",
-            Section::Devices => "Mouse y teclado",
-            Section::Apps => "Aplicaciones",
-            Section::Storage => "Almacenamiento",
-            Section::Security => "Privacidad y seguridad",
-            Section::Firewall => "Firewall",
+            Section::System => tr("Sistema"),
+            Section::Personalization => tr("Personalización"),
+            Section::DateTime => tr("Hora e idioma"),
+            Section::Network => tr("Red e Internet"),
+            Section::Browser => tr("Navegador"),
+            Section::Sound => tr("Sonido"),
+            Section::Devices => tr("Mouse y teclado"),
+            Section::Apps => tr("Aplicaciones"),
+            Section::Storage => tr("Almacenamiento"),
+            Section::Security => tr("Privacidad y seguridad"),
+            Section::Firewall => tr("Firewall"),
         }
     }
 
@@ -107,6 +108,7 @@ pub enum Opt {
     Wallpaper,
     Animations,
     StatusPanel,
+    Language,
     Zone,
     Clock24,
     TestNet,
@@ -222,7 +224,7 @@ impl Settings {
     }
 
     pub fn title(&self) -> String {
-        format!("Configuración · {}", self.section.name())
+        trf("Configuración · {}", &[self.section.name()])
     }
 
     pub fn config(&self) -> &Config {
@@ -263,8 +265,8 @@ impl Settings {
                 alloc::vec![
                     Row::new(
                         Opt::Hostname,
-                        "Nombre del equipo",
-                        "Aparece en la terminal: usuario@equipo",
+                        tr("Nombre del equipo"),
+                        tr("Aparece en la terminal: usuario@equipo"),
                         Text {
                             value: c.hostname.clone(),
                             secret: false
@@ -272,8 +274,8 @@ impl Settings {
                     ),
                     Row::new(
                         Opt::User,
-                        "Usuario",
-                        "Tu nombre de usuario en la terminal",
+                        tr("Usuario"),
+                        tr("Tu nombre de usuario en la terminal"),
                         Text {
                             value: c.user.clone(),
                             secret: false
@@ -281,13 +283,13 @@ impl Settings {
                     ),
                     Row::new(
                         Opt::Info,
-                        "Versión",
-                        "Kernel propio en Rust (x86_64, UEFI)",
+                        tr("Versión"),
+                        tr("Kernel propio en Rust (x86_64, UEFI)"),
                         Value("JARVIS-OS 0.1 · hito K4".into())
                     ),
                     Row::new(
                         Opt::Info,
-                        "Procesador",
+                        tr("Procesador"),
                         "",
                         Value(if stats.cpu_name.is_empty() {
                             "x86_64".into()
@@ -297,101 +299,109 @@ impl Settings {
                     ),
                     Row::new(
                         Opt::Info,
-                        "Memoria",
+                        tr("Memoria"),
                         format!("RAM {}", format_size(stats.ram_total)),
                         Usage(
                             (stats.heap_used * 100)
                                 .checked_div(stats.heap_total)
                                 .unwrap_or(0) as u32,
-                            format!(
+                            trf(
                                 "{} de {} (heap)",
-                                format_size(stats.heap_used),
-                                format_size(stats.heap_total)
+                                &[
+                                    &format_size(stats.heap_used),
+                                    &format_size(stats.heap_total)
+                                ]
                             ),
                         )
                     ),
                     Row::new(
                         Opt::Info,
-                        "Pantalla",
-                        "Resolución que eligió el firmware (UEFI GOP)",
+                        tr("Pantalla"),
+                        tr("Resolución que eligió el firmware (UEFI GOP)"),
                         Value(format!("{w} × {h}"))
                     ),
                     Row::new(
                         Opt::Info,
-                        "Tiempo encendido",
+                        tr("Tiempo encendido"),
                         "",
                         Value(duration(stats.uptime_ms))
                     ),
                     Row::new(
                         Opt::Restart,
-                        "Reiniciar",
-                        "Vuelve a arrancar la máquina",
-                        Button("REINICIAR")
+                        tr("Reiniciar"),
+                        tr("Vuelve a arrancar la máquina"),
+                        Button(tr("REINICIAR"))
                     ),
                     Row::new(
                         Opt::Shutdown,
-                        "Apagar",
-                        "Todo lo del disco ya está guardado",
-                        Button("APAGAR")
+                        tr("Apagar"),
+                        tr("Todo lo del disco ya está guardado"),
+                        Button(tr("APAGAR"))
                     ),
                 ]
             }
             Section::Personalization => alloc::vec![
                 Row::new(
                     Opt::Wallpaper,
-                    "Fondo de escritorio",
-                    "El HUD, un color o una imagen BMP de /Imágenes",
+                    tr("Fondo de escritorio"),
+                    tr("El HUD, un color o una imagen BMP de /Imágenes"),
                     Choice(wallpaper_name(&c.wallpaper))
                 ),
                 Row::new(
                     Opt::Animations,
-                    "Animaciones",
-                    "La esfera de JARVIS gira (apagarlo ahorra CPU)",
+                    tr("Animaciones"),
+                    tr("La esfera de JARVIS gira (apagarlo ahorra CPU)"),
                     on(c.animations)
                 ),
                 Row::new(
                     Opt::StatusPanel,
-                    "Panel de estado",
-                    "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
+                    tr("Panel de estado"),
+                    tr("Gráficos de CPU, memoria, disco y red abajo a la izquierda"),
                     on(c.status_panel)
                 ),
             ],
             Section::DateTime => alloc::vec![
                 Row::new(
+                    Opt::Language,
+                    tr("Idioma"),
+                    tr("Menús, ventanas y Configuración (la terminal sigue en castellano)"),
+                    Choice(c.language.name().into())
+                ),
+                Row::new(
                     Opt::Zone,
-                    "Zona horaria",
-                    "El reloj de la máquina está en UTC",
+                    tr("Zona horaria"),
+                    tr("El reloj de la máquina está en UTC"),
                     Choice(c.zone_label())
                 ),
                 Row::new(
                     Opt::Clock24,
-                    "Formato de 24 horas",
-                    "Si no, 12 horas con a. m. / p. m.",
+                    tr("Formato de 24 horas"),
+                    tr("Si no, 12 horas con a. m. / p. m."),
                     on(c.clock_24h)
                 ),
             ],
             Section::Network => {
                 let n = &stats.net;
                 let state = match (n.present, n.ip) {
-                    (false, _) => "Sin placa de red".to_string(),
-                    (true, None) => "Pidiendo dirección (DHCP)...".to_string(),
-                    (true, Some(a)) => format!("Conectado · {}", ip(a)),
+                    (false, _) => tr("Sin placa de red").to_string(),
+                    (true, None) => tr("Pidiendo dirección (DHCP)...").to_string(),
+                    (true, Some(a)) => trf("Conectado · {}", &[&ip(a)]),
                 };
                 let m = n.mac;
                 let test = match &self.net_test {
                     Some((_, msg)) => msg.clone(),
-                    None => "Pide http://info.cern.ch/ por la red propia".into(),
+                    None => tr("Pide http://info.cern.ch/ por la red propia").into(),
                 };
                 alloc::vec![
                     Row::new(
                         Opt::Info,
-                        "Estado",
+                        tr("Estado"),
                         "Placa virtio-net · TCP/IP smoltcp",
                         Value(state)
                     ),
                     Row::new(
                         Opt::Info,
-                        "Dirección física (MAC)",
+                        tr("Dirección física (MAC)"),
                         "",
                         Value(format!(
                             "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
@@ -400,8 +410,8 @@ impl Settings {
                     ),
                     Row::new(
                         Opt::Info,
-                        "Puerta de enlace y DNS",
-                        "Los da el servidor DHCP",
+                        tr("Puerta de enlace y DNS"),
+                        tr("Los da el servidor DHCP"),
                         Value(format!(
                             "{} · {}",
                             n.gateway.map(ip).unwrap_or_else(|| "-".into()),
@@ -410,28 +420,32 @@ impl Settings {
                     ),
                     Row::new(
                         Opt::Info,
-                        "Tráfico desde el arranque",
+                        tr("Tráfico desde el arranque"),
                         "",
-                        Value(format!(
+                        Value(trf(
                             "recibido {} · enviado {}",
-                            format_size(stats.net_rx),
-                            format_size(stats.net_tx)
+                            &[&format_size(stats.net_rx), &format_size(stats.net_tx)]
                         ))
                     ),
                     Row::new(
                         Opt::Info,
                         "HTTPS",
-                        "El kernel todavía no tiene TLS: usa el puente del anfitrión",
+                        tr("El kernel todavía no tiene TLS: usa el puente del anfitrión"),
                         Value("10.0.2.2:8118".into())
                     ),
-                    Row::new(Opt::TestNet, "Probar la conexión", test, Button("PROBAR")),
+                    Row::new(
+                        Opt::TestNet,
+                        tr("Probar la conexión"),
+                        test,
+                        Button(tr("PROBAR"))
+                    ),
                 ]
             }
             Section::Browser => alloc::vec![
                 Row::new(
                     Opt::Homepage,
-                    "Página de inicio",
-                    "Lo que abre el navegador (about:inicio = la de JARVIS)",
+                    tr("Página de inicio"),
+                    tr("Lo que abre el navegador (about:inicio = la de JARVIS)"),
                     Text {
                         value: c.homepage.clone(),
                         secret: false
@@ -439,76 +453,76 @@ impl Settings {
                 ),
                 Row::new(
                     Opt::Search,
-                    "Buscador",
-                    "Lo que escribís en la barra que no es una dirección",
+                    tr("Buscador"),
+                    tr("Lo que escribís en la barra que no es una dirección"),
                     Choice(c.search.name().into())
                 ),
                 Row::new(
                     Opt::LightPages,
-                    "Páginas claras",
-                    "Fondo blanco como en otros navegadores (si no, oscuro)",
+                    tr("Páginas claras"),
+                    tr("Fondo blanco como en otros navegadores (si no, oscuro)"),
                     on(c.light_pages)
                 ),
                 Row::new(
                     Opt::Images,
-                    "Mostrar imágenes",
-                    "Se convierten a BMP en el puente del anfitrión",
+                    tr("Mostrar imágenes"),
+                    tr("Se convierten a BMP en el puente del anfitrión"),
                     on(c.load_images)
                 ),
                 Row::new(
                     Opt::Reader,
-                    "Modo lectura",
-                    "Solo el contenido: sin menús, formularios ni estilos",
+                    tr("Modo lectura"),
+                    tr("Solo el contenido: sin menús, formularios ni estilos"),
                     on(c.reader_mode)
                 ),
             ],
             Section::Sound => alloc::vec![
                 Row::new(
                     Opt::Sounds,
-                    "Sonidos del sistema",
-                    "Un pitido corto con los avisos de error",
+                    tr("Sonidos del sistema"),
+                    tr("Un pitido corto con los avisos de error"),
                     on(c.sounds)
                 ),
                 Row::new(
                     Opt::TestSound,
-                    "Probar el parlante",
-                    "Un La (440 Hz) por el parlante de la PC",
-                    Button("PROBAR")
+                    tr("Probar el parlante"),
+                    tr("Un La (440 Hz) por el parlante de la PC"),
+                    Button(tr("PROBAR"))
                 ),
                 Row::new(
                     Opt::Info,
-                    "Dispositivo",
-                    "Canal 2 del PIT (8254)",
-                    Value("Parlante de la PC".into())
+                    tr("Dispositivo"),
+                    tr("Canal 2 del PIT (8254)"),
+                    Value(tr("Parlante de la PC").into())
                 ),
             ],
             Section::Devices => alloc::vec![
                 Row::new(
                     Opt::MouseSpeed,
-                    "Velocidad del puntero",
-                    "1 = lento · 3 = normal · 5 = rápido",
+                    tr("Velocidad del puntero"),
+                    tr("1 = lento · 3 = normal · 5 = rápido"),
                     Choice(format!("{}", c.mouse_speed))
                 ),
                 Row::new(
                     Opt::WheelLines,
-                    "Rueda del mouse",
-                    "Cuánto se mueve la página con cada paso",
-                    Choice(format!("{} renglones", c.wheel_lines))
+                    tr("Rueda del mouse"),
+                    tr("Cuánto se mueve la página con cada paso"),
+                    Choice(trf("{} renglones", &[&c.wheel_lines.to_string()]))
                 ),
                 Row::new(
                     Opt::InvertWheel,
-                    "Invertir la rueda",
-                    "Desplazamiento \"natural\", como en un touchpad",
+                    tr("Invertir la rueda"),
+                    tr("Desplazamiento \"natural\", como en un touchpad"),
                     on(c.invert_wheel)
                 ),
                 Row::new(
                     Opt::Keyboard,
-                    "Distribución del teclado",
-                    "Latinoamérica: ñ, tildes (´ + vocal) y AltGr+Q = @",
+                    tr("Distribución del teclado"),
+                    tr("Latinoamérica: ñ, tildes (´ + vocal) y AltGr+Q = @"),
                     Choice(if c.latam_keyboard {
-                        "Español (Latinoamérica)".into()
+                        tr("Español (Latinoamérica)").into()
                     } else {
-                        "Inglés (EE. UU.)".into()
+                        tr("Inglés (EE. UU.)").into()
                     })
                 ),
             ],
@@ -516,22 +530,22 @@ impl Settings {
                 let mut rows = alloc::vec![
                     Row::new(
                         Opt::Updates,
-                        "Buscar actualizaciones",
-                        "Abre la terminal con: apt update && apt upgrade",
-                        Button("BUSCAR")
+                        tr("Buscar actualizaciones"),
+                        tr("Abre la terminal con: apt update && apt upgrade"),
+                        Button(tr("BUSCAR"))
                     ),
                     Row::new(
                         Opt::MorePackages,
-                        "Instalar más programas",
-                        "Abre la terminal con la lista de paquetes (apt list)",
-                        Button("VER")
+                        tr("Instalar más programas"),
+                        tr("Abre la terminal con la lista de paquetes (apt list)"),
+                        Button(tr("VER"))
                     ),
                 ];
                 if self.packages.is_empty() {
                     rows.push(Row::new(
                         Opt::Info,
-                        "Programas instalados",
-                        "Todavía no instalaste ninguno. Probá: apt install neofetch",
+                        tr("Programas instalados"),
+                        tr("Todavía no instalaste ninguno. Probá: apt install neofetch"),
                         Value("0".into()),
                     ));
                 }
@@ -539,8 +553,8 @@ impl Settings {
                     rows.push(Row::new(
                         Opt::Remove(i),
                         name.clone(),
-                        format!("versión {version}"),
-                        Button("DESINSTALAR"),
+                        trf("versión {}", &[version]),
+                        Button(tr("DESINSTALAR")),
                     ));
                 }
                 rows
@@ -550,7 +564,7 @@ impl Settings {
                 if let Some((used, total)) = self.disk_usage_hint() {
                     rows.push(Row::new(
                         Opt::Info,
-                        "Disco JARVIS (FAT32)",
+                        tr("Disco JARVIS (FAT32)"),
                         format!("{} libres", format_size(total - used)),
                         Usage(
                             (used * 100).checked_div(total).unwrap_or(0) as u32,
@@ -569,31 +583,31 @@ impl Settings {
                 }
                 rows.push(Row::new(
                     Opt::EmptyTrash,
-                    "Vaciar la Papelera",
+                    tr("Vaciar la Papelera"),
                     if self.confirm_trash {
-                        "¿Seguro? Se borra para siempre: hacé clic otra vez"
+                        tr("¿Seguro? Se borra para siempre: hacé clic otra vez")
                     } else {
-                        "Borra para siempre lo que hay en /Papelera"
+                        tr("Borra para siempre lo que hay en /Papelera")
                     },
                     Button(if self.confirm_trash {
-                        "CONFIRMAR"
+                        tr("CONFIRMAR")
                     } else {
-                        "VACIAR"
+                        tr("VACIAR")
                     }),
                 ));
                 rows
             }
             Section::Security => {
                 let lock = if c.lock_minutes == 0 {
-                    "Nunca".to_string()
+                    tr("Nunca").to_string()
                 } else {
-                    format!("{} min", c.lock_minutes)
+                    trf("{} min", &[&c.lock_minutes.to_string()])
                 };
                 alloc::vec![
                     Row::new(
                         Opt::Pin,
-                        "PIN de desbloqueo",
-                        "Solo números (hasta 8). Vacío = sin PIN",
+                        tr("PIN de desbloqueo"),
+                        tr("Solo números (hasta 8). Vacío = sin PIN"),
                         Text {
                             value: c.pin.clone(),
                             secret: true
@@ -601,21 +615,21 @@ impl Settings {
                     ),
                     Row::new(
                         Opt::LockAfter,
-                        "Bloquear sin actividad",
-                        "Después de un rato sin usar el teclado ni el mouse",
+                        tr("Bloquear sin actividad"),
+                        tr("Después de un rato sin usar el teclado ni el mouse"),
                         Choice(lock)
                     ),
                     Row::new(
                         Opt::LockNow,
-                        "Bloquear ahora",
-                        "Lo mismo que Win+L",
-                        Button("BLOQUEAR")
+                        tr("Bloquear ahora"),
+                        tr("Lo mismo que Win+L"),
+                        Button(tr("BLOQUEAR"))
                     ),
                     Row::new(
                         Opt::Info,
-                        "Borrar = mover a la Papelera",
-                        "Ni las apps ni la terminal borran para siempre sin preguntar",
-                        Value("Siempre".into())
+                        tr("Borrar = mover a la Papelera"),
+                        tr("Ni las apps ni la terminal borran para siempre sin preguntar"),
+                        Value(tr("Siempre").into())
                     ),
                 ]
             }
@@ -624,55 +638,55 @@ impl Settings {
                 let mut rows = alloc::vec![
                     Row::new(
                         Opt::FwEnabled,
-                        "Firewall",
-                        "Revisa cada conexión que sale antes de que llegue a la red",
+                        tr("Firewall"),
+                        tr("Revisa cada conexión que sale antes de que llegue a la red"),
                         on(fw.enabled)
                     ),
                     Row::new(
                         Opt::FwDefaultOut,
-                        "Conexiones salientes",
-                        "Lo que no dice ninguna regla",
+                        tr("Conexiones salientes"),
+                        tr("Lo que no dice ninguna regla"),
                         Choice(
                             if fw.default_out == Action::Allow {
-                                "Permitir"
+                                tr("Permitir")
                             } else {
-                                "Denegar"
+                                tr("Denegar")
                             }
                             .into()
                         )
                     ),
                     Row::new(
                         Opt::Info,
-                        "Conexiones entrantes",
-                        "JARVIS-OS no ofrece servicios: se rechaza lo que no pidió",
-                        Value("Bloqueadas".into())
+                        tr("Conexiones entrantes"),
+                        tr("JARVIS-OS no ofrece servicios: se rechaza lo que no pidió"),
+                        Value(tr("Bloqueadas").into())
                     ),
                     Row::new(
                         Opt::FwLog,
-                        "Anotar lo bloqueado",
-                        "En /Sistema/firewall.log (ufw show blocked)",
+                        tr("Anotar lo bloqueado"),
+                        tr("En /Sistema/firewall.log (ufw show blocked)"),
                         on(fw.log)
                     ),
                     Row::new(
                         Opt::FwShowLog,
-                        "Ver lo bloqueado",
-                        "Abre la terminal con: ufw show blocked",
-                        Button("VER")
+                        tr("Ver lo bloqueado"),
+                        tr("Abre la terminal con: ufw show blocked"),
+                        Button(tr("VER"))
                     ),
                 ];
                 for (i, (name, desc)) in crate::firewall::APPS.iter().enumerate() {
                     let blocked = fw.rules.contains(&app_rule(name));
                     rows.push(Row::new(
                         Opt::FwApp(i),
-                        format!("Permitir: {desc}"),
-                        format!("Regla: deny out app {name}"),
+                        trf("Permitir: {}", &[tr(desc)]),
+                        trf("Regla: deny out app {}", &[name]),
                         on(!blocked),
                     ));
                 }
                 rows.push(Row::new(
                     Opt::FwAddSite,
-                    "Bloquear un sitio",
-                    "Ejemplo: tiktok.com (también bloquea sus subdominios)",
+                    tr("Bloquear un sitio"),
+                    tr("Ejemplo: tiktok.com (también bloquea sus subdominios)"),
                     Text {
                         value: String::new(),
                         secret: false,
@@ -681,9 +695,9 @@ impl Settings {
                 for (i, r) in fw.rules.iter().enumerate() {
                     rows.push(Row::new(
                         Opt::FwRule(i),
-                        format!("Regla {}", i + 1),
+                        trf("Regla {}", &[&(i + 1).to_string()]),
                         r.to_line(),
-                        Button("BORRAR"),
+                        Button(tr("BORRAR")),
                     ));
                 }
                 rows
@@ -735,7 +749,13 @@ impl Settings {
         c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
         // Barra lateral.
         c.fill_rect(r.x, r.y, SIDEBAR_W, r.h, theme::PANEL);
-        text::draw(c, r.x + 20, r.y + 20, "CONFIGURACIÓN", &label(theme::CYAN));
+        text::draw(
+            c,
+            r.x + 20,
+            r.y + 20,
+            tr("CONFIGURACIÓN"),
+            &label(theme::CYAN),
+        );
         for (i, s) in SECTIONS.iter().enumerate() {
             let sr = Self::section_rect(r, i);
             let active = *s == self.section;
@@ -812,10 +832,9 @@ impl Settings {
             self.draw_control(c, row, cr, sel);
         }
         if rows.len() > visible {
-            let hint = format!(
+            let hint = trf(
                 "{} de {} · flechas para ver más",
-                self.selected + 1,
-                rows.len()
+                &[&(self.selected + 1).to_string(), &rows.len().to_string()],
             );
             text::draw_right(c, p.x + p.w - 24, p.y + 30, &hint, &light(theme::TEXT_DIM));
         }
@@ -847,7 +866,11 @@ impl Settings {
                     c,
                     x - 10,
                     y + 4,
-                    if *v { "Activado" } else { "Desactivado" },
+                    if *v {
+                        tr("Activado")
+                    } else {
+                        tr("Desactivado")
+                    },
                     &st,
                 );
             }
@@ -908,7 +931,7 @@ impl Settings {
                     cr.x + 10,
                     cr.y + (cr.h - 16) / 2,
                     if placeholder {
-                        "(vacío) · Enter para editar"
+                        tr("(vacío) · Enter para editar")
                     } else {
                         &shown
                     },
@@ -994,9 +1017,14 @@ impl Settings {
             Opt::StatusPanel => c.status_panel = !c.status_panel,
             Opt::Zone => c.utc_offset = (step(c.utc_offset as i32 + 12, 27) - 12) as i8,
             Opt::Clock24 => c.clock_24h = !c.clock_24h,
+            Opt::Language => {
+                let all = Lang::ALL;
+                let pos = all.iter().position(|l| *l == c.language).unwrap_or(0) as i32;
+                c.language = all[step(pos, all.len() as i32) as usize];
+            }
             Opt::TestNet => {
                 let id = ctx.out.fetch("http://info.cern.ch/");
-                self.net_test = Some((id, "Probando...".into()));
+                self.net_test = Some((id, tr("Probando...").into()));
                 return;
             }
             Opt::Search => {
@@ -1052,8 +1080,10 @@ impl Settings {
                     }
                     let _ = fs.write_file(crate::files::TRASH_INDEX, b"", now);
                     ctx.log.push("ARCHIVOS_PAPELERA_VACIA".into());
-                    ctx.out
-                        .notify(format!("Papelera vacía ({n} elementos)."), false);
+                    ctx.out.notify(
+                        trf("Papelera vacía ({} elementos).", &[&n.to_string()]),
+                        false,
+                    );
                     self.storage = folder_sizes(fs);
                 }
                 return;
@@ -1149,7 +1179,7 @@ impl Settings {
         if ok {
             self.commit(ctx);
         } else {
-            ctx.out.notify("Ese valor no sirve (usuario y equipo: letras, números y guiones; PIN: solo números).", true);
+            ctx.out.notify(tr("Ese valor no sirve (usuario y equipo: letras, números y guiones; PIN: solo números)."), true);
         }
         self.dirty = true;
     }
@@ -1256,12 +1286,11 @@ impl Settings {
             && *waiting == id
         {
             *msg = match result {
-                Ok(r) => format!(
+                Ok(r) => trf(
                     "Funciona: respuesta {} con {} bytes",
-                    r.status,
-                    r.body.len()
+                    &[&r.status.to_string(), &r.body.len().to_string()],
                 ),
-                Err(e) => format!("No anduvo: {e}"),
+                Err(e) => trf("No anduvo: {}", &[e]),
             };
             self.dirty = true;
         }
@@ -1281,10 +1310,10 @@ fn app_rule(name: &str) -> Rule {
 
 fn wallpaper_name(w: &Wallpaper) -> String {
     match w {
-        Wallpaper::Hud => "HUD de JARVIS".into(),
+        Wallpaper::Hud => tr("HUD de JARVIS").into(),
         Wallpaper::Solid(n) => SOLID_COLORS
             .get(*n)
-            .map_or("Color".into(), |c| c.0.to_string()),
+            .map_or(tr("Color").into(), |c| c.0.to_string()),
         Wallpaper::Image(p) => p.rsplit('/').next().unwrap_or(p).to_string(),
     }
 }

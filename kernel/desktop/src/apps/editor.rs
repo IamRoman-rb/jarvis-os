@@ -13,6 +13,7 @@ use jarvis_gfx::{Canvas, Rect, theme};
 
 use super::{Click, Ctx};
 use crate::files::{error_message, format_size};
+use crate::i18n::{tr, trf};
 use crate::input::{Key, Mods};
 use crate::text_input::TextInput;
 use crate::widgets::{FIELD_BG, WINDOW_BG, draw_fit, label, light, s16};
@@ -73,7 +74,7 @@ impl Editor {
             match fs.read_prefix(path, MAX_FILE + 1) {
                 Ok(bytes) if bytes.len() > MAX_FILE => {
                     ed.notice(
-                        "El archivo es muy grande: se muestra el principio.",
+                        tr("El archivo es muy grande: se muestra el principio."),
                         true,
                         ctx.now_ms,
                     );
@@ -81,7 +82,7 @@ impl Editor {
                 }
                 Ok(bytes) => ed.load(&bytes),
                 Err(jarvis_fs::FsError::NotFound) => {
-                    ed.notice("Archivo nuevo: Ctrl+S lo crea.", false, ctx.now_ms)
+                    ed.notice(tr("Archivo nuevo: Ctrl+S lo crea."), false, ctx.now_ms)
                 }
                 Err(e) => ed.notice(error_message(e), true, ctx.now_ms),
             }
@@ -119,8 +120,11 @@ impl Editor {
             .path
             .as_deref()
             .map(|p| p.rsplit('/').next().unwrap_or(p))
-            .unwrap_or("Sin título");
-        format!("{}{} · Editor", if self.modified { "* " } else { "" }, name)
+            .unwrap_or(tr("Sin título"));
+        trf(
+            "{}{} · Editor",
+            &[if self.modified { "* " } else { "" }, &name],
+        )
     }
 
     pub fn tick(&mut self, now_ms: u64) {
@@ -216,7 +220,7 @@ impl Editor {
         };
         let now = ctx.timestamp();
         let Some(fs) = ctx.fs.as_deref_mut() else {
-            self.notice("No hay disco.", true, ctx.now_ms);
+            self.notice(tr("No hay disco."), true, ctx.now_ms);
             return;
         };
         let text = self.text();
@@ -252,7 +256,7 @@ impl Editor {
                         self.path = Some(path);
                         self.save(ctx);
                     } else {
-                        self.notice("La ruta tiene que empezar con /", true, ctx.now_ms);
+                        self.notice(tr("La ruta tiene que empezar con /"), true, ctx.now_ms);
                     }
                 }
                 other => {
@@ -338,7 +342,7 @@ impl Editor {
         if self.modified && !self.close_warned {
             self.close_warned = true;
             self.notice(
-                "Hay cambios sin guardar: Ctrl+S guarda; cerrá de nuevo para descartarlos.",
+                tr("Hay cambios sin guardar: Ctrl+S guarda; cerrá de nuevo para descartarlos."),
                 true,
                 ctx.now_ms,
             );
@@ -383,14 +387,13 @@ impl Editor {
                 draw_fit(c, s.x + 12, ty, msg, &s16(col), s.w - 260);
             }
             None => {
-                let path = self.path.as_deref().unwrap_or("(sin guardar)");
+                let path = self.path.as_deref().unwrap_or(tr("(sin guardar)"));
                 draw_fit(c, s.x + 12, ty, path, &light(theme::TEXT_DIM), s.w - 260);
             }
         }
-        let pos = format!(
+        let pos = trf(
             "LÍN {} · COL {} · CTRL+S GUARDAR",
-            self.row + 1,
-            self.col + 1
+            &[&(self.row + 1).to_string(), &(self.col + 1).to_string()],
         );
         text::draw_right(c, s.x + s.w - 12, ty, &pos, &label(theme::TEXT_DIM));
 
@@ -398,7 +401,13 @@ impl Editor {
             let d = Rect::new(r.x + (r.w - 460) / 2, r.y + 60, 460, 120);
             jarvis_gfx::shapes::rounded_rect(c, d.x, d.y, d.w, d.h, 8, theme::PANEL, 255);
             jarvis_gfx::shapes::rounded_outline(c, d.x, d.y, d.w, d.h, 8, theme::CYAN.scale(180));
-            text::draw(c, d.x + 18, d.y + 16, "GUARDAR COMO", &label(theme::CYAN));
+            text::draw(
+                c,
+                d.x + 18,
+                d.y + 16,
+                tr("GUARDAR COMO"),
+                &label(theme::CYAN),
+            );
             let f = Rect::new(d.x + 18, d.y + 46, d.w - 36, 32);
             c.fill_rect(f.x, f.y, f.w, f.h, FIELD_BG);
             let tw = draw_fit(c, f.x + 8, f.y + 8, &input.text, &text_st, f.w - 20);
@@ -407,7 +416,7 @@ impl Editor {
                 c,
                 d.x + 18,
                 d.y + 90,
-                "Enter guarda · Esc cancela",
+                tr("Enter guarda · Esc cancela"),
                 &light(theme::TEXT_DIM),
             );
         }

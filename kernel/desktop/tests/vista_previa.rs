@@ -98,7 +98,18 @@ fn to_bmp(data: &[u8]) -> Result<Vec<u8>, String> {
 fn vista_previa_de_una_pagina() {
     let url = std::env::var("JARVIS_URL").unwrap_or_else(|_| "https://www.google.com/".into());
     let mut t = Driver::new();
-    t.d.open(Launch::Browse(url), t.now, CLOCK);
+    // JARVIS_IDIOMA=en|pt: la interfaz en otro idioma.
+    if let Ok(l) = std::env::var("JARVIS_IDIOMA") {
+        jarvis_desktop::i18n::set(jarvis_desktop::i18n::Lang::from_code(&l));
+    }
+    // JARVIS_URL=config:N abre la Configuración en la sección N; `archivos`, los Archivos.
+    let what = match url.as_str() {
+        u if u.starts_with("config:") => Launch::Settings(u[7..].parse().unwrap_or(0)),
+        "archivos" => Launch::Folder("/".into()),
+        "terminal" => Launch::Terminal(None),
+        _ => Launch::Browse(url.clone()),
+    };
+    t.d.open(what, t.now, CLOCK);
     let serve = |t: &mut Driver| {
         for _ in 0..6 {
             let reqs = t.d.take_requests().net;
@@ -136,6 +147,16 @@ fn vista_previa_de_una_pagina() {
     for _ in 0..down {
         t.key(jarvis_desktop::Key::PageDown);
     }
+    // Todo de nuevo (la ventana ya se dibujó una vez en otros buffers): Win+Ctrl+Shift+B.
+    t.combo(
+        jarvis_desktop::Mods {
+            win: true,
+            ctrl: true,
+            shift: true,
+            ..jarvis_desktop::Mods::NONE
+        },
+        jarvis_desktop::Key::Char('b'),
+    );
     let (mut bg, mut fr) = buffers();
     let mut bgc = canvas(&mut bg);
     let mut frame = canvas(&mut fr);

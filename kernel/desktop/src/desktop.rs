@@ -32,6 +32,7 @@ use crate::apps::{
 use crate::chrome::{self, Hover};
 use crate::config::{self, Config, Wallpaper};
 use crate::cursor;
+use crate::i18n::{tr, trf};
 use crate::input::{Event, Key, Mods, MousePacket};
 use crate::panels::{self, Action, Menu, QuickButton, QuickHit};
 use crate::shell::{
@@ -266,6 +267,7 @@ impl<D: BlockDevice> Desktop<D> {
             .and_then(|fs| fs.read_file(config::PATH).ok())
             .map(|b| Config::parse(&String::from_utf8_lossy(&b)))
             .unwrap_or_default();
+        crate::i18n::set(config.language);
         let screen = Rect::new(0, 0, width as i32, height as i32);
         let work = Rect::new(0, WORK_TOP, width as i32, height as i32 - WORK_TOP);
         Desktop {
@@ -507,7 +509,7 @@ impl<D: BlockDevice> Desktop<D> {
         }
         if req.kind != crate::system::FetchKind::Image {
             self.notify(
-                format!("Firewall: bloqueó {host} ({})", req.app),
+                trf("Firewall: bloqueó {} ({})", &[&host, &req.app]),
                 true,
                 now_ms,
             );
@@ -990,7 +992,14 @@ impl<D: BlockDevice> Desktop<D> {
         let (cur, n) = self.wm.desktops();
         self.logs
             .push(format!("ESCRITORIO_VIRTUAL {} de {n}", cur + 1));
-        self.notify(format!("Escritorio {} de {n}", cur + 1), false, now_ms);
+        self.notify(
+            trf(
+                "Escritorio {} de {}",
+                &[&(cur + 1).to_string(), &n.to_string()],
+            ),
+            false,
+            now_ms,
+        );
     }
 
     /// Hace lo que se eligió en un menú (Win+X, Alt+Espacio).
@@ -1045,9 +1054,18 @@ impl<D: BlockDevice> Desktop<D> {
         if old.wallpaper != self.config.wallpaper {
             self.bg_dirty = true;
         }
+        if old.language != self.config.language {
+            // Otro idioma: se redibuja todo (barra, ventanas, HUD).
+            crate::i18n::set(self.config.language);
+            self.bg_dirty = true;
+            for s in &mut self.slots {
+                s.chrome_dirty = true;
+            }
+        }
         if old.clock_24h != self.config.clock_24h
             || old.status_panel != self.config.status_panel
             || old.animations != self.config.animations
+            || old.language != self.config.language
         {
             self.full_redraw = true;
         }
@@ -1070,7 +1088,7 @@ impl<D: BlockDevice> Desktop<D> {
         match saved {
             Some(Ok(())) => self.logs.push("CONFIG_GUARDADA".into()),
             Some(Err(e)) => self.notify(
-                format!("No se pudo guardar la configuración: {e}"),
+                trf("No se pudo guardar la configuración: {}", &[&e.to_string()]),
                 true,
                 now_ms,
             ),
@@ -2179,7 +2197,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Quick { sel } => {
                 let net = match self.stats.net.ip {
                     Some(a) => format!("RED {}", crate::widgets::ip(a)),
-                    None => "SIN RED".into(),
+                    None => tr("SIN RED").into(),
                 };
                 panels::draw_quick(frame, w, h, &self.config, *sel, &net);
             }
@@ -2224,7 +2242,7 @@ impl<D: BlockDevice> Desktop<D> {
         area: Option<Rect>,
     ) {
         let Some(fs) = self.fs.as_mut() else {
-            self.notify("No hay disco para guardar la captura.", true, now_ms);
+            self.notify(tr("No hay disco para guardar la captura."), true, now_ms);
             return;
         };
         let ts = crate::apps::timestamp(clock);
@@ -2268,9 +2286,13 @@ impl<D: BlockDevice> Desktop<D> {
         match fs.write_file(&path, &data, ts) {
             Ok(()) => {
                 self.logs.push(format!("CAPTURA {path}"));
-                self.notify(format!("Captura guardada en {path}"), false, now_ms);
+                self.notify(trf("Captura guardada en {}", &[&path]), false, now_ms);
             }
-            Err(e) => self.notify(format!("No se pudo guardar la captura: {e}"), true, now_ms),
+            Err(e) => self.notify(
+                trf("No se pudo guardar la captura: {}", &[&e.to_string()]),
+                true,
+                now_ms,
+            ),
         }
     }
 

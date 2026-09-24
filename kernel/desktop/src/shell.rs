@@ -3,7 +3,7 @@
 //! la vista de tareas, la pantalla de bloqueo, el diálogo de apagado y los avisos.
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use jarvis_gfx::clock::{DateTime, StrBuf};
@@ -14,6 +14,7 @@ use jarvis_gfx::vfont::VectorText;
 use jarvis_gfx::{Canvas, Color, Rect, theme};
 
 use crate::apps::{icon_of, name_of};
+use crate::i18n::{tr, trf};
 use crate::system::{AppKind, History, SystemStats};
 use crate::text_input::TextInput;
 use crate::widgets::{FIELD_BG, SELECTED_BG, bar, button, draw_fit, graph, ip, label, light, s16};
@@ -58,15 +59,15 @@ pub fn launcher_icon(l: Launcher) -> Icon {
 
 pub fn launcher_name(l: Launcher) -> &'static str {
     match l {
-        Launcher::Start => "Inicio (Win)",
-        Launcher::App(AppKind::Console) => "Consola JARVIS (Win+R)",
-        Launcher::App(AppKind::Monitor) => "Monitor (Ctrl+Shift+Esc)",
-        Launcher::App(AppKind::Files) => "Archivos (Win+E)",
-        Launcher::App(AppKind::Terminal) => "Terminal (Ctrl+Alt+T)",
-        Launcher::App(AppKind::Settings) => "Configuración (Win+I)",
+        Launcher::Start => tr("Inicio (Win)"),
+        Launcher::App(AppKind::Console) => tr("Consola JARVIS (Win+R)"),
+        Launcher::App(AppKind::Monitor) => tr("Monitor (Ctrl+Shift+Esc)"),
+        Launcher::App(AppKind::Files) => tr("Archivos (Win+E)"),
+        Launcher::App(AppKind::Terminal) => tr("Terminal (Ctrl+Alt+T)"),
+        Launcher::App(AppKind::Settings) => tr("Configuración (Win+I)"),
         Launcher::App(k) => name_of(k),
-        Launcher::Capture => "Captura (Impr Pant)",
-        Launcher::Jarvis => "JARVIS · escritorio (Win+D)",
+        Launcher::Capture => tr("Captura (Impr Pant)"),
+        Launcher::Jarvis => tr("JARVIS · escritorio (Win+D)"),
     }
 }
 
@@ -217,9 +218,9 @@ pub fn draw_status(
     let p = status_panel_rect(w, h);
     rounded_rect(c, p.x, p.y, p.w, p.h, 8, theme::PANEL, 215);
     rounded_outline(c, p.x, p.y, p.w, p.h, 8, theme::PANEL_RIM);
-    text::draw(c, p.x + 12, p.y + 10, "ESTADO", &label(theme::TEXT_DIM));
+    text::draw(c, p.x + 12, p.y + 10, tr("ESTADO"), &label(theme::TEXT_DIM));
     let hint = label(theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 120));
-    text::draw_right(c, p.x + p.w - 12, p.y + 10, "CLIC: MONITOR", &hint);
+    text::draw_right(c, p.x + p.w - 12, p.y + 10, tr("CLIC: MONITOR"), &hint);
     line(
         c,
         p.x + 1,
@@ -248,7 +249,7 @@ pub fn draw_status(
     text::draw_right(c, right, row(0), &format!("{} %", st.cpu_pct), &value);
 
     // Memoria: barra + usada/total.
-    text::draw(c, p.x + 12, row(1), "MEMORIA", &key);
+    text::draw(c, p.x + 12, row(1), tr("MEMORIA"), &key);
     let mem_pct = (st.heap_used * 100).checked_div(st.heap_total).unwrap_or(0) as u32;
     bar(
         c,
@@ -260,22 +261,22 @@ pub fn draw_status(
     text::draw_right(c, right, row(1), &mem, &value);
 
     // Disco.
-    text::draw(c, p.x + 12, row(2), "DISCO", &key);
+    text::draw(c, p.x + 12, row(2), tr("DISCO"), &key);
     match disk {
         Some((free, total)) => {
             let used = total.saturating_sub(free);
             let pct = (used * 100).checked_div(total).unwrap_or(0) as u32;
             bar(c, Rect::new(gx, row(2) + 6, gw, 5), pct, theme::AMBER);
-            let free = format!("{} MiB libres", free / (1024 * 1024));
+            let free = trf("{} MiB libres", &[&(free / (1024 * 1024)).to_string()]);
             text::draw_right(c, right, row(2), &free, &value);
         }
         None => {
-            text::draw_right(c, right, row(2), "sin disco", &key);
+            text::draw_right(c, right, row(2), tr("sin disco"), &key);
         }
     }
 
     // Red: tráfico + dirección.
-    text::draw(c, p.x + 12, row(3), "RED", &key);
+    text::draw(c, p.x + 12, row(3), tr("RED"), &key);
     let net_max = hist.rx.max().max(hist.tx.max()).max(1024);
     sparkline(
         c,
@@ -285,18 +286,18 @@ pub fn draw_status(
         theme::CYAN,
     );
     let net = match (st.net.present, st.net.ip) {
-        (false, _) => String::from("sin placa"),
+        (false, _) => String::from(tr("sin placa")),
         (true, None) => String::from("DHCP..."),
         (true, Some(a)) => ip(a),
     };
     text::draw_right(c, right, row(3), &net, &value);
 
-    text::draw(c, p.x + 12, row(4), "RENDIMIENTO", &key);
+    text::draw(c, p.x + 12, row(4), tr("RENDIMIENTO"), &key);
     let perf = format!("{} FPS · {} ms", st.fps, st.frame_ms);
     text::draw_right(c, right, row(4), &perf, &value);
 
-    text::draw(c, p.x + 12, row(5), "CEREBRO", &key);
-    text::draw_right(c, right, row(5), "sin conectar", &light(theme::AMBER));
+    text::draw(c, p.x + 12, row(5), tr("CEREBRO"), &key);
+    text::draw_right(c, right, row(5), tr("sin conectar"), &light(theme::AMBER));
 
     // Píldora "Control de misión" (abre la vista de tareas, como Win+Tab).
     let pill = pill_rect(w, h);
@@ -307,7 +308,7 @@ pub fn draw_status(
         c,
         pill.x + 28,
         pill.y + 7,
-        "CONTROL DE MISIÓN",
+        tr("CONTROL DE MISIÓN"),
         &label(theme::TEXT_DIM),
     );
 }
@@ -366,9 +367,9 @@ impl StartMenu {
         if !q.is_empty() {
             let text = self.query.text.trim();
             let label = if text.contains('.') && !text.contains(' ') {
-                format!("Abrir {text}")
+                trf("Abrir {}", &[&text])
             } else {
-                format!("Buscar en la web: {text}")
+                trf("Buscar en la web: {}", &[&text])
             };
             out.push((StartItem::Web(text.into()), label, Icon::Globe));
         }
@@ -394,9 +395,9 @@ impl StartMenu {
         let bw = (menu.w - 40) / 3;
         let at = |i: i32| Rect::new(menu.x + 10 + i * (bw + 10), y, bw, 36);
         [
-            (StartItem::Lock, "BLOQUEAR", at(0)),
-            (StartItem::Restart, "REINICIAR", at(1)),
-            (StartItem::Shutdown, "APAGAR", at(2)),
+            (StartItem::Lock, tr("BLOQUEAR"), at(0)),
+            (StartItem::Restart, tr("REINICIAR"), at(1)),
+            (StartItem::Shutdown, tr("APAGAR"), at(2)),
         ]
     }
 
@@ -427,7 +428,7 @@ impl StartMenu {
                 c,
                 f.x + 18,
                 f.y + 10,
-                "Escribí para buscar apps o la web",
+                tr("Escribí para buscar apps o la web"),
                 &light(theme::TEXT_DIM),
             );
             c.fill_rect(f.x + 11, f.y + 9, 2, 18, theme::CYAN);
@@ -533,7 +534,7 @@ pub fn draw_switcher(c: &mut Canvas<'_>, w: usize, h: usize, thumbs: &[Thumb<'_>
         c,
         p.x + 20,
         p.y + 14,
-        "CAMBIAR DE VENTANA",
+        tr("CAMBIAR DE VENTANA"),
         &label(theme::TEXT_DIM),
     );
     for (i, t) in thumbs.iter().enumerate() {
@@ -554,19 +555,19 @@ pub fn draw_task_view(c: &mut Canvas<'_>, w: usize, h: usize, thumbs: &[Thumb<'_
         c,
         MARGIN + 8,
         MARGIN + 60,
-        "CONTROL DE MISIÓN",
+        tr("CONTROL DE MISIÓN"),
         &label(theme::CYAN),
     );
     text::draw(
         c,
         MARGIN + 8,
         MARGIN + 84,
-        "Clic o Enter: ir a la ventana · Supr: cerrarla · Esc: volver",
+        tr("Clic o Enter: ir a la ventana · Supr: cerrarla · Esc: volver"),
         &light(theme::TEXT_DIM),
     );
     if thumbs.is_empty() {
         let st = s16(theme::TEXT_DIM);
-        let msg = "No hay ventanas abiertas.";
+        let msg = tr("No hay ventanas abiertas.");
         text::draw(
             c,
             (w as i32 - text::width(msg, &st)) / 2,
@@ -630,8 +631,8 @@ pub fn draw_lock(
     let dw = text::width(date.as_str(), &st);
     text::draw(c, (w - dw) / 2, h / 2 + 10, date.as_str(), &st);
     let hint = match pin {
-        None => "JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC",
-        Some(_) => "JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER",
+        None => tr("JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC"),
+        Some(_) => tr("JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER"),
     };
     let st = label(theme::TEXT_DIM);
     text::draw(c, (w - text::width(hint, &st)) / 2, h - 90, hint, &st);
@@ -648,7 +649,7 @@ pub fn draw_lock(
             text::draw(c, f.x + 16, f.y + 13, "PIN", &st);
         }
         if wrong {
-            let msg = "PIN INCORRECTO. PROBÁ OTRA VEZ.";
+            let msg = tr("PIN INCORRECTO. PROBÁ OTRA VEZ.");
             let st = label(theme::AMBER);
             text::draw(c, (w - text::width(msg, &st)) / 2, f.y + f.h + 16, msg, &st);
         }
@@ -681,17 +682,17 @@ pub fn draw_power(c: &mut Canvas<'_>, w: usize, h: usize, sel: usize) {
         c,
         d.x + 58,
         d.y + 28,
-        "APAGAR JARVIS-OS",
+        tr("APAGAR JARVIS-OS"),
         &label(theme::CRIMSON),
     );
     text::draw(
         c,
         d.x + 24,
         d.y + 72,
-        "¿Qué querés que haga la computadora?",
+        tr("¿Qué querés que haga la computadora?"),
         &s16(theme::TEXT),
     );
-    let labels = ["APAGAR", "REINICIAR", "CANCELAR"];
+    let labels = [tr("APAGAR"), tr("REINICIAR"), tr("CANCELAR")];
     for (i, r) in power_buttons(w, h).into_iter().enumerate() {
         let col = match i {
             0 => theme::CRIMSON,

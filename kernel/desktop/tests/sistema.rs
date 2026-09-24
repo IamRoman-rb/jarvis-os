@@ -34,9 +34,10 @@ fn configuracion_cambia_el_fondo_y_queda_guardada() {
     t.key(Key::Right);
     t.frame();
     assert!(t.logs().iter().any(|l| l == "CONFIG_GUARDADA"));
-    // Reloj de 12 horas (Fecha y hora, segunda fila) y velocidad del mouse.
+    // Reloj de 12 horas (Hora e idioma, tercera fila).
     t.key(Key::PageDown);
-    t.key(Key::Down);
+    assert_eq!(settings_section(&t), "Hora e idioma");
+    t.keys(&[Key::Down, Key::Down]);
     t.key(Key::Enter);
     assert!(!t.d.config().clock_24h);
     t.frame();

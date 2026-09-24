@@ -31,7 +31,7 @@ impl FilesWindow {
     }
 
     pub fn title(&self) -> String {
-        format!("Archivos · {}", self.app.cwd)
+        crate::i18n::trf("Archivos · {}", &[&self.app.cwd])
     }
 
     /// Ir a otra carpeta (cuando se pide abrir Archivos en una carpeta y ya estaba abierto).

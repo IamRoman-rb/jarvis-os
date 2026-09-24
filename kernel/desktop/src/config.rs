@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 use jarvis_gfx::Color;
 
 use crate::firewall::Firewall;
+use crate::i18n::Lang;
 
 pub const PATH: &str = "/Sistema/config.ini";
 
@@ -110,6 +111,8 @@ pub struct Config {
     pub lock_minutes: u32,
     /// Qué conexiones se permiten (ver [`crate::firewall`]).
     pub firewall: Firewall,
+    /// Idioma de la interfaz.
+    pub language: Lang,
 }
 
 impl Default for Config {
@@ -135,6 +138,7 @@ impl Default for Config {
             pin: String::new(),
             lock_minutes: 0,
             firewall: Firewall::default(),
+            language: Lang::Es,
         }
     }
 }
@@ -198,6 +202,7 @@ impl Config {
                     c.pin = v.into()
                 }
                 "bloquear_minutos" => c.lock_minutes = v.parse::<u32>().unwrap_or(0).min(240),
+                "idioma" => c.language = Lang::from_code(v),
                 k => {
                     c.firewall.parse_key(k, v);
                 }
@@ -236,6 +241,7 @@ impl Config {
             format!("equipo={}", self.hostname),
             format!("pin={}", self.pin),
             format!("bloquear_minutos={}", self.lock_minutes),
+            format!("idioma={}", self.language.code()),
         ];
         let mut lines = lines;
         lines.extend(self.firewall.serialize());
@@ -285,6 +291,7 @@ mod tests {
             search: SearchEngine::Wikipedia,
             pin: "1234".into(),
             lock_minutes: 5,
+            language: Lang::Pt,
             ..Config::default()
         };
         let mut c = c;

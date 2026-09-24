@@ -21,6 +21,8 @@ use jarvis_gfx::{Canvas, Color, Rect, theme};
 use super::{Click, Ctx};
 use crate::bmp;
 use crate::config::Config;
+use crate::i18n::{tr, trf};
+use crate::i18n::{tr, trf};
 use crate::input::{Key, Mods};
 use crate::system::{FetchKind, HttpResponse};
 use crate::text_input::TextInput;
@@ -254,9 +256,9 @@ impl Browser {
             self.doc().title.clone()
         };
         if t.is_empty() {
-            "Navegador".into()
+            tr("Navegador").into()
         } else {
-            format!("{t} · Navegador")
+            trf("{} · Navegador", &[&t])
         }
     }
 
@@ -388,7 +390,7 @@ impl Browser {
             Scheme::File => {
                 let path = url::percent_decode(u.path_only());
                 let Some(fs) = ctx.fs.as_deref_mut() else {
-                    self.show_error("No hay disco.".into());
+                    self.show_error(tr("No hay disco.").into());
                     return;
                 };
                 let is_dir = path == "/" || fs.stat(&path).is_ok_and(|s| s.is_dir);
@@ -458,7 +460,7 @@ impl Browser {
                     url: u.to_string(),
                     since: ctx.now_ms,
                 };
-                self.status = note.unwrap_or_else(|| format!("Conectando con {}...", u.host));
+                self.status = note.unwrap_or_else(|| trf("Conectando con {}...", &[&u.host]));
             }
         }
     }
@@ -470,9 +472,10 @@ impl Browser {
         self.status = String::new();
         self.dirty = true;
         if self.doc().needs_js {
-            self.status = "Esta página se arma con JavaScript, que JARVIS-OS todavía no ejecuta: \
-                           puede verse incompleta."
-                .into();
+            self.status = tr(
+                tr("Esta página se arma con JavaScript, que JARVIS-OS todavía no ejecuta: puede verse incompleta."),
+            )
+            .into();
         }
     }
 
@@ -503,7 +506,7 @@ impl Browser {
                 self.images = alloc::vec![Img::Ready(img)];
                 self.show(prep);
             }
-            None => self.show_error("No se pudo leer la imagen.".into()),
+            None => self.show_error(tr("No se pudo leer la imagen.").into()),
         }
     }
 
@@ -660,7 +663,7 @@ impl Browser {
             return;
         }
         match result {
-            Err(e) => self.show_error(format!("No se pudo abrir la página: {e}")),
+            Err(e) => self.show_error(trf("No se pudo abrir la página: {}", &[e])),
             Ok(resp) => {
                 if let Some(u) = Url::parse(&resp.url) {
                     self.address.text = u.to_string();
@@ -714,7 +717,7 @@ impl Browser {
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "descarga.bin".into());
         let Some(fs) = ctx.fs.as_deref_mut() else {
-            self.show_error("No hay disco para guardar la descarga.".into());
+            self.show_error(tr("No hay disco para guardar la descarga.").into());
             return;
         };
         let mut path = format!("{DOWNLOADS}/{name}");
@@ -798,7 +801,7 @@ impl Browser {
             return;
         }
         if href.to_ascii_lowercase().starts_with("javascript:") {
-            self.status = "Ese enlace necesita JavaScript.".into();
+            self.status = tr("Ese enlace necesita JavaScript.").into();
             self.dirty = true;
             return;
         }
@@ -860,7 +863,7 @@ impl Browser {
         };
         let Some(form_idx) = field.form else {
             if field.kind == FieldKind::Button {
-                self.status = "Ese botón necesita JavaScript.".into();
+                self.status = tr("Ese botón necesita JavaScript.").into();
                 self.dirty = true;
             }
             return;
@@ -869,9 +872,10 @@ impl Browser {
             return;
         };
         if form.post {
-            self.status =
-                "Este formulario manda datos con POST: el puente solo acepta GET (ver ADR 0004)."
-                    .into();
+            self.status = tr(
+                "Este formulario manda datos con POST: el puente solo acepta GET (ver ADR 0004).",
+            )
+            .into();
             self.dirty = true;
             return;
         }
@@ -1204,9 +1208,9 @@ impl Browser {
             Key::F(9) => {
                 self.reader_toggle = !self.reader_toggle;
                 self.status = if self.reader() {
-                    "Modo lectura".into()
+                    tr("Modo lectura").into()
                 } else {
-                    "Página completa".into()
+                    tr("Página completa").into()
                 };
                 self.restyle();
             }
@@ -1225,7 +1229,7 @@ impl Browser {
                 }
             }
             Key::Escape if self.is_loading() => {
-                self.state = State::Error("Carga cancelada.".into());
+                self.state = State::Error(tr("Carga cancelada.").into());
             }
             _ => return false,
         }
@@ -1324,7 +1328,7 @@ impl Browser {
             State::Loading { url, since, .. } => {
                 c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
                 let dots = ".".repeat(((now_ms - since) / 250 % 4) as usize);
-                let msg = format!("Cargando {url}{dots}");
+                let msg = trf("Cargando {}{}", &[url, &dots]);
                 draw_fit(
                     c,
                     page.x + MARGIN,
@@ -1335,7 +1339,7 @@ impl Browser {
                 );
                 let secs = (now_ms - since) / 1000;
                 if secs >= 3 {
-                    let wait = format!("Hace {secs} s. Esc cancela.");
+                    let wait = trf("Hace {} s. Esc cancela.", &[&secs.to_string()]);
                     text::draw(
                         c,
                         page.x + MARGIN,
@@ -1351,7 +1355,7 @@ impl Browser {
                     c,
                     page.x + MARGIN,
                     page.y + 30,
-                    "NO SE PUDO CARGAR",
+                    tr("NO SE PUDO CARGAR"),
                     &label(theme::AMBER),
                 );
                 let st = s16(theme::TEXT);
@@ -1381,11 +1385,14 @@ impl Browser {
         let msg = if !self.status.is_empty() {
             self.status.clone()
         } else if loading_images > 0 {
-            format!("Bajando {loading_images} imágenes y estilos...")
+            trf(
+                "Bajando {} imágenes y estilos...",
+                &[&loading_images.to_string()],
+            )
         } else if self.reader() {
-            "Listo · modo lectura (F9)".into()
+            tr("Listo · modo lectura (F9)").into()
         } else {
-            "Listo".into()
+            tr("Listo").into()
         };
         draw_fit(
             c,
@@ -1465,7 +1472,7 @@ impl Browser {
             theme::TEXT_DIM
         });
         let shown = if self.address.text.is_empty() && !self.editing {
-            "Buscá o escribí una dirección"
+            tr("Buscá o escribí una dirección")
         } else {
             self.address.text.as_str()
         };
@@ -1911,7 +1918,7 @@ fn dir_listing<D: BlockDevice>(fs: &mut jarvis_fs::FileSystem<D>, path: &str) ->
     for e in &entries {
         let full = crate::files::join(path, &e.name);
         let size = if e.is_dir {
-            "carpeta".into()
+            tr("carpeta").into()
         } else {
             crate::files::format_size(e.size as u64)
         };
