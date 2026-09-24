@@ -1,9 +1,9 @@
 //! `cargo xtask <comando>`: arma la imagen booteable de JARVIS-OS y la corre en QEMU.
 //!
 //! - `build`       compila el kernel y crea `target/jarvis-os-uefi.img`
-//! - `run`         abre QEMU con ventana
-//! - `test`        arranca sin ventana, espera `JARVIS_BOOT_OK`, aprieta Espacio y espera `JARVIS_HABLA` (CI)
-//! - `screenshot`  capturas en reposo y hablando: `target/jarvis-os.png` y `jarvis-os-hablando.png`
+//! - `run`         abre QEMU con ventana y el disco persistente `target/disco.img`
+//! - `test`        de punta a punta sin ventana: teclado, mouse, Archivos y disco (CI)
+//! - `screenshot`  capturas: JARVIS en reposo y hablando, Archivos y un diálogo (en `target/`)
 //! - `vdi`         convierte la imagen a `target/jarvis-os.vdi` para VirtualBox
 //! - `disk`        crea el disco virtual `target/disco.img` si no existe (`--reset` lo regenera)
 

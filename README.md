@@ -4,17 +4,19 @@ Un sistema operativo nuevo, con **kernel propio escrito en Rust**, cuya interfaz
 asistente **JARVIS** en el centro. JARVIS piensa con Claude: el "cerebro" corre en Python en el host
 y el kernel le habla por un puente (puerto serie primero, red después).
 
-![JARVIS-OS hablando — hito K1](docs/img/k1-hablando.png)
+| JARVIS | Archivos |
+|---|---|
+| ![JARVIS hablando](docs/img/k1-hablando.png) | ![Gestor de archivos](docs/img/k2-archivos.png) |
 
-*Hito K1: el kernel arranca por UEFI y anima el HUD en tiempo real, sin ningún sistema operativo
-debajo. La esfera de 22.000 partículas gira y, cuando JARVIS habla, late con las sílabas y le
-corren ondas por la superficie mientras el mensaje se escribe letra por letra.*
+*Todo lo que se ve corre sobre el kernel propio, sin ningún sistema operativo debajo: la esfera
+de partículas que late cuando JARVIS habla, y un gestor de archivos sobre un disco virtual con
+un FAT32 escrito desde cero, con teclado y mouse.*
 
 ## Estado
 
 | Parte | Qué hay | Dónde |
 |---|---|---|
-| Kernel | K1 ✅: interrupciones, timer + TSC, teclado, heap, HUD animado con doble buffer. Siguiente: K2 (paginación) | [docs/kernel.md](docs/kernel.md) |
+| Kernel | K2 ✅: disco virtio-blk, FAT32 propio, mouse PS/2 y la app Archivos. Antes: interrupciones, TSC, HUD animado. Siguiente: K3 (paginación) | [docs/kernel.md](docs/kernel.md) |
 | Cerebro | Núcleo por texto: agente con Claude, 4 tools, permisos de 3 niveles, auditoría | `src/jarvis/` ([PR #1](https://github.com/IamRoman-rb/jarvis-os/pull/1)) |
 | Puente kernel ↔ cerebro | Hito K4 | — |
 
@@ -25,7 +27,7 @@ de C++ de Visual Studio. El toolchain nightly correcto se instala solo.
 
 ```bash
 cd kernel
-cargo xtask run      # compila, arma la imagen UEFI y abre JARVIS-OS en QEMU (Espacio = JARVIS habla)
+cargo xtask run      # compila y abre JARVIS-OS en QEMU (Espacio = JARVIS habla, Tab = Archivos)
 ```
 
 Más comandos (tests, capturas, disco para VirtualBox): [docs/kernel.md](docs/kernel.md).
@@ -40,9 +42,12 @@ uv sync && uv run pytest
 
 ```
 kernel/            workspace Rust
-  gfx/             dibujo del HUD (no_std, testeable en el host)
-  kernel/          el kernel: arranque, drivers, integración
-  xtask/           build de la imagen, QEMU, capturas
+  gfx/             dibujo: HUD, esfera, texto (no_std, testeable en el host)
+  fs/              FAT32 propio (no_std, testeado contra fatfs)
+  desktop/         escritorio y app Archivos (no_std, testeable en el host)
+  kernel/          el kernel: arranque, interrupciones y drivers
+  xtask/           imagen booteable, disco virtual, QEMU, tests de punta a punta
+  rootfs/          contenido inicial del disco virtual
 src/jarvis/        cerebro: agente, tools, política de permisos, auditoría
 design/            design system "Obsidian Kinetic HUD" y mockups
 docs/              kernel.md, ADRs, permisos, investigación inicial
