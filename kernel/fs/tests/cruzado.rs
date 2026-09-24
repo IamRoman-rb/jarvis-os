@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use std::io::{Cursor, Read, Write};
 
 use fatfs::{FatType, FormatVolumeOptions, FsOptions};
-use jarvis_fs::{FileSystem, FsError, MemDisk, Timestamp};
+use jarvis_fs::{BlockCache, FileSystem, FsError, MemDisk, Timestamp};
 
 const SIZE: usize = 40 * 1024 * 1024;
 const NOW: Timestamp = Timestamp {
@@ -524,5 +524,87 @@ fn errores_esperables() {
             b"a",
             "un rename fallido no toca nada"
         );
+    });
+}
+
+#[test]
+fn copiar_archivos_y_carpetas() {
+    let (free, img) = with_ours(blank(), |fs| {
+        fs.mkdir("/Proyecto", NOW).unwrap();
+        fs.mkdir("/Proyecto/src", NOW).unwrap();
+        fs.write_file("/Proyecto/src/main.rs", &pattern(5000, 3), NOW)
+            .unwrap();
+        fs.write_file("/Proyecto/LÉAME.md", b"hola", NOW).unwrap();
+        fs.write_file("/Proyecto/vacío.txt", b"", NOW).unwrap();
+        fs.copy("/Proyecto", "/Copia de Proyecto", NOW).unwrap();
+        fs.copy("/Proyecto/LÉAME.md", "/léame (2).md", NOW).unwrap();
+        assert_eq!(
+            fs.copy("/Proyecto", "/Proyecto/src/adentro", NOW),
+            Err(FsError::MoveIntoItself)
+        );
+        assert_eq!(
+            fs.copy("/Proyecto/LÉAME.md", "/Copia de Proyecto/léame.md", NOW),
+            Err(FsError::AlreadyExists),
+            "FAT no distingue mayúsculas"
+        );
+        assert_eq!(fs.copy("/no-existe", "/x", NOW), Err(FsError::NotFound));
+        fs.free_bytes()
+    });
+    check_consistency(&img, free);
+    with_fatfs(img, |fs| {
+        assert_eq!(
+            fatfs_read(fs, "/Copia de Proyecto/src/main.rs"),
+            pattern(5000, 3)
+        );
+        assert_eq!(fatfs_read(fs, "/léame (2).md"), b"hola");
+        assert!(fatfs_read(fs, "/Copia de Proyecto/vacío.txt").is_empty());
+        assert!(fatfs_read(fs, "/Proyecto/src/main.rs") == pattern(5000, 3));
+    });
+}
+
+#[test]
+fn copiar_sin_espacio_no_deja_copias_a_medias() {
+    let (free, img) = with_ours(blank(), |fs| {
+        let big = fs.free_bytes() as usize * 6 / 10;
+        fs.mkdir("/Grande", NOW).unwrap();
+        fs.write_file("/Grande/a.bin", &vec![7u8; big / 2], NOW)
+            .unwrap();
+        fs.write_file("/Grande/b.bin", &vec![8u8; big / 2], NOW)
+            .unwrap();
+        let before = fs.free_bytes();
+        assert_eq!(fs.copy("/Grande", "/Grande 2", NOW), Err(FsError::NoSpace));
+        assert!(!fs.exists("/Grande 2"));
+        assert_eq!(
+            fs.free_bytes(),
+            before,
+            "se liberó lo que se llegó a copiar"
+        );
+        fs.free_bytes()
+    });
+    check_consistency(&img, free);
+}
+
+#[test]
+fn con_cache_de_sectores_el_disco_queda_igual() {
+    let img = blank();
+    let mut fs = FileSystem::mount(BlockCache::new(MemDisk::new(img), 64)).unwrap();
+    for i in 0..30 {
+        fs.write_file(&format!("/nota {i}.txt"), &pattern(1500, i), NOW)
+            .unwrap();
+    }
+    fs.mkdir("/Carpeta", NOW).unwrap();
+    fs.move_to("/nota 3.txt", "/Carpeta").unwrap();
+    fs.remove("/nota 4.txt").unwrap();
+    for _ in 0..3 {
+        assert_eq!(fs.list("/").unwrap().len(), 29);
+    }
+    let free = fs.free_bytes();
+    let cache = fs.into_device();
+    assert!(cache.hits > 0, "la caché se usó");
+    let img = cache.into_inner().into_inner();
+    check_consistency(&img, free);
+    with_fatfs(img, |fs| {
+        assert_eq!(fatfs_read(fs, "/Carpeta/nota 3.txt"), pattern(1500, 3));
+        assert!(!fatfs_names(fs, "/").contains("nota 4.txt"));
     });
 }

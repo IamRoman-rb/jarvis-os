@@ -23,12 +23,14 @@
 
 extern crate alloc;
 
+mod cache;
 mod device;
 mod dirent;
 mod error;
 mod fat32;
 mod time;
 
+pub use cache::BlockCache;
 pub use device::{BlockDevice, IoError, MemDisk, SECTOR_SIZE};
 pub use error::{FsError, Result};
 pub use fat32::{DirEntry, FileSystem};

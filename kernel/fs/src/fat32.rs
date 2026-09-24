@@ -832,4 +832,46 @@ impl<D: BlockDevice> FileSystem<D> {
         self.store_dir(&dir)?;
         self.sync_fsinfo()
     }
+    /// Copia un archivo, o una carpeta con todo su contenido, a `dest` (la ruta nueva completa,
+    /// que no tiene que existir). Si algo falla a la mitad (por ejemplo, se llena el disco), se
+    /// borra lo que se llegó a copiar: nunca queda una copia a medias.
+    pub fn copy(&mut self, src: &str, dest: &str, now: Timestamp) -> Result<()> {
+        let src_parts = components(src)?;
+        let dest_parts = components(dest)?;
+        if src_parts.is_empty() || dest_parts.is_empty() {
+            return Err(FsError::RootNotAllowed);
+        }
+        let entry = self.stat(src)?;
+        if entry.is_dir
+            && dest_parts.len() >= src_parts.len()
+            && src_parts
+                .iter()
+                .zip(&dest_parts)
+                .all(|(a, b)| same_name(a, b))
+        {
+            return Err(FsError::MoveIntoItself);
+        }
+        if self.exists(dest) {
+            return Err(FsError::AlreadyExists);
+        }
+        let result = self.copy_tree(src, dest, &entry, now);
+        if result.is_err() && self.exists(dest) {
+            let _ = self.remove(dest);
+        }
+        result
+    }
+
+    fn copy_tree(&mut self, src: &str, dest: &str, entry: &DirEntry, now: Timestamp) -> Result<()> {
+        if !entry.is_dir {
+            let data = self.read_file(src)?;
+            return self.create_file(dest, &data, now);
+        }
+        self.mkdir(dest, now)?;
+        for child in self.list(src)? {
+            let from = alloc::format!("{}/{}", src.trim_end_matches('/'), child.name);
+            let to = alloc::format!("{}/{}", dest.trim_end_matches('/'), child.name);
+            self.copy_tree(&from, &to, &child, now)?;
+        }
+        Ok(())
+    }
 }
