@@ -4,17 +4,17 @@ Un sistema operativo nuevo, con **kernel propio escrito en Rust**, cuya interfaz
 asistente **JARVIS** en el centro. JARVIS piensa con Claude: el "cerebro" corre en Python en el host
 y el kernel le habla por un puente (puerto serie primero, red después).
 
-![JARVIS-OS arrancando en QEMU — hito K0](docs/img/k0.png)
+![JARVIS-OS hablando — hito K1](docs/img/k1-hablando.png)
 
-*Hito K0: el kernel arranca por UEFI y dibuja el HUD directamente en el framebuffer (la esfera de
-22.000 partículas, la hora real leída del reloj de la placa y el panel de estado), sin ningún
-sistema operativo debajo.*
+*Hito K1: el kernel arranca por UEFI y anima el HUD en tiempo real, sin ningún sistema operativo
+debajo. La esfera de 22.000 partículas gira y, cuando JARVIS habla, late con las sílabas y le
+corren ondas por la superficie mientras el mensaje se escribe letra por letra.*
 
 ## Estado
 
 | Parte | Qué hay | Dónde |
 |---|---|---|
-| Kernel | K0 ✅: arranque UEFI, puerto serie, RTC, HUD. Siguiente: K1 (interrupciones, timer, teclado) | [docs/kernel.md](docs/kernel.md) |
+| Kernel | K1 ✅: interrupciones, timer + TSC, teclado, heap, HUD animado con doble buffer. Siguiente: K2 (paginación) | [docs/kernel.md](docs/kernel.md) |
 | Cerebro | Núcleo por texto: agente con Claude, 4 tools, permisos de 3 niveles, auditoría | `src/jarvis/` ([PR #1](https://github.com/IamRoman-rb/jarvis-os/pull/1)) |
 | Puente kernel ↔ cerebro | Hito K4 | — |
 
@@ -25,7 +25,7 @@ de C++ de Visual Studio. El toolchain nightly correcto se instala solo.
 
 ```bash
 cd kernel
-cargo xtask run      # compila, arma la imagen UEFI y abre JARVIS-OS en QEMU
+cargo xtask run      # compila, arma la imagen UEFI y abre JARVIS-OS en QEMU (Espacio = JARVIS habla)
 ```
 
 Más comandos (tests, capturas, disco para VirtualBox): [docs/kernel.md](docs/kernel.md).

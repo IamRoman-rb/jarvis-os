@@ -2,8 +2,8 @@
 //!
 //! - `build`       compila el kernel y crea `target/jarvis-os-uefi.img`
 //! - `run`         abre QEMU con ventana
-//! - `test`        arranca sin ventana y espera `JARVIS_BOOT_OK` por el puerto serie (CI)
-//! - `screenshot`  arranca sin ventana y guarda la pantalla en `target/jarvis-os.png`
+//! - `test`        arranca sin ventana, espera `JARVIS_BOOT_OK`, aprieta Espacio y espera `JARVIS_HABLA` (CI)
+//! - `screenshot`  capturas en reposo y hablando: `target/jarvis-os.png` y `jarvis-os-hablando.png`
 //! - `vdi`         convierte la imagen a `target/jarvis-os.vdi` para VirtualBox
 
 use std::env;
@@ -47,8 +47,12 @@ fn workspace_root() -> PathBuf {
         .into()
 }
 
+/// Carpeta de salida: respeta `CARGO_TARGET_DIR` (útil para compilar mientras otra instancia de
+/// QEMU tiene abierta la imagen de `target/`).
 fn target_dir() -> PathBuf {
-    workspace_root().join("target")
+    env::var_os("CARGO_TARGET_DIR")
+        .map(|d| workspace_root().join(d))
+        .unwrap_or_else(|| workspace_root().join("target"))
 }
 
 // --- build ------------------------------------------------------------------------------------
@@ -128,6 +132,11 @@ fn ovmf() -> Result<(PathBuf, Option<PathBuf>)> {
 fn qemu(image: &Path, headless: bool) -> Result<Command> {
     let (code, vars) = ovmf()?;
     let mut cmd = Command::new(qemu_binary());
+    if cfg!(windows) {
+        // Aceleración por hardware de Windows (Hyper-V): ~9 veces más rápido que emular. Si no
+        // está disponible, QEMU sigue con el siguiente acelerador (tcg: emulación por software).
+        cmd.args(["-accel", "whpx,kernel-irqchip=off", "-accel", "tcg"]);
+    }
     cmd.args([
         "-machine",
         "q35",
@@ -167,103 +176,142 @@ fn run(image: &Path) -> Result<()> {
     }
 }
 
-/// Arranca QEMU y espera el marcador de arranque en el puerto serie, mostrando cada línea.
-fn boot_and_wait(mut cmd: Command) -> Result<Child> {
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("no pude abrir QEMU ({}): {e}", qemu_binary().display()))?;
-    let stdout = child.stdout.take().ok_or("QEMU sin stdout")?;
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        for line in BufReader::new(stdout)
-            .lines()
-            .map_while(std::result::Result::ok)
-        {
-            if tx.send(line).is_err() {
-                break;
-            }
-        }
-    });
+/// Una ejecución de QEMU sin ventana, con acceso al puerto serie (lo que imprime el kernel) y al
+/// monitor de QEMU (para apretar teclas y sacar capturas). Al soltarla, QEMU se cierra.
+struct Session {
+    child: Child,
+    lines: mpsc::Receiver<String>,
+    monitor: TcpStream,
+}
 
-    let deadline = Instant::now() + BOOT_TIMEOUT;
-    loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        match rx.recv_timeout(left) {
-            Ok(line) => {
-                println!("[serie] {line}");
-                if line.contains(BOOT_MARKER) {
-                    return Ok(child);
-                }
-                if line.contains("PANIC") {
-                    let _ = child.kill();
-                    return Err("el kernel entró en panic".into());
+impl Session {
+    fn start(image: &Path) -> Result<Session> {
+        // Monitor de QEMU por TCP en un puerto libre.
+        let port = TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .map_err(|e| format!("sin puerto libre: {e}"))?
+            .port();
+        let mut cmd = qemu(image, true)?;
+        cmd.arg("-monitor")
+            .arg(format!("tcp:127.0.0.1:{port},server,nowait"));
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("no pude abrir QEMU ({}): {e}", qemu_binary().display()))?;
+        let stdout = child.stdout.take().ok_or("QEMU sin stdout")?;
+        let (tx, lines) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout)
+                .lines()
+                .map_while(std::result::Result::ok)
+            {
+                if tx.send(line).is_err() {
+                    break;
                 }
             }
-            Err(_) => {
-                let _ = child.kill();
-                return Err(format!(
-                    "no llegó {BOOT_MARKER} en {} s",
-                    BOOT_TIMEOUT.as_secs()
-                ));
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let monitor = loop {
+            match TcpStream::connect(("127.0.0.1", port)) {
+                Ok(m) => break m,
+                Err(e) if Instant::now() > deadline => {
+                    let _ = child.kill();
+                    return Err(format!("no pude conectarme al monitor de QEMU: {e}"));
+                }
+                Err(_) => thread::sleep(Duration::from_millis(100)),
+            }
+        };
+        monitor
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .ok();
+        Ok(Session {
+            child,
+            lines,
+            monitor,
+        })
+    }
+
+    /// Espera una línea del puerto serie que contenga `marker`, mostrando todo lo que llega.
+    fn wait_for(&mut self, marker: &str, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.lines.recv_timeout(left) {
+                Ok(line) => {
+                    println!("[serie] {line}");
+                    if line.contains(marker) {
+                        return Ok(());
+                    }
+                    if line.contains("PANIC") {
+                        return Err("el kernel entró en panic".into());
+                    }
+                }
+                Err(_) => return Err(format!("no llegó {marker} en {} s", timeout.as_secs())),
             }
         }
     }
-}
 
-fn test(image: &Path) -> Result<()> {
-    let mut child = boot_and_wait(qemu(image, true)?)?;
-    let _ = child.kill();
-    let _ = child.wait();
-    println!("ok: JARVIS-OS arrancó y dibujó el HUD");
-    Ok(())
-}
+    fn monitor(&mut self, command: &str) -> Result<()> {
+        writeln!(self.monitor, "{command}").map_err(|e| format!("monitor: {e}"))?;
+        // Vaciar lo que responde el monitor, para que no se llene su buffer.
+        let mut sink = [0u8; 4096];
+        let _ = self.monitor.read(&mut sink);
+        Ok(())
+    }
 
-fn screenshot(image: &Path) -> Result<()> {
-    // Monitor de QEMU por TCP en un puerto libre: desde ahí se pide la captura.
-    let port = TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map_err(|e| format!("sin puerto libre: {e}"))?
-        .port();
-    let mut cmd = qemu(image, true)?;
-    cmd.arg("-monitor")
-        .arg(format!("tcp:127.0.0.1:{port},server,nowait"));
-    let mut child = boot_and_wait(cmd)?;
-
-    let ppm = target_dir().join("screen.ppm");
-    let _ = fs::remove_file(&ppm);
-    let result = (|| -> Result<()> {
-        let mut mon =
-            TcpStream::connect(("127.0.0.1", port)).map_err(|e| format!("monitor: {e}"))?;
-        mon.set_read_timeout(Some(Duration::from_millis(500))).ok();
-        thread::sleep(Duration::from_millis(500)); // que termine de pintar
-        writeln!(
-            mon,
+    /// Captura la pantalla de QEMU y la guarda como PNG.
+    fn screenshot(&mut self, png: &Path) -> Result<()> {
+        let ppm = png.with_extension("ppm");
+        let _ = fs::remove_file(&ppm);
+        self.monitor(&format!(
             "screendump {}",
             ppm.display().to_string().replace('\\', "/")
-        )
-        .map_err(|e| format!("monitor: {e}"))?;
+        ))?;
         let deadline = Instant::now() + Duration::from_secs(10);
-        let mut sink = [0u8; 4096];
-        while !ppm.exists() || fs::metadata(&ppm).map(|m| m.len()).unwrap_or(0) == 0 {
-            let _ = mon.read(&mut sink);
+        while fs::metadata(&ppm).map(|m| m.len()).unwrap_or(0) == 0 {
             if Instant::now() > deadline {
                 return Err("QEMU no generó la captura".into());
             }
+            thread::sleep(Duration::from_millis(100));
         }
-        thread::sleep(Duration::from_millis(300));
-        let _ = writeln!(mon, "quit");
+        thread::sleep(Duration::from_millis(300)); // que termine de escribir el archivo
+        ppm_to_png(&ppm, png)?;
+        let _ = fs::remove_file(&ppm);
+        println!("captura: {}", png.display());
         Ok(())
-    })();
-    let _ = child.kill();
-    let _ = child.wait();
-    result?;
+    }
+}
 
-    let png = target_dir().join("jarvis-os.png");
-    ppm_to_png(&ppm, &png)?;
-    println!("captura: {}", png.display());
+impl Drop for Session {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Arranca, verifica que dibuje el HUD y prueba el teclado de punta a punta: Espacio (por el
+/// monitor de QEMU) → IRQ1 → cola de teclado → asistente → `JARVIS_HABLA` por el puerto serie.
+fn test(image: &Path) -> Result<()> {
+    let mut s = Session::start(image)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey spc")?;
+    s.wait_for("JARVIS_HABLA", Duration::from_secs(15))?;
+    println!("ok: JARVIS-OS arrancó, dibujó el HUD y respondió al teclado");
     Ok(())
+}
+
+/// Dos capturas: en reposo (después del saludo) y hablando.
+fn screenshot(image: &Path) -> Result<()> {
+    let mut s = Session::start(image)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.wait_for("JARVIS_REPOSO", Duration::from_secs(30))?;
+    thread::sleep(Duration::from_millis(600)); // que termine de apagarse el brillo
+    s.screenshot(&target_dir().join("jarvis-os.png"))?;
+    s.monitor("sendkey spc")?;
+    s.wait_for("JARVIS_HABLA", Duration::from_secs(15))?;
+    thread::sleep(Duration::from_millis(1200)); // a mitad de la frase
+    s.screenshot(&target_dir().join("jarvis-os-hablando.png"))
 }
 
 /// Convierte el PPM binario (P6) que genera QEMU a PNG.

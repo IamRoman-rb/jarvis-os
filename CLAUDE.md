@@ -20,8 +20,8 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
 Kernel (desde kernel/):
 - Tests de lógica:  cargo test -p jarvis-gfx
 - Arrancar:         cargo xtask run            (QEMU con ventana; logs del kernel por la terminal)
-- Test de arranque: cargo xtask test           (sin ventana; espera JARVIS_BOOT_OK)
-- Captura:          cargo xtask screenshot     (target/jarvis-os.png: mirala después de cambiar el HUD)
+- Test de arranque: cargo xtask test           (sin ventana; arranque + Espacio → JARVIS_HABLA)
+- Captura:          cargo xtask screenshot     (reposo y hablando en target/: miralas si tocás el HUD)
 - Lint:             cargo fmt --all && cargo clippy -p jarvis-gfx -p xtask --all-targets -- -D warnings
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
 Cerebro (desde la raíz):
@@ -37,9 +37,15 @@ Cerebro (desde la raíz):
    kernel solo conecta hardware con esa lógica. Toda lógica nueva lleva tests.
 4. Cada driver nuevo (puerto, dispositivo) en su propio módulo, con un comentario de qué hardware
    maneja y dónde está documentado (OSDev wiki, datasheet).
-5. Hasta K1 no hay SSE: el punto flotante es por software. Nada de float en bucles por píxel.
-6. Si tocás el HUD, corré `cargo xtask screenshot` y mirá el resultado antes de dar el cambio por bueno.
-7. El toolchain está fijado en kernel/rust-toolchain.toml. Actualizarlo es un cambio aparte.
+5. El punto flotante es por software (target x86_64-unknown-none). En lo que corre por frame o por
+   píxel, usar punto fijo Q14 y la tabla de senos de gfx/src/trig.rs; `f32` solo en inicialización.
+6. El tiempo se mide con `time::millis()` (TSC calibrado), nunca contando interrupciones.
+7. Los manejadores de interrupción hacen lo mínimo y no toman locks que use el bucle principal
+   (usar colas sin locks, como keyboard.rs).
+8. Si tocás el HUD, corré `cargo xtask screenshot` y mirá el resultado antes de dar el cambio por bueno.
+9. El toolchain está fijado en kernel/rust-toolchain.toml. Actualizarlo es un cambio aparte.
+10. Si QEMU está abierto, la imagen de target/ queda bloqueada: compilá con
+    `CARGO_TARGET_DIR=target/otra`. Nunca cierres un QEMU que no abriste vos.
 
 ## Reglas de seguridad del cerebro (NO negociables)
 1. Jamás permission_mode="bypassPermissions" ni "acceptEdits".

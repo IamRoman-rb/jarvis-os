@@ -59,6 +59,47 @@ impl Color {
     }
 }
 
+/// Rectángulo en píxeles (esquina superior izquierda + tamaño).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+impl Rect {
+    pub const fn new(x: i32, y: i32, w: i32, h: i32) -> Rect {
+        Rect { x, y, w, h }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.w <= 0 || self.h <= 0
+    }
+
+    pub const fn contains(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
+    }
+
+    pub const fn intersects(&self, other: &Rect) -> bool {
+        !self.is_empty()
+            && !other.is_empty()
+            && self.x < other.x + other.w
+            && other.x < self.x + self.w
+            && self.y < other.y + other.h
+            && other.y < self.y + self.h
+    }
+
+    /// Recorta el rectángulo a una pantalla de `width` × `height`.
+    pub fn clamp(&self, width: usize, height: usize) -> Rect {
+        let x0 = self.x.clamp(0, width as i32);
+        let y0 = self.y.clamp(0, height as i32);
+        let x1 = (self.x + self.w).clamp(0, width as i32);
+        let y1 = (self.y + self.h).clamp(0, height as i32);
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    }
+}
+
 /// Orden de los bytes de cada píxel en memoria.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PixelFormat {
@@ -66,6 +107,9 @@ pub enum PixelFormat {
     Bgr,
     Gray,
 }
+
+/// Máximo de rectángulos en la zona de recorte (alcanza para los 3 de cada frame).
+pub const MAX_CLIP: usize = 4;
 
 /// Superficie de dibujo. `stride` es el ancho real de cada fila en píxeles (puede ser mayor que
 /// `width`: el hardware a veces agrega relleno al final de cada fila).
@@ -76,6 +120,8 @@ pub struct Canvas<'a> {
     stride: usize,
     bytes_per_pixel: usize,
     format: PixelFormat,
+    /// Si hay recorte, solo se pinta dentro de estos rectángulos (ver [`Canvas::set_clip`]).
+    clip: [Option<Rect>; MAX_CLIP],
 }
 
 impl<'a> Canvas<'a> {
@@ -102,7 +148,26 @@ impl<'a> Canvas<'a> {
             stride,
             bytes_per_pixel,
             format,
+            clip: [None; MAX_CLIP],
         })
+    }
+
+    /// Limita el dibujo a la unión de `rects` (hasta [`MAX_CLIP`]). Cada píxel se pinta una sola
+    /// vez aunque los rectángulos se superpongan, porque el recorte se chequea por píxel.
+    pub fn set_clip(&mut self, rects: impl IntoIterator<Item = Rect>) {
+        self.clip = [None; MAX_CLIP];
+        for (slot, r) in self.clip.iter_mut().zip(rects) {
+            *slot = Some(r);
+        }
+    }
+
+    /// Vuelve a permitir dibujar en toda la superficie.
+    pub fn clear_clip(&mut self) {
+        self.clip = [None; MAX_CLIP];
+    }
+
+    fn clipped_out(&self, x: i32, y: i32) -> bool {
+        self.clip[0].is_some() && !self.clip.iter().flatten().any(|r| r.contains(x, y))
     }
 
     pub fn width(&self) -> usize {
@@ -122,6 +187,9 @@ impl<'a> Canvas<'a> {
 
     /// Pinta un píxel. Fuera de la pantalla no hace nada (así las figuras se recortan solas).
     pub fn put(&mut self, x: i32, y: i32, c: Color) {
+        if self.clipped_out(x, y) {
+            return;
+        }
         let Some(o) = self.offset(x, y) else { return };
         let px = &mut self.buf[o..o + self.bytes_per_pixel];
         match self.format {
@@ -186,6 +254,34 @@ impl<'a> Canvas<'a> {
             }
         }
     }
+
+    /// ¿Los dos canvas tienen la misma geometría en memoria? (requisito de [`copy_from`](Self::copy_from))
+    pub fn same_layout(&self, other: &Canvas<'_>) -> bool {
+        self.width == other.width
+            && self.height == other.height
+            && self.stride == other.stride
+            && self.bytes_per_pixel == other.bytes_per_pixel
+            && self.format == other.format
+    }
+
+    /// Copia el rectángulo `r` de `src` a este canvas, fila por fila (`copy_from_slice` compila a
+    /// un `memcpy`). Es la base del doble buffer. Si las geometrías no coinciden, no hace nada.
+    pub fn copy_from(&mut self, src: &Canvas<'_>, r: Rect) -> bool {
+        if !self.same_layout(src) {
+            return false;
+        }
+        let r = r.clamp(self.width, self.height);
+        if r.is_empty() {
+            return true;
+        }
+        let bpp = self.bytes_per_pixel;
+        let len = r.w as usize * bpp;
+        for y in r.y as usize..(r.y + r.h) as usize {
+            let start = (y * self.stride + r.x as usize) * bpp;
+            self.buf[start..start + len].copy_from_slice(&src.buf[start..start + len]);
+        }
+        true
+    }
 }
 
 #[cfg(test)]
@@ -228,6 +324,55 @@ mod tests {
         canvas.put(-1, 0, Color::WHITE);
         assert_eq!(buf[3 * 4], 255);
         assert_eq!(buf.iter().filter(|b| **b == 255).count(), 3);
+    }
+
+    #[test]
+    fn copy_from_copia_solo_el_rectangulo() {
+        let mut a = vec![0u8; 8 * 8 * 4];
+        let mut b = vec![0u8; 8 * 8 * 4];
+        let mut src = Canvas::new(&mut a, 8, 8, 8, 4, PixelFormat::Bgr).unwrap();
+        src.fill(Color::WHITE);
+        let mut dst = Canvas::new(&mut b, 8, 8, 8, 4, PixelFormat::Bgr).unwrap();
+        // Rectángulo que se sale por la izquierda: se recorta.
+        assert!(dst.copy_from(&src, Rect::new(-2, 2, 5, 3)));
+        for y in 0..8 {
+            for x in 0..8 {
+                let dentro = (0..3).contains(&x) && (2..5).contains(&y);
+                let esperado = if dentro { Color::WHITE } else { Color::BLACK };
+                assert_eq!(dst.get(x, y), Some(esperado), "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn copy_from_rechaza_geometrias_distintas() {
+        let mut a = vec![0u8; 8 * 8 * 4];
+        let mut b = vec![0u8; 8 * 8 * 4];
+        let src = Canvas::new(&mut a, 8, 8, 8, 4, PixelFormat::Rgb).unwrap();
+        let mut dst = Canvas::new(&mut b, 8, 8, 8, 4, PixelFormat::Bgr).unwrap();
+        assert!(!dst.copy_from(&src, Rect::new(0, 0, 8, 8)));
+    }
+
+    #[test]
+    fn el_recorte_limita_donde_se_pinta() {
+        let mut buf = vec![0u8; 10 * 10 * 4];
+        let mut c = Canvas::new(&mut buf, 10, 10, 10, 4, PixelFormat::Rgb).unwrap();
+        c.set_clip([Rect::new(0, 0, 3, 3), Rect::new(2, 2, 3, 3)]);
+        c.fill(Color::WHITE);
+        assert_eq!(c.get(1, 1), Some(Color::WHITE));
+        assert_eq!(c.get(4, 4), Some(Color::WHITE));
+        assert_eq!(c.get(0, 4), Some(Color::BLACK));
+        c.clear_clip();
+        c.put(9, 9, Color::WHITE);
+        assert_eq!(c.get(9, 9), Some(Color::WHITE));
+    }
+
+    #[test]
+    fn interseccion_de_rectangulos() {
+        let r = Rect::new(0, 0, 10, 10);
+        assert!(r.intersects(&Rect::new(9, 9, 5, 5)));
+        assert!(!r.intersects(&Rect::new(10, 0, 5, 5)));
+        assert!(!r.intersects(&Rect::new(2, 2, 0, 5)));
     }
 
     #[test]
