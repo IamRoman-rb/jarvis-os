@@ -58,6 +58,12 @@ pub fn request_kind(url: &Url, via_proxy: bool, kind: FetchKind) -> Vec<u8> {
     } else {
         url.path.clone()
     };
+    // La API de la tienda de snaps exige decir la "serie" del sistema (la 16, como Ubuntu).
+    let series = if url.host == "api.snapcraft.io" {
+        "Snap-Device-Series: 16\r\nSnap-Device-Architecture: amd64\r\n"
+    } else {
+        ""
+    };
     let (accept, extra) = match kind {
         FetchKind::Image => ("image/*", "X-Jarvis-Imagen: bmp\r\n"),
         FetchKind::Download => ("*/*", ""),
@@ -70,7 +76,7 @@ pub fn request_kind(url: &Url, via_proxy: bool, kind: FetchKind) -> Vec<u8> {
          Accept: {accept}\r\n\
          Accept-Language: es-AR,es;q=0.9,en;q=0.5\r\n\
          Accept-Encoding: identity\r\n\
-         {extra}\
+         {extra}{series}\
          Connection: close\r\n\r\n",
         url.host
     )

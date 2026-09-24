@@ -14,20 +14,60 @@ pub struct Image {
     pub height: usize,
     /// Fila por fila, de arriba hacia abajo.
     pub pixels: Vec<Color>,
+    /// Opacidad de cada píxel (vacío si la imagen es opaca): BMP de 32 bits con canal alfa,
+    /// como los que manda el puente para los PNG con partes transparentes.
+    pub alpha: Vec<u8>,
 }
 
 impl Image {
     /// Dibuja la imagen estirada a `dst` (vecino más cercano).
     pub fn draw_scaled(&self, c: &mut Canvas<'_>, dst: jarvis_gfx::Rect) {
+        self.draw_rows(c, dst, 0, dst.h);
+    }
+
+    /// Usa la imagen como máscara: pinta `color` con la opacidad de cada píxel (los íconos de
+    /// `mask-image`). Una imagen sin transparencia pinta un rectángulo.
+    pub fn draw_mask(&self, c: &mut Canvas<'_>, dst: jarvis_gfx::Rect, color: Color) {
         if self.width == 0 || self.height == 0 || dst.w <= 0 || dst.h <= 0 {
             return;
         }
         for y in 0..dst.h {
             let sy = (y as i64 * self.height as i64 / dst.h as i64) as usize;
-            let row = &self.pixels[sy * self.width..(sy + 1) * self.width];
             for x in 0..dst.w {
                 let sx = (x as i64 * self.width as i64 / dst.w as i64) as usize;
-                c.put(dst.x + x, dst.y + y, row[sx]);
+                let a = self.alpha.get(sy * self.width + sx).copied().unwrap_or(255);
+                if a > 0 {
+                    c.blend(dst.x + x, dst.y + y, color, a);
+                }
+            }
+        }
+    }
+
+    /// Como [`Image::draw_scaled`], pero solo las filas `from..to` de `dst` (lo que se ve).
+    pub fn draw_rows(&self, c: &mut Canvas<'_>, dst: jarvis_gfx::Rect, from: i32, to: i32) {
+        if self.width == 0 || self.height == 0 || dst.w <= 0 || dst.h <= 0 {
+            return;
+        }
+        let x0 = (-dst.x).max(0);
+        let x1 = dst.w.min(c.width() as i32 - dst.x);
+        for y in from.max(0)..to.min(dst.h) {
+            let sy = (y as i64 * self.height as i64 / dst.h as i64) as usize;
+            let row = &self.pixels[sy * self.width..(sy + 1) * self.width];
+            let arow = if self.alpha.is_empty() {
+                None
+            } else {
+                Some(&self.alpha[sy * self.width..(sy + 1) * self.width])
+            };
+            for x in x0..x1 {
+                let sx = (x as i64 * self.width as i64 / dst.w as i64) as usize;
+                match arow {
+                    Some(a) if a[sx] < 255 => {
+                        if a[sx] > 0 {
+                            c.blend(dst.x + x, dst.y + y, row[sx], a[sx]);
+                        }
+                    }
+                    _ => c.put(dst.x + x, dst.y + y, row[sx]),
+                }
             }
         }
     }
@@ -100,6 +140,12 @@ pub fn decode(b: &[u8]) -> Option<Image> {
     let bytes = bpp / 8;
     let row = (w * bytes).div_ceil(4) * 4;
     let mut pixels = vec![Color::BLACK; w * h];
+    let mut alpha = if bpp == 32 {
+        vec![255u8; w * h]
+    } else {
+        Vec::new()
+    };
+    let mut any_alpha = false;
     for y in 0..h {
         // Alto positivo = filas de abajo hacia arriba.
         let src_y = if height > 0 { h - 1 - y } else { y };
@@ -112,12 +158,22 @@ pub fn decode(b: &[u8]) -> Option<Image> {
                 g: p[1],
                 b: p[0],
             };
+            if bytes == 4 {
+                let a = line[x * 4 + 3];
+                alpha[y * w + x] = a;
+                any_alpha |= a != 255;
+            }
         }
+    }
+    // Un BMP de 32 bits sin transparencia (o con el canal en cero, como los viejos) es opaco.
+    if !any_alpha || alpha.iter().all(|&a| a == 0) {
+        alpha.clear();
     }
     Some(Image {
         width: w,
         height: h,
         pixels,
+        alpha,
     })
 }
 

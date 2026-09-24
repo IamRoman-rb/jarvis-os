@@ -67,7 +67,7 @@ type Disk = BlockCache<VirtioBlk>;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
-    config.kernel_stack_size = 512 * 1024;
+    config.kernel_stack_size = 4 * 1024 * 1024;
     // Mapear toda la memoria física: el heap la usa (ver allocator.rs) y el disco hace DMA.
     config.mappings.physical_memory = Some(Mapping::Dynamic);
     // Sin pedir resolución mínima: el bootloader deja el modo de video que eligió el firmware

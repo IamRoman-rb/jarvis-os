@@ -2,10 +2,11 @@
 //! imágenes, formularios y descargas.
 //!
 //! Las páginas se piden al kernel (que tiene la red) por el `Outbox` y la respuesta vuelve con
-//! [`Browser::net_response`]. El HTML y el CSS se convierten en un documento (`web::html`) y
-//! acá se arma en renglones del ancho de la ventana. Después de la página se bajan sus hojas de
-//! estilo externas (la página se vuelve a armar con ellas) y sus imágenes (el puente del
-//! anfitrión las convierte a BMP, el formato que el kernel sabe leer).
+//! [`Browser::net_response`]. El HTML y el CSS se preparan (`web::html`: árbol y estilos) y se
+//! maquetan en cajas del ancho de la ventana (`web::layout`), que acá se dibujan con la fuente
+//! proporcional de las páginas. Después de la página se bajan sus hojas de estilo externas (la
+//! página se vuelve a armar con ellas) y sus imágenes (el puente del anfitrión las convierte a
+//! BMP, el formato que el kernel sabe leer).
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -13,7 +14,8 @@ use alloc::vec::Vec;
 
 use jarvis_fs::BlockDevice;
 use jarvis_gfx::shapes::{line, rounded_outline, rounded_rect};
-use jarvis_gfx::text::{self, Size, Style, Weight};
+use jarvis_gfx::text::{self, Style};
+use jarvis_gfx::webfont::{FontSpec, WebFonts};
 use jarvis_gfx::{Canvas, Color, Rect, theme};
 
 use super::{Click, Ctx};
@@ -22,16 +24,24 @@ use crate::config::Config;
 use crate::input::{Key, Mods};
 use crate::system::{FetchKind, HttpResponse};
 use crate::text_input::TextInput;
-use crate::web::html::{self, Align, BlockKind, Document, FieldKind, Options};
+use crate::web::css::Media;
+use crate::web::dom::NodeKind;
+use crate::web::html::{self, Document, FieldKind, NONE, Options, Prepared};
+use crate::web::layout::{self, Env, Page, Paint};
+use crate::web::sites;
+use crate::web::style::Display;
 use crate::web::url::{self, Scheme, Url};
 use crate::widgets::{FIELD_BG, WINDOW_BG, draw_fit, label, light, s16};
 
 const BAR_H: i32 = 48;
 const STATUS_H: i32 = 26;
 const MARGIN: i32 = 28;
-const FIELD_H: i32 = 30;
-const MAX_IMAGES: usize = 40;
-const MAX_CSS: usize = 6;
+const MAX_IMAGES: usize = 60;
+const MAX_CSS: usize = 8;
+/// Ancho supuesto de la página hasta que se dibuja por primera vez.
+const DEFAULT_W: i32 = 1000;
+/// Fondo del tema oscuro ("páginas claras" apagado).
+const DARK_BG: Color = Color::hex(0x0b1220);
 const DOWNLOADS: &str = "/Descargas";
 
 pub const HOME: &str = "about:inicio";
@@ -90,35 +100,6 @@ const HELP_HTML: &str = "<title>Atajos de teclado</title>\
 <li><b>Tab</b>: completar · <b>Arriba/Abajo</b>: historial · <b>Ctrl+C</b>: cancelar · <b>Ctrl+L</b>: limpiar · <b>Ctrl+A/E/U/K/W</b>: editar la línea</li>\
 <li><b>help</b> lista los comandos · <b>apt install neofetch</b> instala un programa</li></ul>";
 
-#[derive(Clone)]
-enum ItemKind {
-    Text {
-        text: String,
-        style: Style,
-        underline: bool,
-        bg: Option<Color>,
-    },
-    Image(usize),
-    Field(usize),
-}
-
-#[derive(Clone)]
-struct Item {
-    x: i32,
-    w: i32,
-    h: i32,
-    kind: ItemKind,
-    link: Option<usize>,
-}
-
-struct Line {
-    y: i32,
-    h: i32,
-    items: Vec<Item>,
-    rule: bool,
-    bg: Option<Color>,
-}
-
 enum State {
     Loading { id: u32, url: String, since: u64 },
     Page,
@@ -126,6 +107,8 @@ enum State {
 }
 
 enum Img {
+    /// Todavía no se pidió.
+    Pending,
     Loading(u32),
     Ready(bmp::Image),
     Failed,
@@ -160,12 +143,17 @@ pub struct Browser {
     /// La primera tecla reemplaza todo (como cuando se selecciona la barra en un navegador).
     replace_on_type: bool,
     pub url: Option<Url>,
-    doc: Document,
+    /// La página: árbol, estilos, enlaces y campos.
+    prep: Option<Prepared>,
+    empty: Document,
     state: State,
     back: Vec<String>,
     forward: Vec<String>,
     scroll: i32,
-    layout: Option<(i32, Vec<Line>, i32)>,
+    /// (ancho, página armada)
+    layout: Option<(i32, Page)>,
+    /// Ancho con el que se calcularon los estilos (`@media` depende de él).
+    styled_width: i32,
     focus_link: Option<usize>,
     /// Campo de formulario con el foco (lo que se escribe va ahí).
     focus_field: Option<usize>,
@@ -177,16 +165,11 @@ pub struct Browser {
     html: Option<String>,
     /// (pedido, contenido) de cada hoja de estilo externa.
     css: Vec<(u32, Option<String>)>,
+    /// Cuántas de las hojas de la página ya se pidieron.
+    css_seen: usize,
     images: Vec<Img>,
-}
-
-fn size_of(px: u8) -> Size {
-    match px {
-        0..=17 => Size::Size16,
-        18..=21 => Size::Size20,
-        22..=27 => Size::Size24,
-        _ => Size::Size32,
-    }
+    /// Las fuentes de las páginas (se cargan con la primera página).
+    fonts: Option<WebFonts>,
 }
 
 impl Browser {
@@ -197,12 +180,14 @@ impl Browser {
             editing: false,
             replace_on_type: false,
             url: None,
-            doc: Document::default(),
+            prep: None,
+            empty: Document::default(),
             state: State::Page,
             back: Vec::new(),
             forward: Vec::new(),
             scroll: 0,
             layout: None,
+            styled_width: DEFAULT_W,
             focus_link: None,
             focus_field: None,
             status: String::new(),
@@ -210,7 +195,9 @@ impl Browser {
             reader_toggle: false,
             html: None,
             css: Vec::new(),
+            css_seen: 0,
             images: Vec::new(),
+            fonts: None,
         }
     }
 
@@ -236,20 +223,35 @@ impl Browser {
         } else {
             Options {
                 reader: false,
-                colors: self.prefs.light,
                 images: self.prefs.images,
             }
         }
     }
 
+    /// Colores del tema oscuro en vez de los de la página ("páginas claras" apagado).
+    fn dark(&self) -> bool {
+        !self.prefs.light && !self.reader()
+    }
+
+    fn doc(&self) -> &Document {
+        self.prep.as_ref().map_or(&self.empty, |p| &p.doc)
+    }
+
+    fn doc_mut(&mut self) -> &mut Document {
+        match &mut self.prep {
+            Some(p) => &mut p.doc,
+            None => &mut self.empty,
+        }
+    }
+
     pub fn title(&self) -> String {
-        let t = if self.doc.title.is_empty() {
+        let t = if self.doc().title.is_empty() {
             self.url
                 .as_ref()
                 .map(|u| u.host.clone())
                 .unwrap_or_default()
         } else {
-            self.doc.title.clone()
+            self.doc().title.clone()
         };
         if t.is_empty() {
             "Navegador".into()
@@ -268,16 +270,60 @@ impl Browser {
 
     /// Texto visible de la página (para los tests).
     pub fn page_text(&self) -> String {
-        self.doc
-            .blocks
-            .iter()
-            .map(|b| b.spans.iter().map(|s| s.text.as_str()).collect::<String>())
-            .collect::<Vec<_>>()
-            .join("\n")
+        let Some(p) = &self.prep else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for n in &p.dom.nodes {
+            if let NodeKind::Text(t) = &n.kind
+                && n.parent.is_some_and(|par| {
+                    p.styled
+                        .get(par)
+                        .is_some_and(|s| s.display != Display::None && s.visible)
+                })
+                && !t.trim().is_empty()
+            {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&t.split_whitespace().collect::<Vec<_>>().join(" "));
+            }
+        }
+        out
     }
 
     pub fn document(&self) -> &Document {
-        &self.doc
+        self.doc()
+    }
+
+    /// La página ya preparada (árbol y estilos), para los tests.
+    pub fn prepared(&self) -> Option<&Prepared> {
+        self.prep.as_ref()
+    }
+
+    /// La página armada (lo que se dibuja), si ya se dibujó.
+    pub fn laid_out(&self) -> Option<&Page> {
+        self.layout.as_ref().map(|l| &l.1)
+    }
+
+    /// (imágenes del documento, listas, fallidas), para los tests y la vista previa.
+    pub fn image_stats(&self) -> (usize, usize, usize) {
+        let ready = self
+            .images
+            .iter()
+            .filter(|i| matches!(i, Img::Ready(_)))
+            .count();
+        let failed = self
+            .images
+            .iter()
+            .filter(|i| matches!(i, Img::Failed))
+            .count();
+        (self.doc().images.len(), ready, failed)
+    }
+
+    /// Cuánto está bajada la página.
+    pub fn scroll(&self) -> i32 {
+        self.scroll
     }
 
     /// Lo escrito en la barra (o una dirección ya armada) → navegar.
@@ -326,6 +372,7 @@ impl Browser {
         self.layout = None;
         self.html = None;
         self.css.clear();
+        self.css_seen = 0;
         self.images.clear();
         self.dirty = true;
         ctx.log.push(format!("NAVEGADOR_IR {u}"));
@@ -358,7 +405,7 @@ impl Browser {
                         } else if lower.ends_with(".bmp") {
                             self.show_image(bytes);
                         } else {
-                            self.show(html::plain(&html::decode_bytes(&bytes)));
+                            self.show_html(html::plain_html(&html::decode_bytes(&bytes)), ctx);
                         }
                     }
                     Err(e) => self.show_error(format!("{path}: {e}")),
@@ -366,9 +413,11 @@ impl Browser {
             }
             Scheme::Http | Scheme::Https => {
                 let lower = u.path_only().to_ascii_lowercase();
-                let kind = if [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"]
-                    .iter()
-                    .any(|e| lower.ends_with(e))
+                let kind = if [
+                    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg",
+                ]
+                .iter()
+                .any(|e| lower.ends_with(e))
                 {
                     FetchKind::Image
                 } else if [
@@ -392,6 +441,9 @@ impl Browser {
                     ".img",
                     ".mp3",
                     ".mp4",
+                    ".snap",
+                    ".flatpak",
+                    ".msix",
                 ]
                 .iter()
                 .any(|e| lower.ends_with(e))
@@ -411,32 +463,45 @@ impl Browser {
         }
     }
 
-    fn show(&mut self, doc: Document) {
-        self.doc = doc;
+    fn show(&mut self, prep: Prepared) {
+        self.prep = Some(prep);
         self.state = State::Page;
         self.layout = None;
         self.status = String::new();
         self.dirty = true;
+        if self.doc().needs_js {
+            self.status = "Esta página se arma con JavaScript, que JARVIS-OS todavía no ejecuta: \
+                           puede verse incompleta."
+                .into();
+        }
     }
 
     fn show_error(&mut self, msg: String) {
-        self.doc = Document::default();
+        self.prep = None;
         self.state = State::Error(msg);
         self.layout = None;
         self.dirty = true;
     }
 
+    fn media(&self) -> Media {
+        Media {
+            width: self.styled_width,
+            height: 700,
+        }
+    }
+
     fn show_image(&mut self, bytes: Vec<u8>) {
         match bmp::decode(&bytes) {
             Some(img) => {
-                let mut doc = html::render(
-                    "<body style='text-align:center'><img src=imagen>",
+                let prep = html::prepare(
+                    "<body style='margin:0;background:#202124;text-align:center'>\
+                     <img src=imagen style='max-width:100%'>",
                     Options::STYLED,
                     &[],
+                    self.media(),
                 );
-                doc.bg = Some(Color::hex(0x202124));
                 self.images = alloc::vec![Img::Ready(img)];
-                self.show(doc);
+                self.show(prep);
             }
             None => self.show_error("No se pudo leer la imagen.".into()),
         }
@@ -444,50 +509,73 @@ impl Browser {
 
     /// Arma la página y pide sus hojas de estilo y sus imágenes.
     fn show_html<D: BlockDevice>(&mut self, text: String, ctx: &mut Ctx<'_, D>) {
-        let doc = html::render(&text, self.options(), &[]);
+        let text = sites::adapt(self.url.as_ref(), text);
+        let prep = html::prepare(&text, self.options(), &[], self.media());
         self.html = Some(text);
-        self.show(doc);
-        if let Some(base) = self.base() {
-            for href in self.doc.stylesheets.iter().take(MAX_CSS) {
-                if let Some(u) = base.join(href)
-                    && matches!(u.scheme, Scheme::Http | Scheme::Https)
-                {
-                    let id = ctx.out.fetch(&u.to_string());
-                    self.css.push((id, None));
-                }
+        self.show(prep);
+        self.request_css(ctx);
+        self.request_images(ctx);
+    }
+
+    fn request_css<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) {
+        let Some(base) = self.base() else { return };
+        let sheets: Vec<String> = self.doc().stylesheets.clone();
+        let seen = self.css_seen;
+        self.css_seen = sheets.len();
+        for href in sheets.iter().skip(seen) {
+            if self.css.len() >= MAX_CSS {
+                break;
+            }
+            if let Some(u) = base.join(href)
+                && matches!(u.scheme, Scheme::Http | Scheme::Https)
+            {
+                let id = ctx.out.fetch(&u.to_string());
+                self.css.push((id, None));
             }
         }
-        self.request_images(ctx);
     }
 
     /// La dirección contra la que se resuelven los enlaces (`<base href>` o la de la página).
     fn base(&self) -> Option<Url> {
         let u = self.url.clone()?;
-        match &self.doc.base {
+        match &self.doc().base {
             Some(b) => u.join(b).or(Some(u)),
             None => Some(u),
         }
     }
 
+    /// Pide las imágenes que faltan.
     fn request_images<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) {
-        self.images.clear();
+        let refs: Vec<String> = self.doc().images.iter().map(|i| i.src.clone()).collect();
+        while self.images.len() < refs.len() {
+            self.images.push(Img::Pending);
+        }
+        self.images.truncate(refs.len());
         if !self.options().images {
             return;
         }
         let Some(base) = self.base() else { return };
-        for (i, img) in self.doc.images.iter().enumerate() {
-            let target = base.join(&img.src);
-            let ok = i < MAX_IMAGES
-                && target.as_ref().is_some_and(|u| {
-                    matches!(u.scheme, Scheme::Http | Scheme::Https)
-                        && !u.path_only().to_ascii_lowercase().ends_with(".svg")
-                });
-            self.images.push(match (ok, target) {
+        let mut asked = self
+            .images
+            .iter()
+            .filter(|i| !matches!(i, Img::Pending))
+            .count();
+        for (i, src) in refs.iter().enumerate() {
+            if !matches!(self.images[i], Img::Pending) {
+                continue;
+            }
+            let target = base.join(src);
+            let ok = asked < MAX_IMAGES
+                && target
+                    .as_ref()
+                    .is_some_and(|u| matches!(u.scheme, Scheme::Http | Scheme::Https));
+            self.images[i] = match (ok, target) {
                 (true, Some(u)) => {
+                    asked += 1;
                     Img::Loading(ctx.out.fetch_kind(&u.to_string(), FetchKind::Image))
                 }
                 _ => Img::Failed,
-            });
+            };
         }
     }
 
@@ -497,19 +585,35 @@ impl Browser {
             return;
         };
         let css: Vec<String> = self.css.iter().filter_map(|(_, c)| c.clone()).collect();
-        let mut doc = html::render(text, self.options(), &css);
+        let mut prep = html::prepare(text, self.options(), &css, self.media());
         // Lo que se escribió en los formularios no se pierde.
-        if doc.fields.len() == self.doc.fields.len() {
-            for (new, old) in doc.fields.iter_mut().zip(&self.doc.fields) {
+        let old = self.doc();
+        if prep.doc.fields.len() == old.fields.len() {
+            for (new, old) in prep.doc.fields.iter_mut().zip(&old.fields) {
                 new.value = old.value.clone();
                 new.checked = old.checked;
             }
         }
-        let same_images = doc.images == self.doc.images;
-        self.doc = doc;
-        if !same_images {
-            // Con otras reglas cambian qué imágenes se ven: se descartan las viejas.
-            self.images.clear();
+        // Con otras reglas cambian qué imágenes se ven: las que siguen (misma dirección) se
+        // conservan, bajadas o por bajar; las nuevas se piden después.
+        let old_srcs: Vec<String> = old.images.iter().map(|i| i.src.clone()).collect();
+        let mut old_imgs: Vec<(String, Img)> = old_srcs
+            .into_iter()
+            .zip(core::mem::take(&mut self.images))
+            .collect();
+        self.images = prep
+            .doc
+            .images
+            .iter()
+            .map(|r| match old_imgs.iter().position(|(s, _)| *s == r.src) {
+                Some(k) => old_imgs.swap_remove(k).1,
+                None => Img::Pending,
+            })
+            .collect();
+        let needs_js = prep.doc.needs_js;
+        self.prep = Some(prep);
+        if !needs_js && self.status.contains("JavaScript") {
+            self.status.clear();
         }
         self.layout = None;
         self.dirty = true;
@@ -529,9 +633,9 @@ impl Browser {
             });
             if self.css.iter().all(|(_, c)| c.is_some()) {
                 self.restyle();
-                if self.images.is_empty() {
-                    self.request_images(ctx);
-                }
+                // Las hojas pueden traer otras (`@import`) e imágenes de fondo.
+                self.request_css(ctx);
+                self.request_images(ctx);
             }
             return;
         }
@@ -578,21 +682,24 @@ impl Browser {
                     let text = html::decode_bytes(&resp.body);
                     self.show_html(text, ctx);
                     if resp.status >= 400 {
-                        self.doc.title = format!("Error {}", resp.status);
+                        self.doc_mut().title = format!("Error {}", resp.status);
                     }
                 } else if ct.starts_with("text/")
                     || ct.contains("json")
                     || ct.contains("xml")
                     || ct.contains("javascript")
                 {
-                    self.show(html::plain(&html::decode_bytes(&resp.body)));
+                    let text = html::plain_html(&html::decode_bytes(&resp.body));
+                    self.show_html(text, ctx);
                 } else if resp.status < 400 {
                     self.save_download(resp, ctx);
                     return;
                 } else {
                     self.show_error(format!("Error {} ({})", resp.status, resp.content_type));
                 }
-                self.status = status;
+                if self.status.is_empty() {
+                    self.status = status;
+                }
             }
         }
     }
@@ -633,7 +740,8 @@ impl Browser {
                     ""
                 };
                 let page = format!(
-                    "<title>Descarga completa</title><h1>Descarga completa</h1>\
+                    "<title>Descarga completa</title><body style='font-family:sans-serif;margin:32px'>\
+                     <h1>Descarga completa</h1>\
                      <p><b>{path}</b> · {} · {what}</p>{run}\
                      <p><a href=\"file://{DOWNLOADS}\">Ver la carpeta Descargas</a></p>",
                     crate::files::format_size(resp.body.len() as u64)
@@ -645,6 +753,10 @@ impl Browser {
     }
 
     pub fn tick<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) {
+        // Imágenes que aparecieron al rearmar la página (otro ancho, otras reglas).
+        if self.images.iter().any(|i| matches!(i, Img::Pending)) && self.options().images {
+            self.request_images(ctx);
+        }
         // Mientras carga, el indicador se anima (4 veces por segundo).
         if let State::Loading { since, .. } = self.state
             && (ctx.now_ms - since) % 250 < 20
@@ -678,11 +790,12 @@ impl Browser {
     }
 
     fn follow<D: BlockDevice>(&mut self, link: usize, ctx: &mut Ctx<'_, D>) {
-        let Some(href) = self.doc.links.get(link).cloned() else {
+        let Some(href) = self.doc().links.get(link).cloned() else {
             return;
         };
-        if href.starts_with('#') {
-            return; // ancla en la misma página
+        if let Some(anchor) = href.strip_prefix('#') {
+            self.scroll_to_anchor(anchor);
+            return;
         }
         if href.to_ascii_lowercase().starts_with("javascript:") {
             self.status = "Ese enlace necesita JavaScript.".into();
@@ -702,12 +815,47 @@ impl Browser {
         }
     }
 
+    /// `#seccion`: va al elemento con ese id (el primer texto que tiene adentro o después).
+    fn scroll_to_anchor(&mut self, anchor: &str) {
+        let Some(p) = &self.prep else { return };
+        let Some(target) = (0..p.dom.nodes.len()).find(|&i| {
+            p.dom.nodes[i].attr("id") == Some(anchor) || p.dom.nodes[i].attr("name") == Some(anchor)
+        }) else {
+            return;
+        };
+        // El primer texto desde ese nodo en adelante (en orden del documento).
+        let first_text = (target..p.dom.nodes.len())
+            .find(|&i| matches!(&p.dom.nodes[i].kind, NodeKind::Text(t) if !t.trim().is_empty()));
+        let Some(t) = first_text else { return };
+        let word = match &p.dom.nodes[t].kind {
+            NodeKind::Text(s) => s.split_whitespace().next().unwrap_or("").to_string(),
+            _ => return,
+        };
+        if let Some((_, page)) = &self.layout {
+            let mut from = 0;
+            // Se busca la palabra debajo de lo que ya se ve primero, después en toda la página.
+            for pass in 0..2 {
+                for pt in &page.paints {
+                    if let Paint::Text { text, top, .. } = pt
+                        && *text == word
+                        && (pass == 1 || *top >= from)
+                    {
+                        self.scroll = (*top - 8).max(0);
+                        self.dirty = true;
+                        return;
+                    }
+                }
+                from = 0;
+            }
+        }
+    }
+
     // --- formularios --------------------------------------------------------------------------
 
     /// Se apretó un botón (o Enter en un campo): se arma la dirección con los campos del
     /// formulario (GET) y se va.
     fn submit<D: BlockDevice>(&mut self, from: usize, ctx: &mut Ctx<'_, D>) {
-        let Some(field) = self.doc.fields.get(from) else {
+        let Some(field) = self.doc().fields.get(from) else {
             return;
         };
         let Some(form_idx) = field.form else {
@@ -717,7 +865,7 @@ impl Browser {
             }
             return;
         };
-        let Some(form) = self.doc.forms.get(form_idx).cloned() else {
+        let Some(form) = self.doc().forms.get(form_idx).cloned() else {
             return;
         };
         if form.post {
@@ -728,7 +876,7 @@ impl Browser {
             return;
         }
         let mut pairs: Vec<(String, String)> = Vec::new();
-        for (i, f) in self.doc.fields.iter().enumerate() {
+        for (i, f) in self.doc().fields.iter().enumerate() {
             if f.form != Some(form_idx) || f.name.is_empty() {
                 continue;
             }
@@ -780,7 +928,7 @@ impl Browser {
 
     /// Clic (o Enter) sobre un campo.
     fn activate_field<D: BlockDevice>(&mut self, i: usize, ctx: &mut Ctx<'_, D>) {
-        let Some(f) = self.doc.fields.get(i) else {
+        let Some(f) = self.doc().fields.get(i) else {
             return;
         };
         match f.kind {
@@ -789,19 +937,20 @@ impl Browser {
                 self.focus_link = None;
             }
             FieldKind::Checkbox => {
-                self.doc.fields[i].checked = !self.doc.fields[i].checked;
+                let f = &mut self.doc_mut().fields[i];
+                f.checked = !f.checked;
             }
             FieldKind::Radio => {
                 let (form, name) = (f.form, f.name.clone());
-                for g in &mut self.doc.fields {
+                for g in &mut self.doc_mut().fields {
                     if g.kind == FieldKind::Radio && g.form == form && g.name == name {
                         g.checked = false;
                     }
                 }
-                self.doc.fields[i].checked = true;
+                self.doc_mut().fields[i].checked = true;
             }
             FieldKind::Select => {
-                let f = &mut self.doc.fields[i];
+                let f = &mut self.doc_mut().fields[i];
                 if !f.options.is_empty() {
                     let pos = f
                         .options
@@ -828,38 +977,58 @@ impl Browser {
         )
     }
 
-    fn colors(&self) -> (Color, Color, Color) {
-        // (fondo, texto, enlaces)
-        if self.options().colors {
-            (
-                self.doc.bg.unwrap_or(Color::WHITE),
-                self.doc.fg.unwrap_or(Color::hex(0x202124)),
-                Color::hex(0x1a0dab),
-            )
-        } else {
-            (WINDOW_BG, theme::TEXT, Color::hex(0x5cc8ff))
+    /// Fondo de la página.
+    fn page_bg(&self) -> Color {
+        if self.dark() {
+            return DARK_BG;
         }
+        self.prep
+            .as_ref()
+            .and_then(html::canvas_color)
+            .unwrap_or(Color::WHITE)
     }
 
     fn ensure_layout(&mut self, width: i32) {
         if self.layout.as_ref().is_some_and(|l| l.0 == width) {
             return;
         }
-        let (_, fg, _) = self.colors();
-        let (lines, total) = layout(
-            &self.doc,
-            &self.images,
-            width - 2 * MARGIN,
-            fg,
-            !self.options().colors,
-        );
-        self.layout = Some((width, lines, total));
+        // `@media` depende del ancho: si cambió, se recalculan los estilos.
+        if width != self.styled_width && self.html.is_some() {
+            self.styled_width = width;
+            self.restyle();
+        }
+        self.styled_width = width;
+        if self.fonts.is_none() {
+            self.fonts = Some(WebFonts::new());
+        }
+        let sizes: Vec<Option<(i32, i32)>> = self
+            .images
+            .iter()
+            .map(|i| match i {
+                Img::Ready(img) => Some((img.width as i32, img.height as i32)),
+                _ => None,
+            })
+            .collect();
+        let page = match (&self.prep, &self.fonts) {
+            (Some(p), Some(fonts)) => {
+                let env = Env {
+                    fonts,
+                    image_sizes: &sizes,
+                    width,
+                    height: 700,
+                    dark: self.dark(),
+                };
+                layout::layout(p, &env)
+            }
+            _ => Page::default(),
+        };
+        self.layout = Some((width, page));
     }
 
     fn max_scroll(&self, page: Rect) -> i32 {
         self.layout
             .as_ref()
-            .map_or(0, |l| (l.2 - page.h + 40).max(0))
+            .map_or(0, |l| (l.1.height - page.h + 40).max(0))
     }
 
     fn scroll_by(&mut self, dy: i32, content: Rect) {
@@ -876,23 +1045,37 @@ impl Browser {
     fn focus_next(&mut self, forward: bool, content: Rect) {
         let page = Self::page_rect(content);
         self.ensure_layout(page.w);
-        let Some((_, lines, _)) = &self.layout else {
+        let Some((_, laid)) = &self.layout else {
             return;
         };
         // (es campo, índice, y)
         let mut order: Vec<(bool, usize, i32)> = Vec::new();
-        for l in lines {
-            for it in &l.items {
-                let key = match (&it.kind, it.link) {
-                    (ItemKind::Field(f), _) => Some((true, *f)),
-                    (_, Some(k)) => Some((false, k)),
-                    _ => None,
-                };
-                if let Some((is_field, k)) = key
-                    && !order.iter().any(|(f, o, _)| *f == is_field && *o == k)
-                {
-                    order.push((is_field, k, l.y));
+        for p in &laid.paints {
+            let key = match p {
+                Paint::Field { field, r, .. } => Some((true, *field as usize, r.y)),
+                Paint::Hit { field, r, .. } if *field != NONE => Some((true, *field as usize, r.y)),
+                Paint::Text { link, top, .. } if *link != NONE => {
+                    Some((false, *link as usize, *top))
                 }
+                Paint::Image { link, r, .. } | Paint::Hit { link, r, .. } if *link != NONE => {
+                    Some((false, *link as usize, r.y))
+                }
+                _ => None,
+            };
+            if let Some((is_field, k, y)) = key
+                && !order.iter().any(|(f, o, _)| *f == is_field && *o == k)
+            {
+                // Los campos ocultos no reciben el foco.
+                if is_field
+                    && self
+                        .doc()
+                        .fields
+                        .get(k)
+                        .is_some_and(|f| f.kind == FieldKind::Hidden)
+                {
+                    continue;
+                }
+                order.push((is_field, k, y));
             }
         }
         if order.is_empty() {
@@ -917,7 +1100,7 @@ impl Browser {
         } else {
             self.focus_link = Some(k);
             self.focus_field = None;
-            self.status = self.doc.links.get(k).cloned().unwrap_or_default();
+            self.status = self.doc().links.get(k).cloned().unwrap_or_default();
         }
         if y < self.scroll || y > self.scroll + page.h - 60 {
             self.scroll = (y - page.h / 3).clamp(0, self.max_scroll(page));
@@ -966,12 +1149,29 @@ impl Browser {
         }
         // Escribiendo en un campo de la página.
         if let Some(fi) = self.focus_field
-            && fi < self.doc.fields.len()
+            && fi < self.doc().fields.len()
         {
+            let kind = self.doc().fields[fi].kind;
+            let typing = matches!(
+                kind,
+                FieldKind::Text | FieldKind::Password | FieldKind::TextArea
+            );
             match key {
+                Key::Enter if kind == FieldKind::TextArea && mods.shift => {
+                    self.doc_mut().fields[fi].value.push('\n');
+                    return true;
+                }
                 Key::Enter => {
                     self.focus_field = None;
-                    self.submit(fi, ctx);
+                    if typing {
+                        self.submit(fi, ctx);
+                    } else {
+                        self.activate_field(fi, ctx);
+                    }
+                    return true;
+                }
+                Key::Char(' ') if !typing => {
+                    self.activate_field(fi, ctx);
                     return true;
                 }
                 Key::Escape => {
@@ -982,13 +1182,13 @@ impl Browser {
                     self.focus_next(!mods.shift, content);
                     return true;
                 }
-                Key::Backspace => {
-                    self.doc.fields[fi].value.pop();
+                Key::Backspace if typing => {
+                    self.doc_mut().fields[fi].value.pop();
                     return true;
                 }
-                Key::Char(c) if !mods.ctrl && !c.is_control() => {
-                    if self.doc.fields[fi].value.chars().count() < 500 {
-                        self.doc.fields[fi].value.push(c);
+                Key::Char(c) if typing && !mods.ctrl && !c.is_control() => {
+                    if self.doc().fields[fi].value.chars().count() < 500 {
+                        self.doc_mut().fields[fi].value.push(c);
                     }
                     return true;
                 }
@@ -1070,8 +1270,8 @@ impl Browser {
             }
             self.focus_field = None;
             match self.item_at(page, x, y) {
-                Some((Some(f), _)) => self.activate_field(f, ctx),
-                Some((None, Some(link))) => {
+                (Some(f), _) => self.activate_field(f, ctx),
+                (None, Some(link)) => {
                     self.focus_link = Some(link);
                     self.follow(link, ctx);
                 }
@@ -1082,21 +1282,34 @@ impl Browser {
     }
 
     /// (campo, enlace) bajo el punto.
-    fn item_at(&mut self, page: Rect, x: i32, y: i32) -> Option<(Option<usize>, Option<usize>)> {
+    fn item_at(&mut self, page: Rect, x: i32, y: i32) -> (Option<usize>, Option<usize>) {
         self.ensure_layout(page.w);
-        let (_, lines, _) = self.layout.as_ref()?;
-        let py = y - page.y - 16 + self.scroll;
-        let px = x - page.x - MARGIN;
-        let line = lines.iter().find(|l| py >= l.y && py < l.y + l.h)?;
-        let it = line
-            .items
-            .iter()
-            .find(|it| px >= it.x && px < it.x + it.w)?;
-        let field = match it.kind {
-            ItemKind::Field(f) => Some(f),
-            _ => None,
+        let Some((_, laid)) = self.layout.as_ref() else {
+            return (None, None);
         };
-        Some((field, it.link))
+        let px = x - page.x;
+        let py = y - page.y + self.scroll;
+        let some = |v: u32| (v != NONE).then_some(v as usize);
+        for p in laid.paints.iter().rev() {
+            match p {
+                Paint::Field { r, field, .. } if r.inset(-3).contains(px, py) => {
+                    return (some(*field), None);
+                }
+                Paint::Hit { r, link, field } if r.contains(px, py) => {
+                    return (some(*field), some(*link));
+                }
+                Paint::Text {
+                    x, top, w, h, link, ..
+                } if *link != NONE && Rect::new(*x, *top, *w, *h).contains(px, py) => {
+                    return (None, some(*link));
+                }
+                Paint::Image { r, link, .. } if *link != NONE && r.contains(px, py) => {
+                    return (None, some(*link));
+                }
+                _ => {}
+            }
+        }
+        (None, None)
     }
 
     pub fn wheel(&mut self, delta: i32, content: Rect) {
@@ -1107,7 +1320,6 @@ impl Browser {
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect, now_ms: u64) {
         let page = Self::page_rect(r);
-        let (bg, _, _) = self.colors();
         match &self.state {
             State::Loading { url, since, .. } => {
                 c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
@@ -1150,11 +1362,12 @@ impl Browser {
                 }
             }
             State::Page => {
+                let bg = self.page_bg();
                 c.fill_rect(r.x, r.y, r.w, r.h, bg);
                 self.draw_page(c, page, now_ms);
             }
         }
-        // La barra va después: tapa los renglones que se asoman arriba de la página.
+        // La barra va después: tapa lo que se asoma arriba de la página.
         self.draw_bar(c, r, now_ms);
         // Barra de estado.
         let s = Rect::new(r.x, r.y + r.h - STATUS_H, r.w, STATUS_H);
@@ -1162,7 +1375,7 @@ impl Browser {
         let loading_images = self
             .images
             .iter()
-            .filter(|i| matches!(i, Img::Loading(_)))
+            .filter(|i| matches!(i, Img::Loading(_) | Img::Pending))
             .count()
             + self.css.iter().filter(|(_, c)| c.is_none()).count();
         let msg = if !self.status.is_empty() {
@@ -1273,278 +1486,389 @@ impl Browser {
     fn draw_page(&mut self, c: &mut Canvas<'_>, page: Rect, now_ms: u64) {
         self.ensure_layout(page.w);
         let scroll = self.scroll;
-        let (_, fg, link_color) = self.colors();
-        let styled = self.options().colors;
-        let focus = self.focus_link;
+        let focus = self.focus_link.map(|l| l as u32);
         let focus_field = self.focus_field;
         let blink = (now_ms / 530).is_multiple_of(2);
-        let Some((_, lines, total)) = &self.layout else {
+        let dark = self.dark();
+        let (Some((_, laid)), Some(fonts)) = (&self.layout, &self.fonts) else {
             return;
         };
-        let x0 = page.x + MARGIN;
-        let rule = if styled {
-            Color::hex(0xdadce0)
-        } else {
-            theme::PANEL_RIM
-        };
-        for l in lines {
-            let y = page.y + 16 + l.y - scroll;
-            if y + l.h < page.y || y > page.y + page.h {
-                continue;
-            }
-            if let Some(bg) = l.bg {
-                c.fill_rect(page.x + MARGIN / 2, y, page.w - MARGIN, l.h, bg);
-            }
-            if l.rule {
-                line(
-                    c,
-                    x0,
-                    y + l.h / 2,
-                    page.x + page.w - MARGIN,
-                    y + l.h / 2,
-                    rule,
-                );
-                continue;
-            }
-            for it in &l.items {
-                let ix = x0 + it.x;
-                let iy = y + l.h - it.h - 2;
-                match &it.kind {
-                    ItemKind::Text {
-                        text: t,
-                        style,
-                        underline,
-                        bg,
-                    } => {
-                        let mut st = *style;
-                        if let Some(k) = it.link {
-                            let focused = focus == Some(k);
-                            if focused {
-                                st = st.color(if styled {
-                                    Color::hex(0xe37400)
-                                } else {
-                                    Color::hex(0xffd166)
-                                });
-                            } else if st.color == fg {
-                                st = st.color(link_color);
-                            }
-                        }
-                        if let Some(bg) = bg {
-                            c.fill_rect(ix - 2, iy - 1, it.w + 4, it.h + 2, *bg);
-                        }
-                        text::draw(c, ix, iy, t, &st);
-                        if *underline || (it.link.is_some() && focus == it.link) {
-                            let uy = iy + st.line_height() - 2;
-                            line(c, ix, uy, ix + it.w - 1, uy, st.color.scale(160));
-                        }
-                    }
-                    ItemKind::Image(i) => {
-                        let area = Rect::new(ix, iy, it.w, it.h);
-                        match self.images.get(*i) {
-                            Some(Img::Ready(img)) => img.draw_scaled(c, area),
-                            _ => {
-                                let ph = if styled {
-                                    Color::hex(0xf1f3f4)
-                                } else {
-                                    theme::PANEL
-                                };
-                                c.fill_rect(area.x, area.y, area.w, area.h, ph);
-                                jarvis_gfx::shapes::rect_outline(
-                                    c, area.x, area.y, area.w, area.h, rule,
-                                );
-                                if let Some(alt) = self.doc.images.get(*i).map(|im| im.alt.as_str())
-                                    && area.w > 40
-                                    && area.h > 20
-                                {
-                                    let st = Style::new(
-                                        Weight::Regular,
-                                        Size::Size16,
-                                        if styled {
-                                            Color::hex(0x5f6368)
-                                        } else {
-                                            theme::TEXT_DIM
-                                        },
-                                    );
-                                    draw_fit(c, area.x + 6, area.y + 4, alt, &st, area.w - 12);
-                                }
-                            }
-                        }
-                        if it.link.is_some() && focus == it.link {
-                            rounded_outline(
-                                c,
-                                ix - 2,
-                                iy - 2,
-                                it.w + 4,
-                                it.h + 4,
-                                2,
-                                Color::hex(0xe37400),
-                            );
-                        }
-                    }
-                    ItemKind::Field(f) => {
-                        if let Some(field) = self.doc.fields.get(*f) {
-                            draw_field(
-                                c,
-                                Rect::new(ix, iy, it.w, it.h),
-                                field,
-                                styled,
-                                focus_field == Some(*f),
-                                blink,
-                            );
-                        }
+        let (ox, oy) = (page.x, page.y - scroll);
+        let outer = c.saved_clip();
+        c.intersect_clip(page);
+        let mut clips = Vec::new();
+        let visible = |r: &Rect| r.y + oy < page.y + page.h && r.y + r.h + oy > page.y;
+        for p in &laid.paints {
+            match p {
+                Paint::None | Paint::Hit { .. } => {}
+                Paint::ClipPush(r) => {
+                    clips.push(c.saved_clip());
+                    c.intersect_clip(Rect::new(r.x + ox, r.y + oy, r.w, r.h));
+                }
+                Paint::ClipPop => {
+                    if let Some(s) = clips.pop() {
+                        c.restore_clip(s);
                     }
                 }
+                Paint::Rect {
+                    r, color, radius, ..
+                } if visible(r) => {
+                    let rr = Rect::new(r.x + ox, r.y + oy, r.w, r.h);
+                    if *radius > 1 {
+                        rounded_rect(c, rr.x, rr.y, rr.w, rr.h, *radius, color.c, color.a);
+                    } else {
+                        fill_alpha(c, rr, color.c, color.a);
+                    }
+                }
+                Paint::Border {
+                    r,
+                    w,
+                    c: col,
+                    radius,
+                    ..
+                } if visible(r) => {
+                    let rr = Rect::new(r.x + ox, r.y + oy, r.w, r.h);
+                    if col.iter().all(|x| x.a == 0) {
+                        continue;
+                    }
+                    if *radius > 1
+                        && w.iter().all(|&x| x == w[0])
+                        && col.iter().all(|x| *x == col[0])
+                    {
+                        for k in 0..w[0].min(4) {
+                            rounded_outline(
+                                c,
+                                rr.x + k,
+                                rr.y + k,
+                                rr.w - 2 * k,
+                                rr.h - 2 * k,
+                                (*radius - k).max(0),
+                                col[0].c,
+                            );
+                        }
+                    } else {
+                        fill_alpha(c, Rect::new(rr.x, rr.y, rr.w, w[0]), col[0].c, col[0].a);
+                        fill_alpha(
+                            c,
+                            Rect::new(rr.x + rr.w - w[1], rr.y, w[1], rr.h),
+                            col[1].c,
+                            col[1].a,
+                        );
+                        fill_alpha(
+                            c,
+                            Rect::new(rr.x, rr.y + rr.h - w[2], rr.w, w[2]),
+                            col[2].c,
+                            col[2].a,
+                        );
+                        fill_alpha(c, Rect::new(rr.x, rr.y, w[3], rr.h), col[3].c, col[3].a);
+                    }
+                }
+                Paint::Text {
+                    x,
+                    base,
+                    top,
+                    h,
+                    w,
+                    text: t,
+                    font,
+                    color,
+                    underline,
+                    strike,
+                    link,
+                } => {
+                    if *top + oy > page.y + page.h || *top + *h + oy < page.y {
+                        continue;
+                    }
+                    let focused = *link != NONE && focus == Some(*link);
+                    let col = if focused {
+                        if dark {
+                            Color::hex(0xffd166)
+                        } else {
+                            Color::hex(0xe37400)
+                        }
+                    } else if color.a < 255 {
+                        // Texto semitransparente: se mezcla con el fondo de la página.
+                        self.page_bg().lerp(color.c, color.a)
+                    } else {
+                        color.c
+                    };
+                    let (px, pb) = (x + ox, base + oy);
+                    fonts.draw(c, px, pb, t, *font, col);
+                    if *underline || focused {
+                        let uy = pb + (font.px as i32 / 8).max(1) + 1;
+                        c.fill_rect(px, uy, *w, (font.px as i32 / 14).max(1), col);
+                    }
+                    if *strike {
+                        let sy = pb - font.px as i32 / 3;
+                        c.fill_rect(px, sy, *w, 1, col);
+                    }
+                }
+                Paint::Image { r, img, link } if visible(r) => {
+                    let rr = Rect::new(r.x + ox, r.y + oy, r.w, r.h);
+                    if let Some(Img::Ready(im)) = self.images.get(*img as usize) {
+                        draw_image(c, im, rr, page);
+                    }
+                    if *link != NONE && focus == Some(*link) {
+                        rounded_outline(
+                            c,
+                            rr.x - 2,
+                            rr.y - 2,
+                            rr.w + 4,
+                            rr.h + 4,
+                            2,
+                            Color::hex(0xe37400),
+                        );
+                    }
+                }
+                Paint::BgImage {
+                    bx,
+                    dest,
+                    img,
+                    repeat,
+                } if visible(bx) => {
+                    let Some(Img::Ready(im)) = self.images.get(*img as usize) else {
+                        continue;
+                    };
+                    let saved = c.saved_clip();
+                    let b = Rect::new(bx.x + ox, bx.y + oy, bx.w, bx.h);
+                    c.intersect_clip(b);
+                    let d = Rect::new(dest.x + ox, dest.y + oy, dest.w, dest.h);
+                    if *repeat && d.w >= 4 && d.h >= 4 {
+                        // Mosaico desde la posición pedida, cubriendo la caja.
+                        let mut x0 = d.x;
+                        while x0 > b.x {
+                            x0 -= d.w;
+                        }
+                        let mut y0 = d.y;
+                        while y0 > b.y {
+                            y0 -= d.h;
+                        }
+                        let mut count = 0;
+                        let mut y = y0;
+                        while y < b.y + b.h && count < 400 {
+                            let mut x = x0;
+                            while x < b.x + b.w && count < 400 {
+                                if y + d.h > page.y && y < page.y + page.h {
+                                    draw_image(c, im, Rect::new(x, y, d.w, d.h), page);
+                                }
+                                x += d.w;
+                                count += 1;
+                            }
+                            y += d.h;
+                        }
+                    } else {
+                        draw_image(c, im, d, page);
+                    }
+                    c.restore_clip(saved);
+                }
+                Paint::Mask {
+                    bx,
+                    dest,
+                    img,
+                    color,
+                } if visible(bx) => {
+                    if let Some(Img::Ready(im)) = self.images.get(*img as usize) {
+                        let saved = c.saved_clip();
+                        c.intersect_clip(Rect::new(bx.x + ox, bx.y + oy, bx.w, bx.h));
+                        let d = Rect::new(dest.x + ox, dest.y + oy, dest.w, dest.h);
+                        im.draw_mask(c, d, color.c);
+                        c.restore_clip(saved);
+                    }
+                }
+                Paint::Field {
+                    r,
+                    field,
+                    font,
+                    color,
+                } if visible(r) => {
+                    if let Some(f) = self.doc().fields.get(*field as usize) {
+                        let rr = Rect::new(r.x + ox, r.y + oy, r.w, r.h);
+                        draw_field(
+                            c,
+                            fonts,
+                            rr,
+                            f,
+                            *font,
+                            color.c,
+                            focus_field == Some(*field as usize),
+                            blink,
+                        );
+                    }
+                }
+                Paint::Placeholder { r, label: l } if visible(r) => {
+                    let rr = Rect::new(r.x + ox, r.y + oy, r.w, r.h);
+                    let (fill, rim, fg) = if dark {
+                        (theme::PANEL, theme::PANEL_RIM, theme::TEXT_DIM)
+                    } else {
+                        (
+                            Color::hex(0xf1f3f4),
+                            Color::hex(0xdadce0),
+                            Color::hex(0x5f6368),
+                        )
+                    };
+                    c.fill_rect(rr.x, rr.y, rr.w, rr.h, fill);
+                    jarvis_gfx::shapes::rect_outline(c, rr.x, rr.y, rr.w, rr.h, rim);
+                    if !l.is_empty() && rr.w > 30 && rr.h > 14 {
+                        let f = FontSpec::new(13);
+                        let saved = c.saved_clip();
+                        c.intersect_clip(rr);
+                        fonts.draw(c, rr.x + 4, rr.y + 14, l, f, fg);
+                        c.restore_clip(saved);
+                    }
+                }
+                _ => {}
             }
         }
+        c.restore_clip(outer);
         // Barra de desplazamiento.
-        if *total > page.h {
+        let total = laid.height;
+        if total > page.h {
             let track = Rect::new(page.x + page.w - 6, page.y + 4, 3, page.h - 8);
-            c.fill_rect(
-                track.x,
-                track.y,
-                track.w,
-                track.h,
-                if styled {
-                    Color::hex(0xdadce0)
-                } else {
-                    theme::PANEL_RIM
-                },
-            );
-            let h = (track.h as i64 * page.h as i64 / *total as i64).max(16) as i32;
-            let max = (*total - page.h + 40).max(1);
+            let (tc, bc) = if dark {
+                (theme::PANEL_RIM, theme::CYAN.scale(180))
+            } else {
+                (Color::hex(0xdadce0), Color::hex(0x9aa0a6))
+            };
+            c.fill_rect(track.x, track.y, track.w, track.h, tc);
+            let h = (track.h as i64 * page.h as i64 / total as i64).max(16) as i32;
+            let max = (total - page.h + 40).max(1);
             let y = track.y + ((track.h - h) as i64 * scroll as i64 / max as i64) as i32;
-            c.fill_rect(
-                track.x,
-                y,
-                track.w,
-                h,
-                if styled {
-                    Color::hex(0x9aa0a6)
-                } else {
-                    theme::CYAN.scale(180)
-                },
-            );
+            c.fill_rect(track.x, y, track.w, h, bc);
         }
     }
 }
 
-fn field_label(f: &html::Field) -> String {
+/// Un rectángulo con transparencia.
+fn fill_alpha(c: &mut Canvas<'_>, r: Rect, color: Color, a: u8) {
+    if r.w <= 0 || r.h <= 0 || a == 0 {
+        return;
+    }
+    if a == 255 {
+        c.fill_rect(r.x, r.y, r.w, r.h, color);
+        return;
+    }
+    let vis = r.clamp(c.width(), c.height());
+    for y in vis.y..vis.y + vis.h {
+        for x in vis.x..vis.x + vis.w {
+            c.blend(x, y, color, a);
+        }
+    }
+}
+
+/// Dibuja una imagen escalada, solo las filas que se ven.
+fn draw_image(c: &mut Canvas<'_>, im: &bmp::Image, dst: Rect, page: Rect) {
+    let y0 = dst.y.max(page.y);
+    let y1 = (dst.y + dst.h).min(page.y + page.h);
+    if y1 <= y0 {
+        return;
+    }
+    im.draw_rows(c, dst, y0 - dst.y, y1 - dst.y);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_field(
+    c: &mut Canvas<'_>,
+    fonts: &WebFonts,
+    r: Rect,
+    f: &html::Field,
+    font: FontSpec,
+    fg: Color,
+    focused: bool,
+    blink: bool,
+) {
+    let accent = Color::hex(0x1a73e8);
+    let dim = Color::hex(0x80868b);
+    let vm = fonts.vmetrics(font);
+    let base = r.y + (r.h - (vm.ascent + vm.descent)) / 2 + vm.ascent;
+    let saved = c.saved_clip();
     match f.kind {
+        FieldKind::Checkbox | FieldKind::Radio => {
+            let side = r.w.min(r.h).max(10);
+            let (x, y) = (r.x, r.y + (r.h - side) / 2);
+            let rad = if f.kind == FieldKind::Radio {
+                side / 2
+            } else {
+                2
+            };
+            rounded_rect(c, x, y, side, side, rad, Color::WHITE, 255);
+            rounded_outline(
+                c,
+                x,
+                y,
+                side,
+                side,
+                rad,
+                if focused {
+                    accent
+                } else {
+                    Color::hex(0x767676)
+                },
+            );
+            if f.checked {
+                rounded_rect(c, x + 3, y + 3, side - 6, side - 6, rad / 2, accent, 255);
+            }
+        }
+        FieldKind::Submit | FieldKind::Button => {
+            c.intersect_clip(r.inset(-4));
+            let w = fonts.width(&f.value, font);
+            fonts.draw(c, r.x + (r.w - w) / 2, base, &f.value, font, fg);
+            if focused {
+                rounded_outline(c, r.x - 4, r.y - 2, r.w + 8, r.h + 4, 3, accent);
+            }
+        }
         FieldKind::Select => {
+            c.intersect_clip(r);
             let shown = f
                 .options
                 .iter()
                 .find(|(v, _)| *v == f.value)
                 .map_or(f.value.as_str(), |(_, l)| l.as_str());
-            format!("{shown}  v")
-        }
-        _ => f.value.clone(),
-    }
-}
-
-fn field_size(f: &html::Field) -> (i32, i32) {
-    let st = Style::new(Weight::Regular, Size::Size16, Color::BLACK);
-    match f.kind {
-        FieldKind::Checkbox | FieldKind::Radio => (18, 18),
-        FieldKind::Submit | FieldKind::Button | FieldKind::Select => (
-            (text::width(&field_label(f), &st) + 28).clamp(40, 400),
-            FIELD_H,
-        ),
-        FieldKind::TextArea => (f.width, FIELD_H * 2),
-        _ => (f.width, FIELD_H),
-    }
-}
-
-fn draw_field(
-    c: &mut Canvas<'_>,
-    r: Rect,
-    f: &html::Field,
-    styled: bool,
-    focused: bool,
-    blink: bool,
-) {
-    let (bg, border, fg, dim, accent) = if styled {
-        (
-            Color::WHITE,
-            Color::hex(0x9aa0a6),
-            Color::hex(0x202124),
-            Color::hex(0x80868b),
-            Color::hex(0x1a73e8),
-        )
-    } else {
-        (
-            FIELD_BG,
-            theme::PANEL_RIM,
-            theme::TEXT,
-            theme::TEXT_DIM,
-            theme::CYAN,
-        )
-    };
-    let st = Style::new(Weight::Regular, Size::Size16, fg);
-    match f.kind {
-        FieldKind::Checkbox | FieldKind::Radio => {
-            let rad = if f.kind == FieldKind::Radio { 9 } else { 3 };
-            rounded_rect(c, r.x, r.y, r.w, r.h, rad, bg, 255);
-            rounded_outline(
-                c,
-                r.x,
-                r.y,
-                r.w,
-                r.h,
-                rad,
-                if focused { accent } else { border },
-            );
-            if f.checked {
-                rounded_rect(c, r.x + 4, r.y + 4, r.w - 8, r.h - 8, rad / 2, accent, 255);
+            fonts.draw(c, r.x + 2, base, shown, font, fg);
+            fonts.draw(c, r.x + r.w - 12, base, "▾", font, fg);
+            c.restore_clip(saved);
+            if focused {
+                rounded_outline(c, r.x - 3, r.y - 2, r.w + 6, r.h + 4, 3, accent);
             }
-        }
-        FieldKind::Submit | FieldKind::Button | FieldKind::Select => {
-            let fill = if styled {
-                Color::hex(0xf1f3f4)
-            } else {
-                theme::PANEL
-            };
-            rounded_rect(c, r.x, r.y, r.w, r.h, 4, fill, 255);
-            rounded_outline(
-                c,
-                r.x,
-                r.y,
-                r.w,
-                r.h,
-                4,
-                if focused { accent } else { border },
-            );
-            let label = field_label(f);
-            let tw = text::width(&label, &st);
-            text::draw(c, r.x + (r.w - tw) / 2, r.y + (r.h - 16) / 2, &label, &st);
         }
         _ => {
-            rounded_rect(c, r.x, r.y, r.w, r.h, 4, bg, 255);
-            rounded_outline(
-                c,
-                r.x,
-                r.y,
-                r.w,
-                r.h,
-                4,
-                if focused { accent } else { border },
-            );
+            c.intersect_clip(r);
             let shown = if f.kind == FieldKind::Password {
-                "*".repeat(f.value.chars().count())
+                "•".repeat(f.value.chars().count())
             } else {
-                f.value.clone()
+                f.value.replace('\n', " ")
             };
-            let (t, style) = if shown.is_empty() && !focused {
-                (f.placeholder.clone(), st.color(dim))
+            let (t, col) = if shown.is_empty() && !focused {
+                (f.placeholder.clone(), dim)
             } else {
-                (shown, st)
+                (shown, fg)
             };
-            let tw = draw_fit(c, r.x + 8, r.y + 8, &t, &style, r.w - 16);
+            // Si no entra, se ve el final (lo último que se escribió).
+            let tw = fonts.width(&t, font);
+            let x = if tw > r.w - 6 {
+                r.x + r.w - 6 - tw
+            } else {
+                r.x + 2
+            };
+            fonts.draw(c, x, base, &t, font, col);
             if focused && blink {
-                c.fill_rect(r.x + 9 + tw, r.y + 6, 2, r.h - 12, accent);
+                let cx = if t.is_empty() || shown_is_placeholder(f, focused) {
+                    r.x + 2
+                } else {
+                    x + tw + 1
+                };
+                c.fill_rect(cx, base - vm.ascent, 2, vm.ascent + vm.descent, accent);
+            }
+            c.restore_clip(saved);
+            if focused {
+                rounded_outline(c, r.x - 4, r.y - 3, r.w + 8, r.h + 6, 3, accent);
             }
         }
     }
+    c.restore_clip(saved);
+}
+
+fn shown_is_placeholder(f: &html::Field, focused: bool) -> bool {
+    f.value.is_empty() && !focused
 }
 
 /// Parte un texto en renglones de `max_w` píxeles.
@@ -1570,244 +1894,14 @@ fn wrap_plain(s: &str, st: &Style, max_w: i32) -> Vec<String> {
     out
 }
 
-/// Tamaño de una imagen en la página: el que pide el HTML, o el suyo, sin pasarse del ancho.
-fn image_size(doc: &Document, images: &[Img], i: usize, max_w: i32) -> Option<(i32, i32)> {
-    let r = doc.images.get(i)?;
-    let natural = match images.get(i) {
-        Some(Img::Ready(img)) => Some((img.width as i32, img.height as i32)),
-        _ => None,
-    };
-    let (w, h) = match (r.width, r.height, natural) {
-        (Some(w), Some(h), _) => (w, h),
-        (Some(w), None, Some((nw, nh))) => (w, w * nh / nw.max(1)),
-        (None, Some(h), Some((nw, nh))) => (h * nw / nh.max(1), h),
-        (_, _, Some(n)) => n,
-        // Sin tamaño y sin imagen todavía: un lugar chico para el texto alternativo.
-        (Some(w), None, None) => (w, 24),
-        (None, Some(h), None) => (h * 2, h),
-        (None, None, None) => return None,
-    };
-    if w <= 0 || h <= 0 {
-        return None;
-    }
-    let max_w = max_w.max(40);
-    Some(if w > max_w {
-        (max_w, h * max_w / w)
-    } else {
-        (w, h.min(2000))
-    })
-}
-
-/// Arma el documento en renglones de `width` píxeles. Devuelve los renglones y el alto total.
-fn layout(doc: &Document, images: &[Img], width: i32, fg: Color, dark: bool) -> (Vec<Line>, i32) {
-    let mut lines: Vec<Line> = Vec::new();
-    let mut y = 0;
-    let mut prev_bg: Option<Color> = None;
-    for block in &doc.blocks {
-        let (gap_before, gap_after) = match block.kind {
-            BlockKind::Heading(1) => (18, 10),
-            BlockKind::Heading(2) => (16, 8),
-            BlockKind::Heading(_) => (12, 6),
-            BlockKind::Item => (2, 2),
-            BlockKind::Pre | BlockKind::Quote => (6, 8),
-            BlockKind::Rule => (8, 8),
-            BlockKind::Text => (6, 8),
-        };
-        if !lines.is_empty() {
-            y += gap_before;
-        }
-        // Dos bloques seguidos con el mismo fondo son la misma caja: sin franja entre ellos.
-        let mut extend_up = match lines.last() {
-            Some(last) if block.bg.is_some() && block.bg == prev_bg => {
-                (y - (last.y + last.h)).max(0)
-            }
-            _ => 0,
-        };
-        prev_bg = block.bg;
-        if block.kind == BlockKind::Rule {
-            lines.push(Line {
-                y,
-                h: 8,
-                items: Vec::new(),
-                rule: true,
-                bg: block.bg,
-            });
-            y += 8 + gap_after;
-            continue;
-        }
-        let indent = block.indent as i32 * 24
-            + if block.kind == BlockKind::Quote {
-                16
-            } else {
-                0
-            };
-        let max_x = width.max(80);
-        let mut cur: Vec<Item> = Vec::new();
-        let mut x = indent;
-        let mut finish = |items: &mut Vec<Item>, lines: &mut Vec<Line>, y: &mut i32| {
-            let line_w = items.iter().map(|i| i.x + i.w).max().unwrap_or(indent) - indent;
-            let shift = match block.align {
-                Align::Left => 0,
-                Align::Center => ((max_x - indent - line_w) / 2).max(0),
-                Align::Right => (max_x - indent - line_w).max(0),
-            };
-            let h = items.iter().map(|i| i.h).max().unwrap_or(18) + 4;
-            for it in items.iter_mut() {
-                it.x += shift;
-            }
-            let up = core::mem::take(&mut extend_up);
-            lines.push(Line {
-                y: *y - up,
-                h: h + up,
-                items: core::mem::take(items),
-                rule: false,
-                bg: block.bg,
-            });
-            *y += h;
-        };
-        for span in &block.spans {
-            let color = if dark {
-                match block.kind {
-                    BlockKind::Pre => theme::PARTICLE_BRIGHT,
-                    BlockKind::Quote => theme::TEXT_DIM,
-                    BlockKind::Heading(1) => Color::WHITE,
-                    BlockKind::Heading(2) => theme::CYAN,
-                    BlockKind::Heading(_) => theme::PARTICLE_BRIGHT,
-                    _ if span.dim => theme::TEXT_DIM,
-                    _ => fg,
-                }
-            } else {
-                span.color
-                    .unwrap_or(if span.dim { Color::hex(0x70757a) } else { fg })
-            };
-            let weight = if span.bold {
-                Weight::Bold
-            } else {
-                Weight::Regular
-            };
-            let st = Style::new(weight, size_of(span.size), color);
-            let lh = st.line_height();
-            // Imágenes y campos: una caja.
-            let boxed = match (span.image, span.field) {
-                (Some(i), _) => image_size(doc, images, i, max_x - indent)
-                    .map(|(w, h)| (ItemKind::Image(i), w, h)),
-                (_, Some(f)) => doc.fields.get(f).map(|fl| {
-                    let (w, h) = field_size(fl);
-                    (ItemKind::Field(f), w.min(max_x - indent), h)
-                }),
-                _ => None,
-            };
-            if let Some((kind, w, h)) = boxed {
-                if x + w > max_x && x > indent {
-                    finish(&mut cur, &mut lines, &mut y);
-                    x = indent;
-                }
-                cur.push(Item {
-                    x,
-                    w,
-                    h,
-                    kind,
-                    link: span.link,
-                });
-                x += w + 6;
-                continue;
-            }
-            if span.image.is_some() {
-                // Imagen sin tamaño todavía: se muestra su texto alternativo.
-                if span.text.is_empty() {
-                    continue;
-                }
-            }
-            let space_w = text::width(" ", &st);
-            let pieces: Vec<&str> = span.text.split('\n').collect();
-            for (pi, piece) in pieces.iter().enumerate() {
-                if pi > 0 {
-                    finish(&mut cur, &mut lines, &mut y);
-                    x = indent;
-                }
-                let words: Vec<&str> = if block.kind == BlockKind::Pre {
-                    alloc::vec![*piece]
-                } else {
-                    piece.split(' ').collect()
-                };
-                for (wi, word) in words.iter().enumerate() {
-                    if wi > 0 && x > indent {
-                        x += space_w;
-                    }
-                    if word.is_empty() {
-                        continue;
-                    }
-                    let mut w = text::width(word, &st);
-                    if x + w > max_x && x > indent && block.kind != BlockKind::Pre {
-                        finish(&mut cur, &mut lines, &mut y);
-                        x = indent;
-                    }
-                    // Una palabra más larga que el renglón se corta.
-                    let word = if w > max_x - indent {
-                        let fitted = text::fit(word, &st, max_x - indent);
-                        w = text::width(&fitted, &st);
-                        fitted
-                    } else {
-                        word.to_string()
-                    };
-                    let bg = if dark { None } else { span.bg };
-                    // Palabras seguidas con el mismo estilo van en un solo trozo.
-                    match cur.last_mut() {
-                        Some(Item {
-                            x: lx,
-                            w: lw,
-                            kind:
-                                ItemKind::Text {
-                                    text: lt,
-                                    style: ls,
-                                    underline: lu,
-                                    bg: lb,
-                                },
-                            link,
-                            ..
-                        }) if *link == span.link
-                            && ls.color == st.color
-                            && core::mem::discriminant(&ls.weight)
-                                == core::mem::discriminant(&st.weight)
-                            && core::mem::discriminant(&ls.size)
-                                == core::mem::discriminant(&st.size)
-                            && *lu == span.underline
-                            && *lb == bg
-                            && *lx + *lw + space_w == x =>
-                        {
-                            lt.push(' ');
-                            lt.push_str(&word);
-                            *lw = x + w - *lx;
-                        }
-                        _ => cur.push(Item {
-                            x,
-                            w,
-                            h: lh,
-                            kind: ItemKind::Text {
-                                text: word,
-                                style: st,
-                                underline: span.underline,
-                                bg,
-                            },
-                            link: span.link,
-                        }),
-                    }
-                    x += w;
-                }
-            }
-        }
-        finish(&mut cur, &mut lines, &mut y);
-        y += gap_after - 4;
-    }
-    (lines, y)
-}
-
 /// Una carpeta del disco como página (para `file:///Descargas`).
 fn dir_listing<D: BlockDevice>(fs: &mut jarvis_fs::FileSystem<D>, path: &str) -> String {
     let mut entries = fs.list(path).unwrap_or_default();
     entries.retain(|e| !e.name.starts_with('.'));
     entries.sort_by_key(|e| (!e.is_dir, e.name.to_lowercase()));
-    let mut s = format!("<title>{path}</title><h1>{path}</h1><ul>");
+    let mut s = format!(
+        "<title>{path}</title><body style='font-family:sans-serif;margin:24px'><h1>{path}</h1><ul>"
+    );
     if path != "/" {
         s.push_str(&format!(
             "<li><a href=\"file://{}\">.. (subir)</a></li>",
@@ -1828,69 +1922,4 @@ fn dir_listing<D: BlockDevice>(fs: &mut jarvis_fs::FileSystem<D>, path: &str) ->
     }
     s.push_str("</ul>");
     s
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn items_text(lines: &[Line]) -> Vec<String> {
-        lines
-            .iter()
-            .flat_map(|l| l.items.iter())
-            .filter_map(|i| match &i.kind {
-                ItemKind::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn arma_renglones_sin_pasarse_del_ancho() {
-        let doc = html::parse(
-            "<h1>Título largo de prueba</h1><p>palabra otra <a href=/x>enlace con varias palabras</a> \
-             y más texto que no entra en un solo renglón porque es largo.</p><pre>a\nb</pre>",
-        );
-        let (lines, total) = layout(&doc, &[], 300, theme::TEXT, true);
-        assert!(total > 0);
-        for l in &lines {
-            for it in &l.items {
-                assert!(
-                    it.x + it.w <= 300,
-                    "{:?}",
-                    items_text(core::slice::from_ref(l))
-                );
-            }
-        }
-        let linked: String = lines
-            .iter()
-            .flat_map(|l| l.items.iter())
-            .filter(|i| i.link == Some(0))
-            .filter_map(|i| match &i.kind {
-                ItemKind::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert_eq!(linked, "enlace con varias palabras");
-        // El <pre> respeta los saltos de línea.
-        let t = items_text(&lines);
-        assert_eq!(&t[t.len() - 2..], ["a", "b"]);
-    }
-
-    #[test]
-    fn centra_y_pone_campos_e_imagenes() {
-        let doc = html::render(
-            "<div style='text-align:center'>hola</div><form><input name=q size=20><input type=submit value=Ir></form><img src=x width=100 height=50>",
-            Options::STYLED,
-            &[],
-        );
-        let (lines, _) = layout(&doc, &[], 600, Color::BLACK, false);
-        let hola = &lines[0].items[0];
-        assert!(hola.x > 250, "centrado: {}", hola.x);
-        let kinds: Vec<(i32, i32)> = lines[1].items.iter().map(|i| (i.w, i.h)).collect();
-        assert_eq!(kinds[0], (180, FIELD_H));
-        assert!(matches!(lines[2].items[0].kind, ItemKind::Image(0)));
-        assert_eq!((lines[2].items[0].w, lines[2].items[0].h), (100, 50));
-    }
 }
