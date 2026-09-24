@@ -1,0 +1,3 @@
+aurora.png -> /Imágenes/Fondos/Aurora.bmp [bmp]
+atardecer.png -> /Imágenes/Fondos/Atardecer.bmp [bmp]
+circuito.png -> /Imágenes/Fondos/Circuito.bmp [bmp]

@@ -24,7 +24,9 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use jarvis_desktop::web::http::{Connect, Fetch, PROXY_HOST, PROXY_PORT, Step, Target, request};
+use jarvis_desktop::web::http::{
+    Connect, Fetch, PROXY_HOST, PROXY_PORT, Step, Target, max_body, request_kind,
+};
 use jarvis_desktop::{HttpResponse, NetInfo, NetRequest};
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::Device;
@@ -42,8 +44,8 @@ const STAGE_TIMEOUT_MS: u64 = 20_000;
 const FALLBACK_DNS: [[u8; 4]; 2] = [[1, 1, 1, 1], [8, 8, 8, 8]];
 
 /// Tope de una página (para que una descarga enorme no se coma toda la memoria).
-const MAX_BODY: usize = 8 * 1024 * 1024;
-const TCP_RX: usize = 64 * 1024;
+/// Con más de 64 KiB, smoltcp usa escalado de ventana (RFC 7323): más datos en vuelo.
+const TCP_RX: usize = 512 * 1024;
 const TCP_TX: usize = 8 * 1024;
 
 enum Stage {
@@ -166,7 +168,7 @@ impl<D: Device> Net<D> {
         req: NetRequest,
         now_ms: u64,
     ) -> Option<(u32, Result<HttpResponse, String>)> {
-        let (fetch, step) = Fetch::start(&req.url);
+        let (fetch, step) = Fetch::start_kind(&req.url, req.kind);
         let connect = match step {
             Step::Connect(c) => c,
             Step::Failed(e) => return Some((req.id, Err(e))),
@@ -388,7 +390,7 @@ impl<D: Device> Net<D> {
                     Err(GetQueryResultError::Failed) => {
                         // Sin DNS: la página se pide por el puente del anfitrión, que resuelve
                         // el nombre con el DNS de la computadora anfitriona.
-                        let request = request(&job.fetch.url, true);
+                        let request = request_kind(&job.fetch.url, true, job.fetch.kind);
                         let proxy = self.proxy;
                         match self.connect(proxy) {
                             Ok(stage) => {
@@ -426,8 +428,12 @@ impl<D: Device> Net<D> {
                     *established = true;
                     job.raw.extend_from_slice(&buf[..n]);
                     job.since = now_ms; // mientras lleguen datos, no vence
-                    if job.raw.len() > MAX_BODY {
-                        return Err("la página es demasiado grande (más de 8 MiB)".into());
+                    let max = max_body(job.fetch.kind);
+                    if job.raw.len() > max {
+                        return Err(format!(
+                            "es demasiado grande (más de {} MiB)",
+                            max / (1024 * 1024)
+                        ));
                     }
                 }
                 let finished = *established && !s.may_recv() && !s.can_recv();

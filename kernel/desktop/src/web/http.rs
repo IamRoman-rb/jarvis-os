@@ -14,12 +14,23 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use super::url::{Scheme, Url};
-use crate::system::HttpResponse;
+use crate::system::{FetchKind, HttpResponse};
 
 /// Dirección del anfitrión vista desde QEMU (red "user": la puerta de enlace es el host).
 pub const PROXY_HOST: [u8; 4] = [10, 0, 2, 2];
 pub const PROXY_PORT: u16 = 8118;
 const MAX_REDIRECTS: u32 = 5;
+/// Nombres que resuelve el puente (el repositorio de paquetes): no se pregunta al DNS.
+pub const BRIDGE_DOMAIN: &str = ".jarvis";
+
+/// Tope de tamaño según para qué es la descarga.
+pub fn max_body(kind: FetchKind) -> usize {
+    match kind {
+        FetchKind::Download => 32 * 1024 * 1024,
+        FetchKind::Image => 12 * 1024 * 1024,
+        FetchKind::Page => 8 * 1024 * 1024,
+    }
+}
 
 /// A quién conectarse y qué mandarle.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,18 +48,29 @@ pub struct Connect {
 }
 
 pub fn request(url: &Url, via_proxy: bool) -> Vec<u8> {
+    request_kind(url, via_proxy, FetchKind::Page)
+}
+
+/// El pedido GET. A las imágenes se les agrega `X-Jarvis-Imagen: bmp`: el puente las convierte.
+pub fn request_kind(url: &Url, via_proxy: bool, kind: FetchKind) -> Vec<u8> {
     let target = if via_proxy {
         url.to_string()
     } else {
         url.path.clone()
     };
+    let (accept, extra) = match kind {
+        FetchKind::Image => ("image/*", "X-Jarvis-Imagen: bmp\r\n"),
+        FetchKind::Download => ("*/*", ""),
+        FetchKind::Page => ("text/html,text/plain;q=0.9,text/css;q=0.8,*/*;q=0.5", ""),
+    };
     format!(
         "GET {target} HTTP/1.1\r\n\
          Host: {}\r\n\
-         User-Agent: JARVIS-OS/0.1 (navegador de texto)\r\n\
-         Accept: text/html,text/plain;q=0.9,*/*;q=0.5\r\n\
+         User-Agent: Mozilla/5.0 (compatible; JARVIS-OS/0.1; navegador de texto)\r\n\
+         Accept: {accept}\r\n\
          Accept-Language: es-AR,es;q=0.9,en;q=0.5\r\n\
          Accept-Encoding: identity\r\n\
+         {extra}\
          Connection: close\r\n\r\n",
         url.host
     )
@@ -150,6 +172,7 @@ fn dechunk(mut b: &[u8]) -> Result<Vec<u8>, String> {
 /// Una descarga con redirecciones.
 pub struct Fetch {
     pub url: Url,
+    pub kind: FetchKind,
     redirects: u32,
 }
 
@@ -161,10 +184,15 @@ pub enum Step {
 
 impl Fetch {
     pub fn start(url: &str) -> (Fetch, Step) {
+        Self::start_kind(url, FetchKind::Page)
+    }
+
+    pub fn start_kind(url: &str, kind: FetchKind) -> (Fetch, Step) {
         match Url::parse(url) {
             Some(u) => {
                 let f = Fetch {
                     url: u,
+                    kind,
                     redirects: 0,
                 };
                 let step = f.connect();
@@ -178,6 +206,7 @@ impl Fetch {
                         port: 0,
                         path: String::new(),
                     },
+                    kind,
                     redirects: 0,
                 },
                 Step::Failed(format!("dirección inválida: {url}")),
@@ -186,17 +215,20 @@ impl Fetch {
     }
 
     fn connect(&self) -> Step {
+        // Las imágenes siempre van por el puente (que las convierte), igual que los nombres
+        // `.jarvis` (el repositorio de paquetes) y todo lo que es HTTPS.
+        let bridge = self.kind == FetchKind::Image || self.url.host.ends_with(BRIDGE_DOMAIN);
         match self.url.scheme {
-            Scheme::Http => Step::Connect(Connect {
+            Scheme::Http if !bridge => Step::Connect(Connect {
                 target: Target::Direct {
                     host: self.url.host.clone(),
                     port: self.url.port,
                 },
-                request: request(&self.url, false),
+                request: request_kind(&self.url, false, self.kind),
             }),
-            Scheme::Https => Step::Connect(Connect {
+            Scheme::Http | Scheme::Https => Step::Connect(Connect {
                 target: Target::Proxy,
-                request: request(&self.url, true),
+                request: request_kind(&self.url, true, self.kind),
             }),
             _ => Step::Failed("el kernel solo descarga http:// y https://".into()),
         }

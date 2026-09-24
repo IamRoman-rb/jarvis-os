@@ -151,6 +151,10 @@ pub enum AppKind {
     Browser,
     Editor,
     Viewer,
+    /// Terminal tipo Linux (shell `jsh`).
+    Terminal,
+    /// Configuración del sistema.
+    Settings,
 }
 
 /// Qué abrir.
@@ -165,6 +169,10 @@ pub enum Launch {
     Browse(String),
     /// Visor de imágenes.
     View(String),
+    /// Terminal, opcionalmente ejecutando un comando.
+    Terminal(Option<String>),
+    /// Configuración en una sección (0 = Sistema).
+    Settings(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,11 +181,25 @@ pub enum Power {
     Reboot,
 }
 
+/// Para qué es una descarga (cambia el límite de tamaño y cómo se pide).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FetchKind {
+    /// Una página (hasta 8 MiB).
+    #[default]
+    Page,
+    /// Una imagen: se pide por el puente, que la convierte a BMP (el único formato que el
+    /// kernel sabe leer) y la achica si es enorme.
+    Image,
+    /// Un archivo para guardar (hasta 32 MiB).
+    Download,
+}
+
 /// Un pedido HTTP GET para el kernel (que tiene la red).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetRequest {
     pub id: u32,
     pub url: String,
+    pub kind: FetchKind,
 }
 
 /// La respuesta ya completa (el kernel sigue las redirecciones).
@@ -209,6 +231,12 @@ pub struct Outbox {
     pub activate: Option<u32>,
     /// Abrir el menú de apagado.
     pub power_menu: bool,
+    /// Configuración nueva (la app Configuración): aplicarla y guardarla.
+    pub config: Option<crate::config::Config>,
+    /// Bloquear la pantalla.
+    pub lock: bool,
+    /// Cerrar la ventana de la app que lo pide (`exit` en la terminal).
+    pub close_self: bool,
     /// Número del último pedido de red (los números no se repiten).
     pub(crate) next_net: u32,
 }
@@ -216,10 +244,15 @@ pub struct Outbox {
 impl Outbox {
     /// Encola un GET y devuelve su número (la respuesta llega con el mismo número).
     pub fn fetch(&mut self, url: &str) -> u32 {
+        self.fetch_kind(url, FetchKind::Page)
+    }
+
+    pub fn fetch_kind(&mut self, url: &str, kind: FetchKind) -> u32 {
         self.next_net += 1;
         self.net.push(NetRequest {
             id: self.next_net,
             url: url.into(),
+            kind,
         });
         self.next_net
     }

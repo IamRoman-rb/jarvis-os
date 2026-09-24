@@ -612,7 +612,7 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
     text::draw(c, card.x + (card.w - nw) / 2, card.y + 64, &name, &name_st);
 
     let size = if entry.is_dir {
-        String::from("—")
+        String::from("-")
     } else {
         format!("{} ({} bytes)", format_size(entry.size as u64), entry.size)
     };

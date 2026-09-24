@@ -51,6 +51,7 @@ fn run(
         NetRequest {
             id: 7,
             url: url.into(),
+            kind: Default::default(),
         },
         now,
     ) {

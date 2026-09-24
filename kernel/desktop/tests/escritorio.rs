@@ -83,8 +83,8 @@ fn atajos_de_windows_para_abrir_apps() {
     t.combo(Mods::WIN, Key::Char('e'));
     assert_eq!(t.d.focused_app(), Some(AppKind::Files));
     assert_eq!(t.d.window_manager().windows().len(), 3);
-    // Win+5 = quinto ícono de la barra (Archivos): como ya tiene el foco, se minimiza.
-    t.combo(Mods::WIN, Key::Char('5'));
+    // Win+6 = sexto ícono de la barra (Archivos): como ya tiene el foco, se minimiza.
+    t.combo(Mods::WIN, Key::Char('6'));
     assert_ne!(t.d.focused_app(), Some(AppKind::Files));
 }
 
@@ -394,7 +394,7 @@ fn render_incremental_igual_a_redibujar_todo() {
     {
         let mut frame = canvas(&mut frame_buf);
         let mut step = |t: &mut Driver| {
-            t.d.render(&mut frame, &bg, t.now, CLOCK);
+            t.d.render(&mut frame, &mut bg, t.now, CLOCK);
         };
         step(&mut t);
         t.key(Key::Tab);
@@ -428,7 +428,7 @@ fn render_incremental_igual_a_redibujar_todo() {
     // Forzar un redibujado completo del mismo estado.
     let mut full_buf = vec![0u8; W * H * 4];
     t.d.invalidate();
-    t.d.render(&mut canvas(&mut full_buf), &bg, t.now, CLOCK);
+    t.d.render(&mut canvas(&mut full_buf), &mut bg, t.now, CLOCK);
     let diff = frame_buf
         .iter()
         .zip(&full_buf)
@@ -454,9 +454,9 @@ fn sin_disco_no_rompe() {
         d.handle(e, 10 + i as u64, CLOCK);
     }
     let (mut bg_buf, mut frame_buf) = buffers();
-    let bg = canvas(&mut bg_buf);
+    let mut bg = canvas(&mut bg_buf);
     let mut frame = canvas(&mut frame_buf);
-    d.render(&mut frame, &bg, 30, CLOCK);
-    d.render(&mut frame, &bg, 40, CLOCK);
+    d.render(&mut frame, &mut bg, 30, CLOCK);
+    d.render(&mut frame, &mut bg, 40, CLOCK);
     assert_eq!(d.focused_app(), Some(AppKind::Files));
 }

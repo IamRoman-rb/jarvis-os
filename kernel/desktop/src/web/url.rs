@@ -189,9 +189,14 @@ fn normalize(path: &str) -> String {
 /// Lo que se escribe en la barra de direcciones → una dirección. Si no parece una dirección
 /// (tiene espacios, no tiene punto, o empieza con "? "), se busca en la web.
 pub fn from_input(text: &str) -> String {
+    from_input_with(text, SEARCH)
+}
+
+/// Como [`from_input`], con otro buscador (`search` termina en `q=`).
+pub fn from_input_with(text: &str, search: &str) -> String {
     let t = text.trim();
     if let Some(q) = t.strip_prefix("? ") {
-        return format!("{SEARCH}{}", percent_encode(q.trim()));
+        return format!("{search}{}", percent_encode(q.trim()));
     }
     if t.contains("://") || t.starts_with("about:") {
         return t.into();
@@ -203,7 +208,7 @@ pub fn from_input(text: &str) -> String {
     if looks_like_host {
         format!("https://{t}")
     } else {
-        format!("{SEARCH}{}", percent_encode(t))
+        format!("{search}{}", percent_encode(t))
     }
 }
 

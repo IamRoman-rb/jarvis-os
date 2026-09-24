@@ -5,6 +5,7 @@
 //! sueltan, y se le avisan al escritorio con un evento aparte: así sabe, por ejemplo, cuándo se
 //! soltó Alt para terminar un Alt+Tab, o que la tecla Windows se apretó sola (menú de inicio).
 
+use jarvis_desktop::keymap::{self, DeadKeys};
 use jarvis_desktop::{Event, Key, Mods};
 use pc_keyboard::{
     DecodedKey, HandleControl, KeyCode, KeyEvent, KeyState, PS2Keyboard, ScancodeSet1, layouts,
@@ -19,13 +20,19 @@ pub fn push_scancode(code: u8) {
     QUEUE.push(code);
 }
 
-/// Decodificador (vive en el bucle principal). Layout US por ahora: `pc-keyboard` no trae el
-/// latinoamericano.
+/// Decodificador (vive en el bucle principal). Decodifica con la distribución de EE. UU. y, si
+/// está elegida la latinoamericana, traduce cada tecla con `jarvis_desktop::keymap`
+/// (`pc-keyboard` no la trae).
 pub struct Keyboard {
     decoder: PS2Keyboard<layouts::Us104Key, ScancodeSet1>,
     mods: Mods,
     /// Se apretaron los dos Shift o los dos Ctrl: se cuentan por separado.
-    held: [bool; 6],
+    held: [bool; 7],
+    /// Teclado latinoamericano (lo decide la Configuración).
+    pub latam: bool,
+    dead: DeadKeys,
+    /// Un segundo carácter para mandar (tecla muerta que no se combinó).
+    pending: Option<char>,
 }
 
 const L_SHIFT: usize = 0;
@@ -34,6 +41,8 @@ const L_CTRL: usize = 2;
 const R_CTRL: usize = 3;
 const ALT: usize = 4;
 const WIN: usize = 5;
+/// AltGr (Alt derecha): elige el tercer símbolo de la tecla (@, \, ~…).
+const ALTGR: usize = 6;
 
 impl Keyboard {
     pub fn new() -> Self {
@@ -44,7 +53,10 @@ impl Keyboard {
                 HandleControl::Ignore,
             ),
             mods: Mods::NONE,
-            held: [false; 6],
+            held: [false; 7],
+            latam: true,
+            dead: DeadKeys::default(),
+            pending: None,
         }
     }
 
@@ -57,12 +69,14 @@ impl Keyboard {
             KeyCode::RControl => R_CTRL,
             KeyCode::LAlt => ALT,
             KeyCode::LWin | KeyCode::RWin => WIN,
+            KeyCode::RAltGr => ALTGR,
             _ => return None,
         };
         self.held[slot] = ev.state != KeyState::Up;
         let mods = Mods {
             shift: self.held[L_SHIFT] || self.held[R_SHIFT],
-            ctrl: self.held[L_CTRL] || self.held[R_CTRL],
+            // Windows manda Ctrl junto con AltGr: mientras AltGr está apretada, no cuenta.
+            ctrl: (self.held[L_CTRL] || self.held[R_CTRL]) && !self.held[ALTGR],
             alt: self.held[ALT],
             win: self.held[WIN],
         };
@@ -75,6 +89,9 @@ impl Keyboard {
 
     /// Próximo evento del teclado: una tecla, o un cambio en los modificadores.
     pub fn next_event(&mut self) -> Option<Event> {
+        if let Some(c) = self.pending.take() {
+            return Some(Event::Key(Key::Char(c)));
+        }
         while let Some(code) = QUEUE.pop() {
             let Ok(Some(ev)) = self.decoder.add_byte(code) else {
                 continue;
@@ -87,11 +104,32 @@ impl Keyboard {
                     None => continue,
                 }
             }
-            if let Some(decoded) = self.decoder.process_keyevent(ev)
-                && let Some(key) = translate(decoded)
-            {
-                return Some(Event::Key(key));
+            let is_down = ev.state == KeyState::Down;
+            let extra_key = ev.code == KeyCode::Oem5;
+            let Some(decoded) = self.decoder.process_keyevent(ev) else {
+                continue;
+            };
+            if self.latam && is_down && extra_key {
+                return Some(Event::Key(Key::Char(keymap::latam_extra_key(
+                    self.mods.shift,
+                ))));
             }
+            let Some(key) = translate(decoded) else {
+                continue;
+            };
+            if self.latam
+                && let Key::Char(c) = key
+                && !self.mods.ctrl
+            {
+                let mapped = keymap::latam(c, self.held[ALTGR]);
+                let [first, second] = self.dead.feed(mapped);
+                self.pending = second;
+                match first {
+                    Some(ch) => return Some(Event::Key(Key::Char(ch))),
+                    None => continue, // tecla muerta: espera la siguiente
+                }
+            }
+            return Some(Event::Key(key));
         }
         None
     }

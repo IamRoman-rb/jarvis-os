@@ -8,7 +8,7 @@ publish.workspace = true
 
 [dependencies]
 libm = "0.2.16"
-noto-sans-mono-bitmap = { version = "0.3.2", default-features = false, features = ["regular", "bold", "light", "size_16", "size_20", "size_32", "unicode-basic-latin", "unicode-latin-1-supplement"] }
+noto-sans-mono-bitmap = { version = "0.3.2", default-features = false, features = ["regular", "bold", "light", "size_16", "size_20", "size_24", "size_32", "unicode-basic-latin", "unicode-latin-1-supplement"] }
 
 [lints]
 workspace = true

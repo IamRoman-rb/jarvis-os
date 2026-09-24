@@ -64,8 +64,18 @@ impl FilesWindow {
             _ if lower.ends_with(".html") || lower.ends_with(".htm") => {
                 Launch::Browse(format!("file://{path}"))
             }
+            // Un script: se ejecuta en la terminal.
+            _ if lower.ends_with(".sh") => Launch::Terminal(Some(format!("sh '{path}'"))),
+            // Programas de Windows: la terminal muestra qué son y por qué no corren (todavía).
+            _ if [".exe", ".msi", ".dll", ".com"]
+                .iter()
+                .any(|e| lower.ends_with(e)) =>
+            {
+                Launch::Terminal(Some(format!("file '{path}' && wine '{path}'")))
+            }
             Kind::Text | Kind::Code => Launch::Edit(path),
             Kind::Image => Launch::View(path),
+            Kind::Binary | Kind::Archive => Launch::Terminal(Some(format!("file '{path}'"))),
             _ => {
                 ctx.out.notify(
                     format!("No hay una app para abrir \"{}\".", entry.name),

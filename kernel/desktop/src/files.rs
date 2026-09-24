@@ -17,9 +17,10 @@ pub const TRASH: &str = "/Papelera";
 /// poder restaurarla. Los nombres que empiezan con "." no se muestran.
 pub const TRASH_INDEX: &str = "/Papelera/.origen";
 /// Accesos rápidos del panel lateral: (nombre, ruta).
-pub const SHORTCUTS: [(&str, &str); 6] = [
+pub const SHORTCUTS: [(&str, &str); 7] = [
     ("Inicio", "/"),
     ("Documentos", "/Documentos"),
+    ("Descargas", "/Descargas"),
     ("Proyectos", "/Proyectos"),
     ("Facultad", "/Facultad"),
     ("Imágenes", "/Imágenes"),
@@ -195,7 +196,7 @@ pub fn parent(path: &str) -> String {
     }
 }
 
-fn basename(path: &str) -> &str {
+pub fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
@@ -222,7 +223,7 @@ fn visible(e: &DirEntry) -> bool {
 }
 
 /// "notas.txt" + 2 → "notas (2).txt"
-fn with_suffix(name: &str, n: u32) -> String {
+pub fn with_suffix(name: &str, n: u32) -> String {
     match name.rsplit_once('.') {
         Some((base, ext)) if !base.is_empty() => format!("{base} ({n}).{ext}"),
         _ => format!("{name} ({n})"),
@@ -588,7 +589,7 @@ impl FilesApp {
             }
             Dialog::ConfirmTrash(name) => {
                 let path = join(&self.cwd, name);
-                self.move_to_trash(fs, &path, now).map(|dest| {
+                Self::move_to_trash(fs, &path, now).map(|dest| {
                     log.push(format!("ARCHIVOS_PAPELERA {path} -> {dest}"));
                     (format!("\"{name}\" está en la Papelera."), None)
                 })
@@ -634,8 +635,7 @@ impl FilesApp {
     }
 
     /// Mueve a /Papelera. Si ya hay algo con ese nombre, agrega " (2)", " (3)"…
-    fn move_to_trash<D: BlockDevice>(
-        &mut self,
+    pub fn move_to_trash<D: BlockDevice>(
         fs: &mut FileSystem<D>,
         path: &str,
         now: Timestamp,

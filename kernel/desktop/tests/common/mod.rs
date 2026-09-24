@@ -254,9 +254,9 @@ impl Driver {
     /// Un frame (con buffers descartables).
     pub fn frame(&mut self) {
         let (mut bg, mut fr) = buffers();
-        let bgc = canvas(&mut bg);
+        let mut bgc = canvas(&mut bg);
         let mut frame = canvas(&mut fr);
-        self.d.render(&mut frame, &bgc, self.now, CLOCK);
+        self.d.render(&mut frame, &mut bgc, self.now, CLOCK);
     }
 }
 

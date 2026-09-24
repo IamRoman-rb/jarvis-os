@@ -16,6 +16,23 @@ pub struct Image {
     pub pixels: Vec<Color>,
 }
 
+impl Image {
+    /// Dibuja la imagen estirada a `dst` (vecino más cercano).
+    pub fn draw_scaled(&self, c: &mut Canvas<'_>, dst: jarvis_gfx::Rect) {
+        if self.width == 0 || self.height == 0 || dst.w <= 0 || dst.h <= 0 {
+            return;
+        }
+        for y in 0..dst.h {
+            let sy = (y as i64 * self.height as i64 / dst.h as i64) as usize;
+            let row = &self.pixels[sy * self.width..(sy + 1) * self.width];
+            for x in 0..dst.w {
+                let sx = (x as i64 * self.width as i64 / dst.w as i64) as usize;
+                c.put(dst.x + x, dst.y + y, row[sx]);
+            }
+        }
+    }
+}
+
 fn row_bytes(width: usize) -> usize {
     (width * 3).div_ceil(4) * 4
 }
