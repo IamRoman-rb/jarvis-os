@@ -1,38 +1,51 @@
-//! Composición de la pantalla principal de JARVIS-OS.
+//! Elementos de la pantalla principal de JARVIS-OS, separados en capas.
 //!
 //! Distribución (según la imagen de referencia): barra de íconos arriba a la izquierda,
 //! "JARVIS" + hora + fecha arriba a la derecha, esfera en el centro, panel de estado y
 //! "Control de misión" abajo a la izquierda, y el último mensaje del asistente abajo a la derecha.
+//!
+//! - **Capa estática** ([`draw_static`]): se dibuja una sola vez en el buffer de fondo.
+//! - **Capas dinámicas** (esfera, reloj, mensaje): cada una tiene su rectángulo, que es lo único
+//!   que se redibuja cuando cambia. La orquestación está en `scene`.
 
 use core::fmt::Write;
 
+use crate::canvas::Rect;
 use crate::clock::{DateTime, StrBuf};
 use crate::shapes::{circle, glow, line, rect_outline, rounded_outline, rounded_rect};
-use crate::sphere;
+use crate::sphere::{Pulse, View};
 use crate::text::{self, Size, Style, Weight};
+use crate::trig::FULL_TURN;
 use crate::{Canvas, Color, theme};
 
-/// Lo que el kernel sabe al momento de dibujar.
-pub struct Hud<'a> {
-    /// Hora local. `None` si el reloj del hardware devolvió algo inválido.
-    pub now: Option<DateTime>,
-    /// Último mensaje del asistente (abajo a la derecha).
-    pub message: &'a str,
-    /// Filas del panel de estado: (etiqueta, valor).
-    pub info: &'a [(&'a str, &'a str)],
-    /// Cantidad de partículas de la esfera.
-    pub particles: u32,
+const MARGIN: i32 = 28;
+/// Una vuelta de la esfera cada 25 segundos.
+const SPIN_PERIOD_MS: u64 = 25_000;
+/// La fecha más larga posible, para reservar su espacio.
+const LONGEST_DATE: &str = "MIÉRCOLES, 30 DE SEPTIEMBRE DE 2026";
+
+fn time_style() -> Style {
+    Style::new(Weight::Bold, Size::Size32, Color::WHITE)
+        .scale(2)
+        .tracking(4)
 }
 
-const MARGIN: i32 = 28;
+fn date_style() -> Style {
+    Style::new(Weight::Regular, Size::Size16, theme::CYAN.scale(190)).tracking(3)
+}
 
-pub fn draw(c: &mut Canvas<'_>, hud: &Hud<'_>) {
+// --- capa estática ----------------------------------------------------------------------------
+
+/// Fondo, grilla, barra de íconos, título "JARVIS" y panel de estado.
+pub fn draw_static(c: &mut Canvas<'_>, info: &[(&str, &str)]) {
     background(c);
-    sphere::centered(c, hud.particles).draw(c);
     toolbar(c);
-    clock(c, hud.now);
-    status_panel(c, hud.info);
-    message(c, hud.message);
+    let right = c.width() as i32 - MARGIN - 8;
+    let title = Style::new(Weight::Light, Size::Size32, theme::TEXT_FAINT)
+        .scale(3)
+        .tracking(10);
+    text::draw_right(c, right, MARGIN - 8, "JARVIS", &title);
+    status_panel(c, info);
 }
 
 fn background(c: &mut Canvas<'_>) {
@@ -115,49 +128,6 @@ fn icon(c: &mut Canvas<'_>, which: i32, x: i32, y: i32, col: Color) {
     }
 }
 
-fn clock(c: &mut Canvas<'_>, now: Option<DateTime>) {
-    let right = c.width() as i32 - MARGIN - 8;
-    let title = Style::new(Weight::Light, Size::Size32, theme::TEXT_FAINT)
-        .scale(3)
-        .tracking(10);
-    text::draw_right(c, right, MARGIN - 8, "JARVIS", &title);
-
-    let mut time = StrBuf::<8>::new();
-    let mut date = StrBuf::<48>::new();
-    match now {
-        Some(t) => {
-            let _ = t.write_time(&mut time);
-            let _ = t.write_date(&mut date);
-        }
-        None => {
-            let _ = time.write_str("--:--");
-            let _ = date.write_str("RELOJ NO DISPONIBLE");
-        }
-    }
-    let big = Style::new(Weight::Bold, Size::Size32, Color::WHITE)
-        .scale(2)
-        .tracking(4);
-    let tw = text::width(time.as_str(), &big);
-    let ty = MARGIN + 34;
-    text::draw_glowing(
-        c,
-        right - tw - 18,
-        ty,
-        time.as_str(),
-        &big,
-        theme::CYAN.scale(40),
-    );
-
-    let small = Style::new(Weight::Regular, Size::Size16, theme::CYAN.scale(190)).tracking(3);
-    text::draw_right(
-        c,
-        right - 10,
-        ty + big.line_height() + 6,
-        date.as_str(),
-        &small,
-    );
-}
-
 fn status_panel(c: &mut Canvas<'_>, rows: &[(&str, &str)]) {
     let h = c.height() as i32;
     let row_h = 22;
@@ -169,13 +139,8 @@ fn status_panel(c: &mut Canvas<'_>, rows: &[(&str, &str)]) {
 
     let label = Style::new(Weight::Regular, Size::Size16, theme::TEXT_DIM).tracking(2);
     text::draw(c, x + 12, y + 10, "ESTADO", &label);
-    text::draw_right(
-        c,
-        x + w - 12,
-        y + 10,
-        "JARVIS-OS",
-        &label.color(theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 120)),
-    );
+    let faint = label.color(theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 120));
+    text::draw_right(c, x + w - 12, y + 10, "JARVIS-OS", &faint);
     line(c, x + 1, y + 34, x + w - 2, y + 34, theme::PANEL_RIM);
 
     let key = Style::new(Weight::Light, Size::Size16, theme::TEXT_DIM);
@@ -195,7 +160,65 @@ fn status_panel(c: &mut Canvas<'_>, rows: &[(&str, &str)]) {
     text::draw(c, px + 28, py + 7, "CONTROL DE MISIÓN", &pill);
 }
 
-fn message(c: &mut Canvas<'_>, msg: &str) {
+// --- reloj ------------------------------------------------------------------------------------
+
+/// Zona que ocupan la hora y la fecha (incluido el halo de la hora).
+pub fn clock_rect(width: usize, _height: usize) -> Rect {
+    let right = width as i32 - MARGIN - 8;
+    let ty = MARGIN + 34;
+    let date_w = text::width(LONGEST_DATE, &date_style());
+    let time_w = text::width("00:00", &time_style()) + 18;
+    let x0 = (right - date_w.max(time_w) - 14).max(0);
+    let y1 = ty + time_style().line_height() + 6 + date_style().line_height() + 4;
+    Rect::new(x0, ty - 4, right + 4 - x0, y1 - (ty - 4))
+}
+
+pub fn draw_clock(c: &mut Canvas<'_>, now: Option<DateTime>) {
+    let right = c.width() as i32 - MARGIN - 8;
+    let mut time = StrBuf::<8>::new();
+    let mut date = StrBuf::<48>::new();
+    match now {
+        Some(t) => {
+            let _ = t.write_time(&mut time);
+            let _ = t.write_date(&mut date);
+        }
+        None => {
+            let _ = time.write_str("--:--");
+            let _ = date.write_str("RELOJ NO DISPONIBLE");
+        }
+    }
+    let big = time_style();
+    let tw = text::width(time.as_str(), &big);
+    let ty = MARGIN + 34;
+    text::draw_glowing(
+        c,
+        right - tw - 18,
+        ty,
+        time.as_str(),
+        &big,
+        theme::CYAN.scale(40),
+    );
+    text::draw_right(
+        c,
+        right - 10,
+        ty + big.line_height() + 6,
+        date.as_str(),
+        &date_style(),
+    );
+}
+
+// --- mensaje del asistente --------------------------------------------------------------------
+
+/// Zona del mensaje de abajo a la derecha (hasta ~75 letras).
+pub fn message_rect(width: usize, height: usize) -> Rect {
+    let (w, h) = (width as i32, height as i32);
+    let right = w - MARGIN - 8;
+    let x0 = (right - 620).max(0);
+    Rect::new(x0, h - MARGIN - 54, right + 4 - x0, 54)
+}
+
+/// `speaking`: mientras habla, la línea de abajo dice "HABLANDO" en vez de "HACE UN INSTANTE".
+pub fn draw_message(c: &mut Canvas<'_>, msg: &str, speaking: bool) {
     let (w, h) = (c.width() as i32, c.height() as i32);
     let right = w - MARGIN - 8;
     let body = Style::new(Weight::Regular, Size::Size16, theme::TEXT);
@@ -204,58 +227,111 @@ fn message(c: &mut Canvas<'_>, msg: &str) {
     let meta = Style::new(Weight::Light, Size::Size16, theme::TEXT_DIM).tracking(2);
     let who = meta.color(theme::CYAN.scale(200));
     let who_w = text::draw_right(c, right, h - MARGIN - 24, "JARVIS", &who);
-    text::draw_right(
-        c,
-        right - who_w - 12,
-        h - MARGIN - 24,
-        "HACE UN INSTANTE ·",
-        &meta,
-    );
+    let (status, style) = if speaking {
+        ("HABLANDO ·", meta.color(theme::CYAN.scale(150)))
+    } else {
+        ("HACE UN INSTANTE ·", meta)
+    };
+    text::draw_right(c, right - who_w - 12, h - MARGIN - 24, status, &style);
+}
+
+// --- esfera -----------------------------------------------------------------------------------
+
+/// Posición, tamaño y rotación de la esfera en el instante `now_ms`.
+pub fn sphere_view(width: usize, height: usize, now_ms: u64) -> View {
+    View {
+        cx: width as i32 / 2,
+        cy: height as i32 / 2,
+        radius: height as i32 * 29 / 100,
+        spin: ((now_ms % SPIN_PERIOD_MS) * FULL_TURN as u64 / SPIN_PERIOD_MS) as u32,
+        tilt: FULL_TURN * 56 / 1000, // ~20°
+    }
+}
+
+/// Resplandor extra detrás de la esfera mientras JARVIS habla. Queda dentro de los límites de la
+/// esfera (radio × 1,15 < radio × 1,2 de `ParticleCloud::bounds`).
+pub fn draw_voice_glow(c: &mut Canvas<'_>, view: &View, pulse: &Pulse) {
+    if pulse.glow > 0 {
+        glow(
+            c,
+            view.cx,
+            view.cy,
+            view.radius * 115 / 100,
+            Color::hex(0x1450c8),
+            pulse.glow / 2,
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::PixelFormat;
+    use crate::sphere::ParticleCloud;
     use std::vec;
 
     #[test]
-    fn dibuja_toda_la_pantalla_sin_panic_en_varios_tamanios() {
+    fn la_capa_estatica_cubre_toda_la_pantalla_en_varios_tamanios() {
         for (w, h) in [(1280, 800), (1024, 768), (1920, 1080), (640, 480)] {
             let mut buf = vec![0u8; w * h * 4];
             let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Bgr).unwrap();
-            let hud = Hud {
-                now: Some(DateTime {
-                    year: 2026,
-                    month: 9,
-                    day: 23,
-                    hour: 15,
-                    minute: 25,
-                    second: 0,
-                }),
-                message: "Sistema en línea. ¿En qué te ayudo?",
-                info: &[("NÚCLEO", "jarvis 0.1.0"), ("MEMORIA", "511 MiB")],
-                particles: 4000,
-            };
-            draw(&mut c, &hud);
-            // El fondo no queda negro puro: se pintó algo en toda la pantalla.
+            draw_static(
+                &mut c,
+                &[("NÚCLEO", "jarvis 0.1.0"), ("MEMORIA", "511 MiB")],
+            );
             assert_ne!(c.get(w as i32 - 1, h as i32 - 1), Some(Color::BLACK));
         }
     }
 
     #[test]
-    fn sin_reloj_muestra_guiones() {
-        let (w, h) = (800, 600);
+    fn reloj_y_mensaje_quedan_dentro_de_sus_rectangulos() {
+        let (w, h) = (1280, 800);
+        let now = DateTime {
+            year: 2026,
+            month: 9,
+            day: 23,
+            hour: 15,
+            minute: 25,
+            second: 0,
+        };
         let mut buf = vec![0u8; w * h * 4];
         let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Rgb).unwrap();
-        draw(
-            &mut c,
-            &Hud {
-                now: None,
-                message: "",
-                info: &[],
-                particles: 100,
-            },
-        );
+        draw_clock(&mut c, Some(now));
+        draw_message(&mut c, "Sistema en línea. ¿En qué te ayudo?", true);
+        let (cr, mr) = (clock_rect(w, h), message_rect(w, h));
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                let px = Rect::new(x, y, 1, 1);
+                if c.get(x, y) != Some(Color::BLACK) {
+                    assert!(
+                        cr.intersects(&px) || mr.intersects(&px),
+                        "píxel suelto en ({x}, {y})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn el_resplandor_de_voz_no_sale_de_la_esfera() {
+        let view = sphere_view(1280, 800, 0);
+        let pulse = Pulse {
+            glow: 255,
+            ..Pulse::REST
+        };
+        let (w, h) = (1280, 800);
+        let mut buf = vec![0u8; w * h * 4];
+        let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Rgb).unwrap();
+        draw_voice_glow(&mut c, &view, &pulse);
+        let b = ParticleCloud::bounds(&view);
+        assert_eq!(c.get(b.x - 1, view.cy), Some(Color::BLACK));
+        assert_ne!(c.get(view.cx, view.cy), Some(Color::BLACK));
+    }
+
+    #[test]
+    fn la_esfera_da_una_vuelta_cada_25_segundos() {
+        assert_eq!(sphere_view(1280, 800, 0).spin, 0);
+        assert_eq!(sphere_view(1280, 800, 12_500).spin, FULL_TURN / 2);
+        assert_eq!(sphere_view(1280, 800, 25_000).spin, 0);
     }
 }
