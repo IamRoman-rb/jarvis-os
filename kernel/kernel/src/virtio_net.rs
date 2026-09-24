@@ -368,7 +368,10 @@ impl Device for VirtioNet {
     fn capabilities(&self) -> DeviceCapabilities {
         let mut caps = DeviceCapabilities::default();
         caps.max_transmission_unit = MTU;
-        caps.max_burst_size = Some(1);
+        // Sin tope de ráfaga: la cola de recepción tiene tantos buffers como el dispositivo
+        // ofrece (256 en QEMU). Con `Some(1)`, smoltcp achicaba la ventana TCP a un solo
+        // paquete por ida y vuelta, y las descargas no pasaban de ~90 KB/s.
+        caps.max_burst_size = None;
         caps.medium = Medium::Ethernet;
         caps
     }

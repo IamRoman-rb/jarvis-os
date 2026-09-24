@@ -11,6 +11,8 @@ pub mod editor;
 pub mod files;
 pub mod monitor;
 pub mod music;
+pub mod settings;
+pub mod terminal;
 pub mod viewer;
 
 use alloc::string::String;
@@ -43,6 +45,8 @@ pub struct SysView<'a> {
     pub disk: Option<(&'a str, u64, u64)>,
     pub now_ms: u64,
     pub clock: Option<DateTime>,
+    /// Tamaño de la pantalla.
+    pub screen: (usize, usize),
 }
 
 /// Lo que recibe una app cuando maneja un evento.
@@ -54,6 +58,7 @@ pub struct Ctx<'a, D: BlockDevice> {
     pub out: &'a mut Outbox,
     pub stats: &'a SystemStats,
     pub tasks: &'a [TaskInfo],
+    pub config: &'a crate::config::Config,
 }
 
 impl<D: BlockDevice> Ctx<'_, D> {
@@ -91,6 +96,8 @@ pub enum App {
     Music(music::Music),
     Viewer(viewer::Viewer),
     Browser(browser::Browser),
+    Terminal(terminal::Terminal),
+    Settings(settings::Settings),
 }
 
 macro_rules! each {
@@ -103,6 +110,8 @@ macro_rules! each {
             App::Music($a) => $e,
             App::Viewer($a) => $e,
             App::Browser($a) => $e,
+            App::Terminal($a) => $e,
+            App::Settings($a) => $e,
         }
     };
 }
@@ -117,6 +126,8 @@ impl App {
             App::Music(_) => AppKind::Music,
             App::Viewer(_) => AppKind::Viewer,
             App::Browser(_) => AppKind::Browser,
+            App::Terminal(_) => AppKind::Terminal,
+            App::Settings(_) => AppKind::Settings,
         }
     }
 
@@ -134,6 +145,8 @@ impl App {
             App::Music(_) => (640, 440),
             App::Viewer(_) => (760, 560),
             App::Browser(_) => (1060, 620),
+            App::Terminal(_) => (860, 520),
+            App::Settings(_) => (1000, 620),
         }
     }
 
@@ -155,6 +168,8 @@ impl App {
             App::Music(a) => a.draw(c, content, sys.now_ms),
             App::Viewer(a) => a.draw(c, content),
             App::Browser(a) => a.draw(c, content, sys.now_ms),
+            App::Terminal(a) => a.draw(c, content),
+            App::Settings(a) => a.draw(c, content, sys),
         }
     }
 
@@ -174,6 +189,8 @@ impl App {
             App::Music(a) => a.key(key, ctx),
             App::Viewer(a) => a.key(key, ctx),
             App::Browser(a) => a.key(key, mods, content, ctx),
+            App::Terminal(a) => a.key(key, mods, ctx),
+            App::Settings(a) => a.key(key, mods, ctx),
         }
     }
 
@@ -186,6 +203,8 @@ impl App {
             App::Music(a) => a.click(click, content, ctx),
             App::Viewer(_) => {}
             App::Browser(a) => a.click(click, content, ctx),
+            App::Terminal(_) => {}
+            App::Settings(a) => a.click(click, content, ctx),
         }
     }
 
@@ -196,6 +215,7 @@ impl App {
             App::Editor(a) => a.wheel(delta, content),
             App::Browser(a) => a.wheel(delta, content),
             App::Console(a) => a.wheel(delta),
+            App::Terminal(a) => a.wheel(delta),
             _ => {}
         }
     }
@@ -206,14 +226,24 @@ impl App {
             App::Files(a) => a.tick(ctx.now_ms),
             App::Music(a) => a.tick(ctx),
             App::Editor(a) => a.tick(ctx.now_ms),
-            App::Browser(a) => a.tick(ctx.now_ms),
+            App::Browser(a) => a.tick(ctx),
+            App::Terminal(a) => a.tick(ctx),
+            App::Settings(a) => a.tick(ctx),
             _ => {}
         }
     }
 
-    pub fn net_response(&mut self, id: u32, result: &Result<HttpResponse, String>) {
-        if let App::Browser(b) = self {
-            b.net_response(id, result);
+    pub fn net_response<D: BlockDevice>(
+        &mut self,
+        id: u32,
+        result: &Result<HttpResponse, String>,
+        ctx: &mut Ctx<'_, D>,
+    ) {
+        match self {
+            App::Browser(b) => b.net_response(id, result, ctx),
+            App::Terminal(t) => t.net_response(id, result, ctx),
+            App::Settings(s) => s.net_response(id, result),
+            _ => {}
         }
     }
 
@@ -243,6 +273,8 @@ pub fn icon_of(kind: AppKind) -> Icon {
         AppKind::Browser => Icon::Globe,
         AppKind::Editor => Icon::Document,
         AppKind::Viewer => Icon::Image,
+        AppKind::Terminal => Icon::Terminal,
+        AppKind::Settings => Icon::Gear,
     }
 }
 
@@ -256,5 +288,7 @@ pub fn name_of(kind: AppKind) -> &'static str {
         AppKind::Browser => "Navegador",
         AppKind::Editor => "Editor de texto",
         AppKind::Viewer => "Visor de imágenes",
+        AppKind::Terminal => "Terminal",
+        AppKind::Settings => "Configuración",
     }
 }

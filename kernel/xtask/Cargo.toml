@@ -12,6 +12,8 @@ fatfs = "0.3.6"
 png = "0.18"
 # Puente HTTPS del anfitrión: el kernel todavía no tiene TLS (ver xtask/src/puente.rs).
 ureq = "3"
+# El puente convierte las imágenes de la web a BMP (el kernel solo lee BMP; ver ADR 0005).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 
 [lints]
 workspace = true

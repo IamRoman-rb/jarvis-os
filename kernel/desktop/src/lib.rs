@@ -11,18 +11,25 @@ extern crate alloc;
 pub mod apps;
 pub mod bmp;
 pub mod chrome;
+pub mod config;
 pub mod cursor;
 pub mod desktop;
 pub mod files;
 pub mod files_view;
 pub mod input;
+pub mod keymap;
+pub mod panels;
 pub mod shell;
 pub mod system;
+pub mod term;
 pub mod text_input;
 pub mod web;
 pub mod widgets;
 pub mod wm;
 
+pub use config::Config;
 pub use desktop::{DEMO_PHRASES, Desktop, Dirty, GREETING, Requests};
 pub use input::{Event, Key, Mods, MouseDecoder, MousePacket};
-pub use system::{AppKind, HttpResponse, Launch, NetInfo, NetRequest, Power, SystemStats};
+pub use system::{
+    AppKind, FetchKind, HttpResponse, Launch, NetInfo, NetRequest, Power, SystemStats,
+};

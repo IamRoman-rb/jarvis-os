@@ -60,6 +60,26 @@ fn date_style() -> Style {
 /// dibuja el escritorio (`jarvis-desktop`).
 pub fn draw_static(c: &mut Canvas<'_>) {
     background(c);
+    draw_title(c);
+}
+
+/// Fondo de un color liso (con una luz suave detrás de la esfera) y el título.
+pub fn draw_solid(c: &mut Canvas<'_>, color: Color) {
+    let (w, h) = (c.width() as i32, c.height() as i32);
+    c.fill(color);
+    glow(
+        c,
+        w / 2,
+        h / 2,
+        h * 45 / 100,
+        color.lerp(Color::WHITE, 18),
+        70,
+    );
+    draw_title(c);
+}
+
+/// El título "JARVIS" de arriba a la derecha (va encima de cualquier fondo).
+pub fn draw_title(c: &mut Canvas<'_>) {
     let right = c.width() as i32 - MARGIN - 8;
     // Título de fondo, con la fuente vectorial (antes era la bitmap agrandada ×3: borrosa).
     let mut title = VectorText::new(34, 2 * 64, 16);
@@ -106,6 +126,18 @@ pub enum Icon {
     Restart,
     Lock,
     Gauge,
+    /// Engranaje (Configuración).
+    Gear,
+    /// `>_` (Terminal).
+    Terminal,
+    /// Caja (paquetes).
+    Package,
+    /// Campana (notificaciones).
+    Bell,
+    /// Calendario.
+    Calendar,
+    /// Descarga (flecha hacia abajo sobre una bandeja).
+    Download,
 }
 
 /// Dibuja el ícono `which` centrado en (x, y).
@@ -207,6 +239,61 @@ pub fn icon(c: &mut Canvas<'_>, which: Icon, x: i32, y: i32, col: Color) {
             rect_outline(c, x - 6, y - 1, 13, 9, col);
             line(c, x, y + 2, x, y + 4, col);
         }
+        Icon::Gear => {
+            circle(c, x, y, 5, col, false);
+            circle(c, x, y, 2, col, false);
+            for (dx, dy) in [
+                (0, -7),
+                (0, 7),
+                (-7, 0),
+                (7, 0),
+                (-5, -5),
+                (5, 5),
+                (-5, 5),
+                (5, -5),
+            ] {
+                let (ix, iy) = (dx * 5 / 7, dy * 5 / 7);
+                line(c, x + ix, y + iy, x + dx, y + dy, col);
+            }
+        }
+        Icon::Terminal => {
+            rounded_outline(c, x - 8, y - 7, 17, 14, 2, col);
+            line(c, x - 5, y - 3, x - 2, y, col);
+            line(c, x - 2, y, x - 5, y + 3, col);
+            line(c, x, y + 3, x + 5, y + 3, col);
+        }
+        Icon::Package => {
+            rect_outline(c, x - 7, y - 4, 15, 11, col);
+            line(c, x - 7, y - 4, x - 4, y - 7, col);
+            line(c, x - 4, y - 7, x + 7, y - 7, col);
+            line(c, x + 7, y - 7, x + 7, y - 4, col);
+            line(c, x - 2, y - 4, x - 2, y, col);
+            line(c, x + 2, y - 4, x + 2, y, col);
+        }
+        Icon::Bell => {
+            rounded_outline(c, x - 5, y - 6, 11, 11, 5, col);
+            line(c, x - 7, y + 4, x + 7, y + 4, col);
+            line(c, x - 5, y, x - 6, y + 4, col);
+            line(c, x + 5, y, x + 6, y + 4, col);
+            line(c, x - 1, y + 6, x + 1, y + 6, col);
+        }
+        Icon::Calendar => {
+            rect_outline(c, x - 7, y - 5, 15, 12, col);
+            line(c, x - 7, y - 2, x + 7, y - 2, col);
+            line(c, x - 4, y - 7, x - 4, y - 4, col);
+            line(c, x + 4, y - 7, x + 4, y - 4, col);
+            for (dx, dy) in [(-4, 1), (0, 1), (4, 1), (-4, 4), (0, 4)] {
+                c.put(x + dx, y + dy, col);
+            }
+        }
+        Icon::Download => {
+            line(c, x, y - 7, x, y + 2, col);
+            line(c, x - 4, y - 2, x, y + 2, col);
+            line(c, x + 4, y - 2, x, y + 2, col);
+            line(c, x - 7, y + 3, x - 7, y + 6, col);
+            line(c, x - 7, y + 6, x + 7, y + 6, col);
+            line(c, x + 7, y + 3, x + 7, y + 6, col);
+        }
     }
 }
 
@@ -253,11 +340,21 @@ pub fn clock_rect(width: usize, _height: usize) -> Rect {
     Rect::new(x0, ty - pad, right + pad - x0, y1 - (ty - pad))
 }
 
-pub fn draw_clock(c: &mut Canvas<'_>, face: &mut ClockFace, now: Option<DateTime>) {
+pub fn draw_clock(c: &mut Canvas<'_>, face: &mut ClockFace, now: Option<DateTime>, h24: bool) {
     let right = c.width() as i32 - MARGIN - 8;
     let mut time = StrBuf::<8>::new();
     let mut date = StrBuf::<48>::new();
+    let mut suffix = "";
     match now {
+        Some(t) if !h24 => {
+            let h = match t.hour % 12 {
+                0 => 12,
+                h => h,
+            };
+            let _ = write!(time, "{h}:{:02}", t.minute);
+            suffix = if t.hour < 12 { "A. M." } else { "P. M." };
+            let _ = t.write_date(&mut date);
+        }
         Some(t) => {
             let _ = t.write_time(&mut time);
             let _ = t.write_date(&mut date);
@@ -273,6 +370,9 @@ pub fn draw_clock(c: &mut Canvas<'_>, face: &mut ClockFace, now: Option<DateTime
     face.halo
         .draw_alpha(c, tx, ty, time.as_str(), theme::CYAN, 22);
     face.digits.draw(c, tx, ty, time.as_str(), Color::WHITE);
+    if !suffix.is_empty() {
+        text::draw_right(c, tx - 12, ty + TIME_HEIGHT - 18, suffix, &date_style());
+    }
     text::draw_right(
         c,
         right - 10,
@@ -366,19 +466,22 @@ mod tests {
             minute: 25,
             second: 0,
         };
-        let mut buf = vec![0u8; w * h * 4];
-        let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Rgb).unwrap();
-        draw_clock(&mut c, &mut ClockFace::new(), Some(now));
-        draw_message(&mut c, "Sistema en línea. ¿En qué te ayudo?", true);
-        let (cr, mr) = (clock_rect(w, h), message_rect(w, h));
-        for y in 0..h as i32 {
-            for x in 0..w as i32 {
-                let px = Rect::new(x, y, 1, 1);
-                if c.get(x, y) != Some(Color::BLACK) {
-                    assert!(
-                        cr.intersects(&px) || mr.intersects(&px),
-                        "píxel suelto en ({x}, {y})"
-                    );
+        // En 24 horas y en 12 (con "P. M." a la izquierda).
+        for h24 in [true, false] {
+            let mut buf = vec![0u8; w * h * 4];
+            let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Rgb).unwrap();
+            draw_clock(&mut c, &mut ClockFace::new(), Some(now), h24);
+            draw_message(&mut c, "Sistema en línea. ¿En qué te ayudo?", true);
+            let (cr, mr) = (clock_rect(w, h), message_rect(w, h));
+            for y in 0..h as i32 {
+                for x in 0..w as i32 {
+                    let px = Rect::new(x, y, 1, 1);
+                    if c.get(x, y) != Some(Color::BLACK) {
+                        assert!(
+                            cr.intersects(&px) || mr.intersects(&px),
+                            "píxel suelto en ({x}, {y}) con h24={h24}"
+                        );
+                    }
                 }
             }
         }

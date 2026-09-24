@@ -1,4 +1,4 @@
-//! Kernel de JARVIS-OS — hito K3: escritorio con ventanas, red y navegador.
+//! Kernel de JARVIS-OS — hito K4: terminal, paquetes, configuración y navegador con CSS.
 //!
 //! No hay sistema operativo debajo: este código corre directamente sobre el hardware (o QEMU).
 //! El crate `bootloader` se encarga de lo previo: pasar la CPU a modo 64 bits, armar las tablas
@@ -52,8 +52,6 @@ use spin::Mutex;
 use virtio_blk::VirtioBlk;
 use virtio_net::VirtioNet;
 
-/// Hora local de Argentina respecto de UTC (el reloj del hardware guarda UTC).
-const UTC_OFFSET_HOURS: i8 = -3;
 /// Partículas de la esfera.
 const PARTICLES: usize = 22_000;
 /// Tope de ~60 frames por segundo.
@@ -83,8 +81,9 @@ entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 /// La pantalla, compartida con el manejador de panic para poder mostrar el error.
 static SCREEN: Mutex<Option<Canvas<'static>>> = Mutex::new(None);
 
-fn local_time() -> Option<DateTime> {
-    rtc::read_utc().map(|t| t.offset_hours(UTC_OFFSET_HOURS))
+/// La hora local: el reloj del hardware guarda UTC y la zona sale de la Configuración.
+fn local_time(utc_offset: i8) -> Option<DateTime> {
+    rtc::read_utc().map(|t| t.offset_hours(utc_offset))
 }
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
@@ -190,6 +189,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
     desktop.draw_background(&mut bg);
+    serial_println!(
+        "configuración: zona UTC{:+}, teclado {}",
+        desktop.utc_offset(),
+        if desktop.latam_keyboard() {
+            "latinoamericano"
+        } else {
+            "EE. UU."
+        }
+    );
     *SCREEN.lock() = Some(screen);
 
     let base = SystemStats {
@@ -204,7 +212,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         MouseDecoder::new()
     };
     x86_64::instructions::interrupts::enable();
-    run(&mut desktop, &mut frame, &bg, &mut net, base, decoder)
+    run(&mut desktop, &mut frame, &mut bg, &mut net, base, decoder)
 }
 
 /// Bucle principal: dormir hasta el próximo tick, atender la red, pasarle la entrada al
@@ -212,13 +220,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 fn run(
     desktop: &mut Desktop<Disk>,
     frame: &mut Canvas<'static>,
-    bg: &Canvas<'static>,
+    bg: &mut Canvas<'static>,
     net: &mut Option<Net<VirtioNet>>,
     mut stats: SystemStats,
     mut mouse_decoder: MouseDecoder,
 ) -> ! {
     let mut keyboard = keyboard::Keyboard::new();
-    let mut clock = local_time();
+    let mut clock = local_time(desktop.utc_offset());
     let mut last_rtc = 0;
     let mut next_frame = 0;
     let mut first = true;
@@ -252,10 +260,11 @@ fn run(
         }
         next_frame = now + FRAME_MS;
         if now - last_rtc >= 1000 {
-            clock = local_time();
+            clock = local_time(desktop.utc_offset());
             last_rtc = now;
         }
 
+        keyboard.latam = desktop.latam_keyboard();
         while let Some(event) = keyboard.next_event() {
             desktop.handle(event, now, clock);
         }

@@ -13,14 +13,26 @@
 //! conexión HTTPS (verificando el certificado del sitio), y devuelve la respuesta en texto plano
 //! y ya descomprimida. Solo acepta GET y solo escucha en 127.0.0.1: desde otra máquina no se
 //! puede usar. Las redirecciones no las sigue: se las devuelve al kernel, que las maneja.
+//!
+//! Además (ADR 0005):
+//! - **Imágenes**: si el pedido trae `X-Jarvis-Imagen: bmp`, la imagen (PNG, JPEG, GIF, WebP…)
+//!   se convierte a BMP, el único formato que el kernel sabe leer, y se achica si es enorme.
+//! - **Repositorio de paquetes**: `http://paquetes.jarvis/…` se sirve desde la carpeta
+//!   `kernel/paquetes/` del proyecto (solo lectura, sin salir de esa carpeta).
 
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
 pub const PORT: u16 = 8118;
-const MAX_BODY: u64 = 8 * 1024 * 1024;
+const MAX_BODY: u64 = 32 * 1024 * 1024;
+/// Lado más largo de las imágenes de la web convertidas (las del repositorio, como los fondos
+/// de pantalla, pueden ser más grandes).
+const MAX_SIDE: u32 = 900;
+const MAX_SIDE_REPO: u32 = 1920;
+pub const REPO_HOST: &str = "paquetes.jarvis";
 
 /// Levanta el puente en un hilo. Si el puerto está ocupado (otro `xtask run` abierto), avisa y
 /// sigue sin puente.
@@ -34,11 +46,11 @@ pub fn start() {
             return;
         }
     };
-    println!("[puente] HTTPS para el navegador de JARVIS-OS en 127.0.0.1:{PORT}");
+    println!("[puente] HTTPS, imágenes y paquetes para JARVIS-OS en 127.0.0.1:{PORT}");
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .max_redirects(0)
         .http_status_as_error(false)
-        .timeout_global(Some(Duration::from_secs(25)))
+        .timeout_global(Some(Duration::from_secs(40)))
         .user_agent("Mozilla/5.0 (compatible; JARVIS-OS/0.1; navegador de texto)")
         .build()
         .into();
@@ -79,6 +91,13 @@ fn reply(stream: &mut TcpStream, status: u16, content_type: &str, extra: &str, b
     let _ = stream.write_all(body);
 }
 
+fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    head.lines().find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        k.trim().eq_ignore_ascii_case(name).then(|| v.trim())
+    })
+}
+
 fn handle(mut stream: TcpStream, agent: &ureq::Agent) -> Result<(), String> {
     let head = read_head(&mut stream)?;
     let line = head.lines().next().unwrap_or("");
@@ -94,28 +113,58 @@ fn handle(mut stream: TcpStream, agent: &ureq::Agent) -> Result<(), String> {
         );
         return Err(format!("pedido rechazado: {line}"));
     }
-    let lang = head
-        .lines()
-        .find_map(|l| l.strip_prefix("Accept-Language: "))
-        .unwrap_or("es-AR,es;q=0.9");
-    match agent.get(url).header("Accept-Language", lang).call() {
+    let want_bmp = header(&head, "X-Jarvis-Imagen").is_some_and(|v| v.eq_ignore_ascii_case("bmp"));
+    // El repositorio de paquetes: archivos de kernel/paquetes/.
+    if let Some(path) = url
+        .strip_prefix(&format!("http://{REPO_HOST}/"))
+        .or_else(|| (url == format!("http://{REPO_HOST}")).then_some(""))
+    {
+        let (status, ct, body) = serve_repo(path, want_bmp);
+        println!(
+            "[puente] paquetes: {path} -> {status} ({} bytes)",
+            body.len()
+        );
+        reply(&mut stream, status, ct, "", &body);
+        return Ok(());
+    }
+    let lang = header(&head, "Accept-Language").unwrap_or("es-AR,es;q=0.9");
+    let accept = header(&head, "Accept").unwrap_or("*/*");
+    match agent
+        .get(url)
+        .header("Accept-Language", lang)
+        .header("Accept", accept)
+        .call()
+    {
         Ok(mut resp) => {
             let status = resp.status().as_u16();
-            let header = |name: &str| {
+            let get = |name: &str| {
                 resp.headers()
                     .get(name)
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("")
                     .to_string()
             };
-            let content_type = header("content-type");
-            let location = header("location");
-            let body = resp
+            let mut content_type = get("content-type");
+            let location = get("location");
+            let mut body = resp
                 .body_mut()
                 .with_config()
                 .limit(MAX_BODY)
                 .read_to_vec()
                 .map_err(|e| format!("{url}: {e}"))?;
+            if want_bmp && status == 200 {
+                match to_bmp(&body, MAX_SIDE) {
+                    Ok(bmp) => {
+                        body = bmp;
+                        content_type = "image/bmp".into();
+                    }
+                    Err(e) => {
+                        println!("[puente] {url}: no se pudo convertir la imagen: {e}");
+                        reply(&mut stream, 415, "text/plain", "", e.as_bytes());
+                        return Ok(());
+                    }
+                }
+            }
             println!("[puente] GET {url} -> {status} ({} bytes)", body.len());
             let extra = if location.is_empty() {
                 String::new()
@@ -140,6 +189,66 @@ fn handle(mut stream: TcpStream, agent: &ureq::Agent) -> Result<(), String> {
     }
 }
 
+/// Cualquier imagen → BMP de 24 bits (con la transparencia sobre blanco), achicada si hace falta.
+pub fn to_bmp(data: &[u8], max_side: u32) -> Result<Vec<u8>, String> {
+    let img = image::load_from_memory(data)
+        .map_err(|e| format!("formato de imagen no soportado: {e}"))?;
+    let img = if img.width().max(img.height()) > max_side {
+        img.thumbnail(max_side, max_side)
+    } else {
+        img
+    };
+    let rgba = img.to_rgba8();
+    let mut rgb = image::RgbImage::new(rgba.width(), rgba.height());
+    for (x, y, p) in rgba.enumerate_pixels() {
+        let a = p[3] as u32;
+        let mix = |c: u8| ((c as u32 * a + 255 * (255 - a)) / 255) as u8;
+        rgb.put_pixel(x, y, image::Rgb([mix(p[0]), mix(p[1]), mix(p[2])]));
+    }
+    let mut out = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(rgb)
+        .write_to(&mut out, image::ImageFormat::Bmp)
+        .map_err(|e| e.to_string())?;
+    Ok(out.into_inner())
+}
+
+pub fn repo_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("paquetes"))
+        .unwrap_or_else(|| PathBuf::from("paquetes"))
+}
+
+/// Un archivo del repositorio. Solo nombres simples (letras, números, `-_.` y `/`), sin `..`:
+/// no se puede leer nada fuera de `kernel/paquetes/`.
+fn serve_repo(path: &str, want_bmp: bool) -> (u16, &'static str, Vec<u8>) {
+    let path = if path.is_empty() { "indice.txt" } else { path };
+    let safe = !path.contains("..")
+        && !path.starts_with('/')
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'));
+    if !safe {
+        return (400, "text/plain", b"nombre de archivo invalido".to_vec());
+    }
+    let file = repo_dir().join(path);
+    match std::fs::read(&file) {
+        Ok(data) if want_bmp => match to_bmp(&data, MAX_SIDE_REPO) {
+            Ok(bmp) => (200, "image/bmp", bmp),
+            Err(e) => (415, "text/plain", e.into_bytes()),
+        },
+        Ok(data) => {
+            let ct = if path.ends_with(".txt") || path.ends_with(".sh") || path.ends_with(".md") {
+                "text/plain; charset=utf-8"
+            } else {
+                "application/octet-stream"
+            };
+            (200, ct, data)
+        }
+        Err(_) => (404, "text/plain", format!("no existe {path}").into_bytes()),
+    }
+}
+
 /// Servidor HTTP de prueba (para los tests y las capturas): contesta siempre la misma página.
 pub fn test_server(html: &'static str) -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -158,4 +267,48 @@ pub fn test_server(html: &'static str) -> Result<u16, String> {
         }
     });
     Ok(port)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn el_repositorio_no_deja_salir_de_su_carpeta() {
+        for bad in [
+            "../Cargo.toml",
+            "/etc/passwd",
+            "a/../../x",
+            "c:\\x",
+            "%2e%2e/x",
+        ] {
+            assert_eq!(serve_repo(bad, false).0, 400, "{bad}");
+        }
+        let (status, _, body) = serve_repo("", false);
+        assert_eq!(status, 200, "sirve el índice");
+        assert!(String::from_utf8_lossy(&body).contains("neofetch|"));
+        assert_eq!(serve_repo("no-existe.txt", false).0, 404);
+    }
+
+    #[test]
+    fn convierte_png_a_bmp() {
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2000,
+            10,
+            image::Rgba([255, 0, 0, 0]),
+        ))
+        .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+        let bmp = to_bmp(&png, MAX_SIDE).unwrap();
+        assert!(bmp.starts_with(b"BM"));
+        let back = image::load_from_memory(&bmp).unwrap().to_rgb8();
+        assert_eq!(back.width(), MAX_SIDE, "se achica");
+        assert_eq!(
+            back.get_pixel(0, 0),
+            &image::Rgb([255, 255, 255]),
+            "transparente sobre blanco"
+        );
+        assert!(to_bmp(b"no es una imagen", MAX_SIDE).is_err());
+    }
 }

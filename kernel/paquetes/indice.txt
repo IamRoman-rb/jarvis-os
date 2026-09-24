@@ -1,0 +1,11 @@
+# Repositorio de paquetes de JARVIS-OS (lo sirve el puente de `cargo xtask run`).
+# Formato: nombre|versión|descripción|dependencias (separadas por comas)|tamaño
+neofetch|1.0|Muestra el logo de JARVIS-OS y los datos del sistema, con colores||2 KB
+cowsay|1.0|Una vaca que dice lo que le escribas||1 KB
+fortune|1.1|Una frase al azar (sobre computación y sistemas operativos)||3 KB
+sl|1.0|Un tren que pasa cuando escribís sl en vez de ls||1 KB
+calc|1.0|Calculadora: calc 2 + 3 x 4||1 KB
+hola|1.0|El ejemplo más chico de un programa de JARVIS-OS (para aprender a hacer el tuyo)||1 KB
+fondos|1.0|Tres fondos de pantalla (se eligen en Configuración > Personalización)||400 KB
+manual|1.0|El manual de JARVIS-OS en /Documentos||6 KB
+esenciales|1.0|Instala de una vez neofetch, cowsay, fortune y calc|neofetch,cowsay,fortune,calc|1 KB

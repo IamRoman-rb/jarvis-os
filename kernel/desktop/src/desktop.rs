@@ -26,11 +26,14 @@ use jarvis_gfx::{Canvas, MAX_CLIP, PixelFormat, Rect};
 
 use crate::apps::{
     App, Click, Ctx, SysView, TaskInfo, browser::Browser, console::Console, editor::Editor,
-    files::FilesWindow, monitor::Monitor, music::Music, name_of, viewer::Viewer,
+    files::FilesWindow, monitor::Monitor, music::Music, name_of, settings::Settings,
+    terminal::Terminal, viewer::Viewer,
 };
 use crate::chrome::{self, Hover};
+use crate::config::{self, Config, Wallpaper};
 use crate::cursor;
 use crate::input::{Event, Key, Mods, MousePacket};
+use crate::panels::{self, Action, Menu, QuickButton, QuickHit};
 use crate::shell::{
     self, LAUNCHERS, Launcher, MAX_EXTRA, StartItem, StartMenu, StatusHit, Thumb, ToolbarItem,
 };
@@ -119,6 +122,14 @@ enum Overlay {
         sel: usize,
     },
     Lock,
+    /// Win+X y Alt+Espacio.
+    Menu(Menu),
+    /// Win+A: configuración rápida.
+    Quick {
+        sel: usize,
+    },
+    /// Win+N: notificaciones y calendario.
+    Notices,
 }
 
 enum Drag {
@@ -189,6 +200,25 @@ pub struct Desktop<D: BlockDevice> {
     drawn_stats: u64,
     drawn_toolbar: Option<(Vec<ToolbarItem>, Option<usize>)>,
     drawn_toasts: Vec<(String, bool)>,
+    config: Config,
+    /// Hay que volver a dibujar el fondo (cambió el fondo de pantalla).
+    bg_dirty: bool,
+    /// Última vez que se tocó el teclado o el mouse (para bloquear por inactividad).
+    last_input: u64,
+    /// PIN que se está escribiendo en la pantalla de bloqueo (y si el último estuvo mal).
+    pin_input: String,
+    pin_wrong: bool,
+    /// La última hora que llegó (para lo que pasa fuera de un evento, como una respuesta de red).
+    last_clock: Option<DateTime>,
+    last_now: u64,
+    /// Historial de avisos para el centro de notificaciones: (texto, error, hora).
+    notices: Vec<(String, bool, String)>,
+    /// Hasta cuándo suena el pitido de un aviso de error.
+    beep_until: Option<u64>,
+    /// Alt+Impr Pant: captura solo de la ventana activa.
+    window_screenshot: bool,
+    /// Frames que la esfera se sigue dibujando después de hablar (para que vuelva a su forma).
+    sphere_settle: u32,
 }
 
 /// Arma un `Ctx` con campos separados de `self` (así se puede usar junto con `self.slots`).
@@ -202,6 +232,7 @@ macro_rules! ctx {
             out: &mut $s.out,
             stats: &$s.stats,
             tasks: $tasks,
+            config: &$s.config,
         }
     };
 }
@@ -211,7 +242,17 @@ fn singleton(kind: AppKind) -> bool {
 }
 
 impl<D: BlockDevice> Desktop<D> {
-    pub fn new(width: usize, height: usize, particles: usize, fs: Option<FileSystem<D>>) -> Self {
+    pub fn new(
+        width: usize,
+        height: usize,
+        particles: usize,
+        mut fs: Option<FileSystem<D>>,
+    ) -> Self {
+        let config = fs
+            .as_mut()
+            .and_then(|fs| fs.read_file(config::PATH).ok())
+            .map(|b| Config::parse(&String::from_utf8_lossy(&b)))
+            .unwrap_or_default();
         let screen = Rect::new(0, 0, width as i32, height as i32);
         let work = Rect::new(0, WORK_TOP, width as i32, height as i32 - WORK_TOP);
         Desktop {
@@ -253,11 +294,65 @@ impl<D: BlockDevice> Desktop<D> {
             drawn_stats: u64::MAX,
             drawn_toolbar: None,
             drawn_toasts: Vec::new(),
+            config,
+            bg_dirty: true,
+            last_input: 0,
+            pin_input: String::new(),
+            pin_wrong: false,
+            notices: Vec::new(),
+            beep_until: None,
+            window_screenshot: false,
+            sphere_settle: 0,
+            last_clock: None,
+            last_now: 0,
         }
     }
 
-    pub fn draw_background(&self, bg: &mut Canvas<'_>) {
-        hud::draw_static(bg);
+    /// La capa de fondo: el HUD, un color o una imagen (según la configuración).
+    pub fn draw_background(&mut self, bg: &mut Canvas<'_>) {
+        self.bg_dirty = false;
+        match self.config.wallpaper.clone() {
+            Wallpaper::Hud => hud::draw_static(bg),
+            Wallpaper::Solid(_) => {
+                let color = self
+                    .config
+                    .wallpaper_color()
+                    .unwrap_or(jarvis_gfx::theme::VOID);
+                hud::draw_solid(bg, color);
+            }
+            Wallpaper::Image(path) => {
+                let image = self
+                    .fs
+                    .as_mut()
+                    .and_then(|fs| fs.read_file(&path).ok())
+                    .and_then(|b| crate::bmp::decode(&b));
+                match image {
+                    Some(img) => {
+                        let (w, h) = (bg.width() as i32, bg.height() as i32);
+                        img.draw_scaled(bg, Rect::new(0, 0, w, h));
+                        hud::draw_title(bg);
+                    }
+                    None => {
+                        self.logs.push(format!("FONDO_ERROR {path}"));
+                        hud::draw_static(bg);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Diferencia con UTC de la zona horaria elegida (el kernel lee el reloj en UTC).
+    pub fn utc_offset(&self) -> i8 {
+        self.config.utc_offset
+    }
+
+    /// ¿Teclado latinoamericano? (El kernel traduce las teclas.)
+    pub fn latam_keyboard(&self) -> bool {
+        self.config.latam_keyboard
     }
 
     /// JARVIS saluda al arrancar.
@@ -306,13 +401,17 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// Nombre del menú o panel abierto encima de todo ("" si no hay).
     pub fn overlay_name(&self) -> &'static str {
-        match self.overlay {
+        match &self.overlay {
             Overlay::None => "",
             Overlay::Start(_) => "inicio",
             Overlay::Switcher { .. } => "alt-tab",
             Overlay::TaskView { .. } => "tareas",
             Overlay::Power { .. } => "apagado",
             Overlay::Lock => "bloqueo",
+            Overlay::Menu(m) if m.title.starts_with("VENTANA") => "ventana",
+            Overlay::Menu(_) => "enlaces",
+            Overlay::Quick { .. } => "rapida",
+            Overlay::Notices => "notificaciones",
         }
     }
 
@@ -360,12 +459,21 @@ impl<D: BlockDevice> Desktop<D> {
             )),
             Err(e) => self.logs.push(format!("RED_ERROR {e}")),
         }
-        for s in &mut self.slots {
-            s.app.net_response(id, &result);
-            if s.app.take_dirty() {
-                s.content_dirty = true;
+        let tasks = self.tasks();
+        let now_ms = self.last_now;
+        {
+            let mut ctx = ctx!(self, now_ms, self.last_clock, &tasks);
+            for s in &mut self.slots {
+                s.app.net_response(id, &result, &mut ctx);
+                if s.app.take_dirty() {
+                    s.content_dirty = true;
+                }
             }
         }
+        let clock = self.last_clock;
+        let before = self.geometry();
+        self.process_outbox(now_ms, clock);
+        self.damage_geometry(&before);
     }
 
     fn tasks(&self) -> Vec<TaskInfo> {
@@ -392,6 +500,9 @@ impl<D: BlockDevice> Desktop<D> {
     // --- eventos ------------------------------------------------------------------------------
 
     pub fn handle(&mut self, event: Event, now_ms: u64, clock: Option<DateTime>) {
+        self.last_input = now_ms;
+        self.last_now = now_ms;
+        self.last_clock = clock;
         let before = self.geometry();
         match event {
             Event::Key(key) => self.on_key(key, now_ms, clock),
@@ -480,6 +591,7 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     fn overlay_is_fullscreen(&self) -> bool {
+        // (Menús y paneles chicos no: se dibujan encima de lo que hay.)
         matches!(
             self.overlay,
             Overlay::TaskView { .. } | Overlay::Power { .. } | Overlay::Lock
@@ -495,7 +607,7 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     fn open_switcher(&mut self, backwards: bool) {
-        let order: Vec<WinId> = self.wm.mru().to_vec();
+        let order: Vec<WinId> = self.wm.mru_here();
         if order.is_empty() {
             return;
         }
@@ -536,7 +648,7 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     fn open_task_view(&mut self) {
-        let mut order: Vec<WinId> = self.wm.mru().to_vec();
+        let mut order: Vec<WinId> = self.wm.mru_here();
         order.sort_unstable();
         self.set_overlay(Overlay::TaskView { order, sel: 0 });
     }
@@ -553,8 +665,7 @@ impl<D: BlockDevice> Desktop<D> {
 
     fn on_key(&mut self, key: Key, now_ms: u64, clock: Option<DateTime>) {
         if matches!(self.overlay, Overlay::Lock) {
-            self.logs.push("ESCRITORIO_DESBLOQUEADO".into());
-            self.set_overlay(Overlay::None);
+            self.lock_key(key);
             return;
         }
         let m = self.mods;
@@ -573,9 +684,13 @@ impl<D: BlockDevice> Desktop<D> {
             let tasks = self.tasks();
             let mut ctx = ctx!(self, now_ms, clock, &tasks);
             let slot = &mut self.slots[i];
-            slot.app.key(key, m, content, &mut ctx);
+            let used = slot.app.key(key, m, content, &mut ctx);
             if slot.app.take_dirty() {
                 slot.content_dirty = true;
+            }
+            // Ctrl+W cierra la ventana si la app no lo usó (como una pestaña).
+            if !used && m.ctrl && matches!(key, Key::Char('w' | 'W')) {
+                self.close_window(id, now_ms, clock);
             }
             return;
         }
@@ -587,26 +702,113 @@ impl<D: BlockDevice> Desktop<D> {
         }
     }
 
-    /// Atajos de Windows. Devuelve `true` si la tecla era uno.
+    /// En la pantalla de bloqueo: sin PIN, cualquier tecla desbloquea; con PIN, hay que
+    /// escribirlo y apretar Enter.
+    fn lock_key(&mut self, key: Key) {
+        if self.config.pin.is_empty() {
+            self.unlock();
+            return;
+        }
+        match key {
+            Key::Char(c) if c.is_ascii_digit() && self.pin_input.len() < 8 => {
+                self.pin_input.push(c);
+                self.pin_wrong = false;
+            }
+            Key::Backspace => {
+                self.pin_input.pop();
+            }
+            Key::Escape => self.pin_input.clear(),
+            Key::Enter => {
+                if self.pin_input == self.config.pin {
+                    self.unlock();
+                    return;
+                }
+                self.pin_input.clear();
+                self.pin_wrong = true;
+                self.logs.push("ESCRITORIO_PIN_INCORRECTO".into());
+            }
+            _ => {}
+        }
+        self.overlay_dirty = true;
+    }
+
+    fn unlock(&mut self) {
+        self.pin_input.clear();
+        self.pin_wrong = false;
+        self.logs.push("ESCRITORIO_DESBLOQUEADO".into());
+        self.set_overlay(Overlay::None);
+    }
+
+    fn lock(&mut self) {
+        self.pin_input.clear();
+        self.pin_wrong = false;
+        self.logs.push("ESCRITORIO_BLOQUEADO".into());
+        self.set_overlay(Overlay::Lock);
+    }
+
+    /// Atajos de Windows (y algunos de Ubuntu). Devuelve `true` si la tecla era uno.
     fn global_shortcut(&mut self, key: Key, m: Mods, now_ms: u64, clock: Option<DateTime>) -> bool {
         let focused = self.wm.focused();
+        let app = Launch::App;
+        if m.win && m.ctrl {
+            match key {
+                // Escritorios virtuales.
+                Key::Char('d' | 'D') => {
+                    self.wm.new_desktop();
+                    self.desktop_changed(now_ms);
+                }
+                Key::Left | Key::Right => {
+                    let (cur, n) = self.wm.desktops();
+                    let next = if key == Key::Left {
+                        cur.checked_sub(1)
+                    } else {
+                        (cur + 1 < n).then_some(cur + 1)
+                    };
+                    if let Some(next) = next {
+                        self.wm.switch_desktop(next);
+                        self.desktop_changed(now_ms);
+                    }
+                }
+                Key::F(4) => {
+                    self.wm.close_desktop();
+                    self.desktop_changed(now_ms);
+                }
+                // Win+Ctrl+Shift+B en Windows reinicia el driver de video: acá, redibuja todo.
+                Key::Char('b' | 'B') if m.shift => {
+                    self.bg_dirty = true;
+                    self.invalidate();
+                    self.logs.push("ESCRITORIO_REDIBUJADO".into());
+                }
+                _ => return false,
+            }
+            return true;
+        }
         if m.win {
             match key {
-                Key::Char('d' | 'D') => {
+                Key::Char('d' | 'D') if m.alt => self.toggle_overlay(Overlay::Notices),
+                Key::Char('d' | 'D' | ',') => {
                     self.wm.toggle_desktop();
                     self.logs.push("ESCRITORIO_MOSTRAR".into());
                 }
+                Key::Char('m' | 'M') if m.shift => self.wm.restore_all(),
                 Key::Char('m' | 'M') => self.wm.minimize_all(),
-                Key::Char('e' | 'E') => self.launch(Launch::App(AppKind::Files), now_ms, clock),
-                Key::Char('r' | 'R') => self.launch(Launch::App(AppKind::Console), now_ms, clock),
-                Key::Char('x' | 'X') => self.launch(Launch::App(AppKind::Monitor), now_ms, clock),
-                Key::Char('l' | 'L') => {
-                    self.logs.push("ESCRITORIO_BLOQUEADO".into());
-                    self.set_overlay(Overlay::Lock);
-                }
+                Key::Home => self.wm.minimize_others(),
+                Key::Char('e' | 'E') => self.launch(app(AppKind::Files), now_ms, clock),
+                Key::Char('r' | 'R') => self.launch(app(AppKind::Console), now_ms, clock),
+                Key::Char('i' | 'I') => self.launch(app(AppKind::Settings), now_ms, clock),
+                Key::Enter => self.launch(app(AppKind::Terminal), now_ms, clock),
+                Key::Char('x' | 'X') => self.toggle_overlay(Overlay::Menu(panels::quick_links())),
+                Key::Char('a' | 'A') => self.toggle_overlay(Overlay::Quick { sel: 0 }),
+                Key::Char('n' | 'N') => self.toggle_overlay(Overlay::Notices),
+                Key::Char('l' | 'L') => self.lock(),
                 Key::Char('s' | 'S') if m.shift => self.screenshot = true,
                 Key::Char('s' | 'S' | 'q' | 'Q') => self.toggle_start(),
                 Key::Tab => self.open_task_view(),
+                Key::Up if m.shift => {
+                    if let Some(id) = focused {
+                        self.wm.stretch_vertical(id);
+                    }
+                }
                 Key::Up => {
                     if let Some(id) = focused
                         && !self.wm.get(id).is_some_and(|w| w.maximized)
@@ -629,11 +831,21 @@ impl<D: BlockDevice> Desktop<D> {
                         self.wm.snap(id, side);
                     }
                 }
-                Key::Char(c @ '1'..='8') => {
+                Key::Char(c @ '1'..='9') => {
                     let i = c as usize - '1' as usize;
                     self.toolbar_action(i, now_ms, clock);
                 }
+                Key::Char('0') => self.toolbar_action(9, now_ms, clock),
                 Key::PrintScreen => self.screenshot = true,
+                _ => return false,
+            }
+            return true;
+        }
+        if m.ctrl && m.alt {
+            match key {
+                // Ubuntu: Ctrl+Alt+T abre una terminal.
+                Key::Char('t' | 'T') => self.launch(app(AppKind::Terminal), now_ms, clock),
+                Key::Delete => self.launch(app(AppKind::Monitor), now_ms, clock),
                 _ => return false,
             }
             return true;
@@ -645,18 +857,35 @@ impl<D: BlockDevice> Desktop<D> {
                     Some(id) => self.close_window(id, now_ms, clock),
                     None => self.set_overlay(Overlay::Power { sel: 0 }),
                 },
+                Key::Char(' ') => {
+                    if let Some(id) = focused
+                        && let Some(w) = self.wm.get(id)
+                    {
+                        let at = (w.rect.x + 8, w.rect.y + 30);
+                        let menu = panels::window_menu(id, at, w.maximized);
+                        self.set_overlay(Overlay::Menu(menu));
+                    }
+                }
+                // Alt+Esc: la ventana siguiente, sin selector.
+                Key::Escape => {
+                    let order = self.wm.mru_here();
+                    if let Some(&next) = order.last()
+                        && order.len() > 1
+                    {
+                        self.wm.activate(next);
+                        self.log_focus(next);
+                    }
+                }
+                Key::PrintScreen => self.window_screenshot = true,
                 _ => return false,
             }
             return true;
         }
         match key {
-            Key::Escape if m.ctrl && m.shift => {
-                self.launch(Launch::App(AppKind::Monitor), now_ms, clock)
-            }
-            Key::Delete if m.ctrl && m.alt => {
-                self.launch(Launch::App(AppKind::Monitor), now_ms, clock)
-            }
+            Key::Escape if m.ctrl && m.shift => self.launch(app(AppKind::Monitor), now_ms, clock),
+            Key::Escape if m.ctrl => self.toggle_start(),
             Key::PrintScreen => self.screenshot = true,
+            Key::F(1) => self.launch(Launch::Browse("about:ayuda".into()), now_ms, clock),
             Key::F(11) => match focused {
                 Some(id) => self.wm.toggle_maximize(id),
                 None => return false,
@@ -666,10 +895,168 @@ impl<D: BlockDevice> Desktop<D> {
         true
     }
 
+    /// Abre el panel, o lo cierra si ya estaba abierto (como Win+A dos veces).
+    fn toggle_overlay(&mut self, o: Overlay) {
+        let same = core::mem::discriminant(&o) == core::mem::discriminant(&self.overlay)
+            && match (&o, &self.overlay) {
+                (Overlay::Menu(a), Overlay::Menu(b)) => a.title == b.title,
+                _ => true,
+            };
+        self.set_overlay(if same { Overlay::None } else { o });
+    }
+
+    fn desktop_changed(&mut self, now_ms: u64) {
+        let (cur, n) = self.wm.desktops();
+        self.logs
+            .push(format!("ESCRITORIO_VIRTUAL {} de {n}", cur + 1));
+        self.notify(format!("Escritorio {} de {n}", cur + 1), false, now_ms);
+    }
+
+    /// Hace lo que se eligió en un menú (Win+X, Alt+Espacio).
+    fn menu_action(&mut self, a: Action, now_ms: u64, clock: Option<DateTime>) {
+        self.set_overlay(Overlay::None);
+        match a {
+            Action::Launch(l) => self.launch(l, now_ms, clock),
+            Action::PowerMenu => self.set_overlay(Overlay::Power { sel: 0 }),
+            Action::ShowDesktop => self.wm.toggle_desktop(),
+            Action::Lock => self.lock(),
+            Action::Search => self.toggle_start(),
+            Action::NewDesktop => {
+                self.wm.new_desktop();
+                self.desktop_changed(now_ms);
+            }
+            Action::Restore(id) => self.wm.restore_or_minimize(id),
+            Action::Minimize(id) => self.wm.minimize(id),
+            Action::Maximize(id) => self.wm.toggle_maximize(id),
+            Action::Snap(id, side) => self.wm.snap(id, side),
+            Action::Close(id) => self.close_window(id, now_ms, clock),
+        }
+    }
+
+    /// Un cambio de la configuración rápida (Win+A).
+    fn quick_hit(&mut self, hit: QuickHit, now_ms: u64, clock: Option<DateTime>) {
+        match hit {
+            QuickHit::Toggle(q) => {
+                let mut cfg = self.config.clone();
+                panels::quick_toggle(&mut cfg, q);
+                self.apply_config(cfg, now_ms);
+                self.overlay_dirty = true;
+            }
+            QuickHit::Button(b) => {
+                self.set_overlay(Overlay::None);
+                match b {
+                    QuickButton::Settings => {
+                        self.launch(Launch::App(AppKind::Settings), now_ms, clock)
+                    }
+                    QuickButton::Lock => self.lock(),
+                    QuickButton::Power => self.set_overlay(Overlay::Power { sel: 0 }),
+                }
+            }
+        }
+    }
+
+    /// Aplica y guarda una configuración nueva.
+    fn apply_config(&mut self, cfg: Config, now_ms: u64) {
+        if cfg == self.config {
+            return;
+        }
+        let old = core::mem::replace(&mut self.config, cfg);
+        if old.wallpaper != self.config.wallpaper {
+            self.bg_dirty = true;
+        }
+        if old.clock_24h != self.config.clock_24h
+            || old.status_panel != self.config.status_panel
+            || old.animations != self.config.animations
+        {
+            self.full_redraw = true;
+        }
+        // Las apps que dependen de la configuración la leen de nuevo.
+        for s in &mut self.slots {
+            match &mut s.app {
+                App::Browser(b) => b.set_config(&self.config),
+                App::Settings(st) => st.sync(&self.config),
+                _ => {}
+            }
+            s.app.set_dirty();
+            s.content_dirty = true;
+        }
+        let ts = crate::apps::timestamp(self.last_clock);
+        let text = self.config.serialize();
+        let saved = self.fs.as_mut().map(|fs| {
+            crate::term::apt::ensure_dirs(fs, "/Sistema", ts)
+                .and_then(|()| fs.write_file(config::PATH, text.as_bytes(), ts))
+        });
+        match saved {
+            Some(Ok(())) => self.logs.push("CONFIG_GUARDADA".into()),
+            Some(Err(e)) => self.notify(
+                format!("No se pudo guardar la configuración: {e}"),
+                true,
+                now_ms,
+            ),
+            None => {}
+        }
+    }
+
     /// Teclas para el menú o panel abierto. `true` si se usó.
     fn overlay_key(&mut self, key: Key, now_ms: u64, clock: Option<DateTime>) -> bool {
         match &mut self.overlay {
             Overlay::None | Overlay::Lock => false,
+            Overlay::Menu(menu) => {
+                let n = menu.items.len();
+                match key {
+                    Key::Escape => self.set_overlay(Overlay::None),
+                    Key::Up => {
+                        menu.sel = (menu.sel + n - 1) % n.max(1);
+                        self.overlay_dirty = true;
+                    }
+                    Key::Down | Key::Tab => {
+                        menu.sel = (menu.sel + 1) % n.max(1);
+                        self.overlay_dirty = true;
+                    }
+                    Key::Enter => {
+                        if let Some(a) = menu.items.get(menu.sel).map(|i| i.action.clone()) {
+                            self.menu_action(a, now_ms, clock);
+                        }
+                    }
+                    _ => {}
+                }
+                true
+            }
+            Overlay::Quick { sel } => {
+                let n = panels::QUICK.len() + 3;
+                match key {
+                    Key::Escape => self.set_overlay(Overlay::None),
+                    Key::Right | Key::Tab => *sel = (*sel + 1) % n,
+                    Key::Left => *sel = (*sel + n - 1) % n,
+                    Key::Down => *sel = (*sel + 3).min(n - 1),
+                    Key::Up => *sel = sel.saturating_sub(3),
+                    Key::Enter | Key::Char(' ') => {
+                        let i = *sel;
+                        let hit = match panels::QUICK.get(i) {
+                            Some((q, _)) => QuickHit::Toggle(*q),
+                            None => QuickHit::Button(
+                                [QuickButton::Settings, QuickButton::Lock, QuickButton::Power]
+                                    [(i - panels::QUICK.len()).min(2)],
+                            ),
+                        };
+                        self.quick_hit(hit, now_ms, clock);
+                    }
+                    _ => {}
+                }
+                self.overlay_dirty = true;
+                true
+            }
+            Overlay::Notices => {
+                match key {
+                    Key::Escape => self.set_overlay(Overlay::None),
+                    Key::Delete => {
+                        self.notices.clear();
+                        self.overlay_dirty = true;
+                    }
+                    _ => {}
+                }
+                true
+            }
             Overlay::Start(menu) => {
                 let n = menu.items().len();
                 match key {
@@ -822,6 +1209,8 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::Edit(_) => AppKind::Editor,
             Launch::Browse(_) => AppKind::Browser,
             Launch::View(_) => AppKind::Viewer,
+            Launch::Terminal(_) => AppKind::Terminal,
+            Launch::Settings(_) => AppKind::Settings,
         };
         // ¿Ya está abierta?
         let existing = self.slots.iter().position(|s| match (&what, &s.app) {
@@ -837,6 +1226,15 @@ impl<D: BlockDevice> Desktop<D> {
             match (&what, &mut slot.app) {
                 (Launch::Folder(p), App::Files(f)) => f.navigate(p, &mut ctx),
                 (Launch::Browse(u), App::Browser(b)) => b.go(u, &mut ctx),
+                (Launch::Terminal(Some(cmd)), App::Terminal(t)) => {
+                    if !t.shell.waiting() {
+                        t.run_command(cmd, &mut ctx);
+                    }
+                }
+                (Launch::Settings(n), App::Settings(st)) => {
+                    let section = crate::apps::settings::SECTIONS[(*n).min(9)];
+                    st.enter(section, &mut ctx);
+                }
                 _ => {}
             }
             if slot.app.take_dirty() {
@@ -858,15 +1256,32 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::App(AppKind::Viewer) => App::Files(FilesWindow::new("/Imágenes", &mut ctx)),
             Launch::View(p) => App::Viewer(Viewer::open(&p, &mut ctx)),
             Launch::App(AppKind::Browser) => {
-                let mut b = Browser::new();
-                b.go(crate::apps::browser::HOME, &mut ctx);
+                let mut b = Browser::new(ctx.config);
+                let home = ctx.config.homepage.clone();
+                b.go(&home, &mut ctx);
                 App::Browser(b)
             }
             Launch::Browse(u) => {
-                let mut b = Browser::new();
+                let mut b = Browser::new(ctx.config);
                 b.go(&u, &mut ctx);
                 App::Browser(b)
             }
+            Launch::App(AppKind::Terminal) | Launch::Terminal(None) => {
+                App::Terminal(Terminal::new(&ctx.config.user, &ctx.config.hostname))
+            }
+            Launch::Terminal(Some(cmd)) => {
+                let mut t = Terminal::new(&ctx.config.user, &ctx.config.hostname);
+                t.run_command(&cmd, &mut ctx);
+                App::Terminal(t)
+            }
+            Launch::App(AppKind::Settings) => App::Settings(Settings::new(
+                crate::apps::settings::Section::System,
+                &mut ctx,
+            )),
+            Launch::Settings(n) => App::Settings(Settings::new(
+                crate::apps::settings::SECTIONS[n.min(9)],
+                &mut ctx,
+            )),
         };
         let (w, h) = app.default_size();
         let rect = self.wm.place(w, h);
@@ -914,6 +1329,9 @@ impl<D: BlockDevice> Desktop<D> {
                 && out.net.is_empty()
                 && out.tone.is_none()
                 && out.power.is_none()
+                && out.config.is_none()
+                && !out.lock
+                && !out.close_self
             {
                 self.out = out;
                 return;
@@ -945,12 +1363,35 @@ impl<D: BlockDevice> Desktop<D> {
             if let Some(p) = out.power {
                 self.power(p);
             }
+            if let Some(cfg) = out.config {
+                self.apply_config(cfg, now_ms);
+            }
+            if out.lock {
+                self.lock();
+            }
+            if out.close_self
+                && let Some(id) = self.wm.focused()
+            {
+                self.close_window(id, now_ms, clock);
+            }
         }
     }
 
     pub fn notify(&mut self, msg: impl Into<String>, error: bool, now_ms: u64) {
         let msg = msg.into();
         self.logs.push(format!("AVISO {msg}"));
+        let time = self
+            .last_clock
+            .map(|t| format!("{:02}:{:02}", t.hour, t.minute))
+            .unwrap_or_default();
+        self.notices.push((msg.clone(), error, time));
+        if self.notices.len() > 30 {
+            self.notices.remove(0);
+        }
+        if error && self.config.sounds {
+            self.requests.tone = Some(880);
+            self.beep_until = Some(now_ms + 120);
+        }
         self.toasts.push((msg, error, now_ms + TOAST_MS));
         if self.toasts.len() > 3 {
             self.toasts.remove(0);
@@ -960,8 +1401,9 @@ impl<D: BlockDevice> Desktop<D> {
     // --- mouse --------------------------------------------------------------------------------
 
     fn on_mouse(&mut self, p: MousePacket, now_ms: u64, clock: Option<DateTime>) {
-        self.cursor.0 = (self.cursor.0 + p.dx).clamp(0, self.width as i32 - 1);
-        self.cursor.1 = (self.cursor.1 + p.dy).clamp(0, self.height as i32 - 1);
+        let f = self.config.mouse_factor();
+        self.cursor.0 = (self.cursor.0 + p.dx * f / 4).clamp(0, self.width as i32 - 1);
+        self.cursor.1 = (self.cursor.1 + p.dy * f / 4).clamp(0, self.height as i32 - 1);
         self.cursor_visible = true;
         let (x, y) = self.cursor;
 
@@ -994,8 +1436,17 @@ impl<D: BlockDevice> Desktop<D> {
             let content = self.content_of(id);
             let tasks = self.tasks();
             let mut ctx = ctx!(self, now_ms, clock, &tasks);
+            let mut delta = p.wheel * self.config.wheel_lines as i32;
+            delta = if delta.abs() < 3 {
+                delta.signum()
+            } else {
+                delta / 3
+            };
+            if self.config.invert_wheel {
+                delta = -delta;
+            }
             let slot = &mut self.slots[i];
-            slot.app.wheel(p.wheel, content, &mut ctx);
+            slot.app.wheel(delta, content, &mut ctx);
             if slot.app.take_dirty() {
                 slot.content_dirty = true;
             }
@@ -1049,7 +1500,39 @@ impl<D: BlockDevice> Desktop<D> {
         // Menús y paneles encima de todo.
         match &self.overlay {
             Overlay::Lock => {
-                self.set_overlay(Overlay::None);
+                if self.config.pin.is_empty() {
+                    self.unlock();
+                }
+                return;
+            }
+            Overlay::Menu(menu) => {
+                let (w, h) = (self.width, self.height);
+                let hit = menu.hit(w, h, x, y).and_then(|i| menu.items.get(i));
+                let inside = menu.rect(w, h).contains(x, y);
+                match hit.map(|i| i.action.clone()) {
+                    Some(a) => self.menu_action(a, now_ms, clock),
+                    None if !inside => self.set_overlay(Overlay::None),
+                    None => {}
+                }
+                return;
+            }
+            Overlay::Quick { .. } => {
+                let (w, h) = (self.width, self.height);
+                if let Some(hit) = panels::quick_hit(w, h, x, y) {
+                    self.quick_hit(hit, now_ms, clock);
+                } else if !panels::quick_rect(w, h).contains(x, y) {
+                    self.set_overlay(Overlay::None);
+                }
+                return;
+            }
+            Overlay::Notices => {
+                let (w, h) = (self.width, self.height);
+                if panels::clear_button(w, h).contains(x, y) {
+                    self.notices.clear();
+                    self.overlay_dirty = true;
+                } else if !panels::notices_rect(w, h).contains(x, y) {
+                    self.set_overlay(Overlay::None);
+                }
                 return;
             }
             Overlay::Power { .. } => {
@@ -1176,7 +1659,12 @@ impl<D: BlockDevice> Desktop<D> {
 
         // El escritorio.
         self.wm.focus_desktop();
-        match shell::status_hit(self.width, self.height, x, y) {
+        let status = if self.config.status_panel {
+            shell::status_hit(self.width, self.height, x, y)
+        } else {
+            None
+        };
+        match status {
             Some(StatusHit::Panel) => self.launch(Launch::App(AppKind::Monitor), now_ms, clock),
             Some(StatusHit::MissionControl) => self.open_task_view(),
             None => {
@@ -1273,11 +1761,32 @@ impl<D: BlockDevice> Desktop<D> {
     pub fn render(
         &mut self,
         frame: &mut Canvas<'_>,
-        bg: &Canvas<'_>,
+        bg: &mut Canvas<'_>,
         now_ms: u64,
         clock: Option<DateTime>,
     ) -> Dirty {
         self.format = Some((frame.format(), frame.bytes_per_pixel()));
+        self.last_now = now_ms;
+        self.last_clock = clock;
+        if self.bg_dirty {
+            self.draw_background(bg);
+            self.full_redraw = true;
+        }
+        if let Some(t) = self.beep_until
+            && now_ms >= t
+        {
+            self.beep_until = None;
+            self.requests.tone = Some(0);
+        }
+        // Bloqueo por inactividad.
+        let idle_ms = self.config.lock_minutes as u64 * 60_000;
+        if idle_ms > 0
+            && now_ms.saturating_sub(self.last_input) >= idle_ms
+            && !matches!(self.overlay, Overlay::Lock)
+        {
+            self.lock();
+            self.logs.push("ESCRITORIO_BLOQUEO_INACTIVIDAD".into());
+        }
         if self.assistant.take_finished(now_ms) {
             self.logs.push("JARVIS_REPOSO".into());
         }
@@ -1303,7 +1812,8 @@ impl<D: BlockDevice> Desktop<D> {
 
         let (w, h) = (self.width, self.height);
         let screen = Rect::new(0, 0, w as i32, h as i32);
-        let view = hud::sphere_view(w, h, now_ms);
+        let anim_ms = if self.config.animations { now_ms } else { 0 };
+        let view = hud::sphere_view(w, h, anim_ms);
         let pulse = self.assistant.pulse(now_ms);
         let sphere = ParticleCloud::bounds(&view);
         let clock_rect = hud::clock_rect(w, h);
@@ -1317,7 +1827,12 @@ impl<D: BlockDevice> Desktop<D> {
             dirty.push(screen);
         }
         let fullscreen_overlay = self.overlay_is_fullscreen();
-        if !fullscreen_overlay && !self.wm.covers(&sphere) {
+        if self.assistant.is_speaking(now_ms) {
+            self.sphere_settle = 90;
+        }
+        let sphere_moves = self.config.animations || self.sphere_settle > 0;
+        self.sphere_settle = self.sphere_settle.saturating_sub(1);
+        if !fullscreen_overlay && !self.wm.covers(&sphere) && sphere_moves {
             dirty.push(sphere);
         }
         let clock_key = clock.map(|t| (t.year, t.month, t.day, t.hour, t.minute));
@@ -1333,7 +1848,7 @@ impl<D: BlockDevice> Desktop<D> {
         if self.drawn_message != Some(message_key) {
             dirty.push(message_rect);
         }
-        if self.drawn_stats != self.stats_version {
+        if self.drawn_stats != self.stats_version && self.config.status_panel {
             dirty.push(status_rect);
         }
         let toolbar = (self.toolbar_items(), self.toolbar_hover);
@@ -1371,7 +1886,15 @@ impl<D: BlockDevice> Desktop<D> {
         self.drawn_toasts = toasts;
 
         if core::mem::take(&mut self.screenshot) {
-            self.save_screenshot(frame, clock, now_ms);
+            self.save_screenshot(frame, clock, now_ms, None);
+        }
+        if core::mem::take(&mut self.window_screenshot) {
+            let area = self
+                .wm
+                .focused()
+                .and_then(|id| self.wm.get(id))
+                .map(|w| w.rect);
+            self.save_screenshot(frame, clock, now_ms, area);
         }
         dirty
     }
@@ -1381,6 +1904,9 @@ impl<D: BlockDevice> Desktop<D> {
         match &self.overlay {
             Overlay::Start(_) => StartMenu::rect(w, h).inset(-4),
             Overlay::Switcher { order, .. } => shell::switcher_rect(w, h, order.len()).inset(-8),
+            Overlay::Menu(m) => m.rect(w, h).inset(-4),
+            Overlay::Quick { .. } => panels::quick_rect(w, h).inset(-4),
+            Overlay::Notices => panels::notices_rect(w, h).inset(-4),
             _ => Rect::new(0, 0, w as i32, h as i32),
         }
     }
@@ -1406,6 +1932,7 @@ impl<D: BlockDevice> Desktop<D> {
             disk: disk.as_ref().map(|(l, f, t)| (l.as_str(), *f, *t)),
             now_ms,
             clock,
+            screen: (self.width, self.height),
         };
         let focused = self.wm.focused();
         for slot in &mut self.slots {
@@ -1475,7 +2002,17 @@ impl<D: BlockDevice> Desktop<D> {
         };
         match &self.overlay {
             Overlay::Lock => {
-                shell::draw_lock(frame, w, h, clock, &mut self.lock_font);
+                let pin =
+                    (!self.config.pin.is_empty()).then_some((self.pin_input.len(), self.pin_wrong));
+                shell::draw_lock(
+                    frame,
+                    w,
+                    h,
+                    clock,
+                    &mut self.lock_font,
+                    self.config.clock_24h,
+                    pin,
+                );
                 return;
             }
             Overlay::Power { sel } => {
@@ -1499,13 +2036,13 @@ impl<D: BlockDevice> Desktop<D> {
             self.cloud.draw(frame, view, pulse);
         }
         if dirty.touches(&hud::clock_rect(w, h)) {
-            hud::draw_clock(frame, &mut self.clock_face, clock);
+            hud::draw_clock(frame, &mut self.clock_face, clock, self.config.clock_24h);
         }
         if dirty.touches(&hud::message_rect(w, h)) {
             let speaking = self.assistant.is_speaking(now_ms);
             hud::draw_message(frame, self.assistant.visible_text(now_ms), speaking);
         }
-        if dirty.touches(&shell::status_rect(w, h)) {
+        if self.config.status_panel && dirty.touches(&shell::status_rect(w, h)) {
             let disk = self
                 .fs
                 .as_ref()
@@ -1545,6 +2082,15 @@ impl<D: BlockDevice> Desktop<D> {
                 let thumbs = self.thumbs(&order, format, bpp);
                 shell::draw_switcher(frame, w, h, &thumbs, sel);
             }
+            Overlay::Menu(m) => m.draw(frame, w, h),
+            Overlay::Quick { sel } => {
+                let net = match self.stats.net.ip {
+                    Some(a) => format!("RED {}", crate::widgets::ip(a)),
+                    None => "SIN RED".into(),
+                };
+                panels::draw_quick(frame, w, h, &self.config, *sel, &net);
+            }
+            Overlay::Notices => panels::draw_notices(frame, w, h, &self.notices, clock),
             _ => {}
         }
     }
@@ -1577,7 +2123,13 @@ impl<D: BlockDevice> Desktop<D> {
         found.into_iter().map(|(_, t)| t).collect()
     }
 
-    fn save_screenshot(&mut self, frame: &Canvas<'_>, clock: Option<DateTime>, now_ms: u64) {
+    fn save_screenshot(
+        &mut self,
+        frame: &Canvas<'_>,
+        clock: Option<DateTime>,
+        now_ms: u64,
+        area: Option<Rect>,
+    ) {
         let Some(fs) = self.fs.as_mut() else {
             self.notify("No hay disco para guardar la captura.", true, now_ms);
             return;
@@ -1592,7 +2144,34 @@ impl<D: BlockDevice> Desktop<D> {
             let _ = fs.mkdir(dir, ts);
         }
         let path = format!("{dir}/{name}");
-        let data = crate::bmp::encode(frame);
+        let data = match area.and_then(|a| {
+            a.intersection(&Rect::new(
+                0,
+                0,
+                frame.width() as i32,
+                frame.height() as i32,
+            ))
+        }) {
+            Some(a) => {
+                let bpp = frame.bytes_per_pixel();
+                let mut buf = alloc::vec![0u8; (a.w * a.h) as usize * bpp];
+                match Canvas::new(
+                    &mut buf,
+                    a.w as usize,
+                    a.h as usize,
+                    a.w as usize,
+                    bpp,
+                    frame.format(),
+                ) {
+                    Some(mut c) => {
+                        c.blit(frame, -a.x, -a.y);
+                        crate::bmp::encode(&c)
+                    }
+                    None => crate::bmp::encode(frame),
+                }
+            }
+            None => crate::bmp::encode(frame),
+        };
         match fs.write_file(&path, &data, ts) {
             Ok(()) => {
                 self.logs.push(format!("CAPTURA {path}"));

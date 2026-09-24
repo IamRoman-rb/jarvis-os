@@ -1,0 +1,1 @@
+sl.sh -> /Programas/bin/sl

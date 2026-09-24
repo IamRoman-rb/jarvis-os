@@ -332,6 +332,10 @@ impl Session {
                 ':' => "shift-semicolon".to_string(),
                 ' ' => "spc".to_string(),
                 '_' => "shift-minus".to_string(),
+                '>' => "shift-dot".to_string(),
+                '|' => "shift-backslash".to_string(),
+                '"' => "shift-apostrophe".to_string(),
+                '=' => "equal".to_string(),
                 c if c.is_ascii_uppercase() => format!("shift-{}", c.to_ascii_lowercase()),
                 c => c.to_string(),
             };
@@ -389,6 +393,8 @@ const TEST_PAGE: &str = "<!DOCTYPE html><html><head><title>Red de JARVIS-OS</tit
 /// 7. se cierra QEMU y `fatfs` verifica en el disco que `/prueba` y la captura quedaron escritas.
 fn test(image: &Path, disk: &Path) -> Result<()> {
     let port = puente::test_server(TEST_PAGE)?;
+    // El puente sirve el repositorio de paquetes (apt).
+    puente::start();
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.wait_for("RED_IP 10.0.2.15", STEP)?;
@@ -417,13 +423,81 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("VENTANA_FOCO", STEP)?;
     s.monitor("sendkey meta_l-d")?;
     s.wait_for("ESCRITORIO_MOSTRAR", STEP)?;
+
+    // Terminal (Ctrl+Alt+T): una redirección escribe en el disco.
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    s.type_text("echo hola terminal > saludo.txt")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // apt: instala un paquete del repositorio (lo sirve el puente) y se ejecuta.
+    s.type_text("apt install hola")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO hola", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("hola")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL hola", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // Configuración (Win+I).
+    s.monitor("sendkey meta_l-i")?;
+    s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
+
     s.monitor("sendkey print")?;
     s.wait_for("CAPTURA /Imágenes/", STEP)?;
     s.quit();
     drop(s);
     verify_dir_on_disk(disk, "prueba")?;
     verify_capture_on_disk(disk)?;
-    println!("ok: arranque, red, teclado, mouse, ventanas, navegador y disco verificados");
+    verify_file_on_disk(disk, "saludo.txt", b"hola terminal\n")?;
+    verify_file_exists(disk, "Programas/bin/hola")?;
+    println!(
+        "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, configuración y disco verificados"
+    );
+    Ok(())
+}
+
+fn open_fatfs(disk: &Path) -> Result<fs::File> {
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(disk)
+        .map_err(|e| format!("disco {}: {e}", disk.display()))
+}
+
+/// Verifica con `fatfs` el contenido de un archivo.
+fn verify_file_on_disk(disk: &Path, path: &str, want: &[u8]) -> Result<()> {
+    let mut file = open_fatfs(disk)?;
+    let fs =
+        fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(|e| e.to_string())?;
+    let mut data = Vec::new();
+    fs.root_dir()
+        .open_file(path)
+        .map_err(|e| format!("no quedó /{path}: {e}"))?
+        .read_to_end(&mut data)
+        .map_err(|e| e.to_string())?;
+    if data != want {
+        return Err(format!(
+            "/{path} tiene {:?}, se esperaba {:?}",
+            String::from_utf8_lossy(&data),
+            String::from_utf8_lossy(want)
+        ));
+    }
+    println!(
+        "[disco] /{path} = {:?} (verificado con fatfs)",
+        String::from_utf8_lossy(&data)
+    );
+    Ok(())
+}
+
+fn verify_file_exists(disk: &Path, path: &str) -> Result<()> {
+    let mut file = open_fatfs(disk)?;
+    let fs =
+        fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(|e| e.to_string())?;
+    fs.root_dir()
+        .open_file(path)
+        .map_err(|e| format!("no quedó /{path}: {e}"))?;
+    println!("[disco] /{path} existe (verificado con fatfs)");
     Ok(())
 }
 
@@ -493,6 +567,7 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     // Archivos: /Documentos con "Bienvenida.txt" seleccionado (vista previa en el inspector).
     s.monitor("sendkey tab")?;
     s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
+    s.type_text("doc")?; // buscar tipeando: /Documentos (antes está /Descargas)
     s.monitor("sendkey ret")?;
     s.wait_for("ARCHIVOS_ABIERTO /Documentos", STEP)?;
     s.monitor("sendkey down")?;
@@ -544,6 +619,68 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
             Err(e) => println!("(sin internet para {url}: {e})"),
         }
     }
+
+    // Google con sus estilos (internet de verdad, opcional).
+    s.monitor("sendkey ctrl-l")?;
+    s.type_text("https://www.google.com/")?;
+    s.monitor("sendkey ret")?;
+    match s.wait_for("RED_RESPUESTA", Duration::from_secs(30)) {
+        Ok(()) => {
+            thread::sleep(Duration::from_secs(4)); // hojas de estilo e imágenes
+            shot(&mut s, "jarvis-os-google.png")?;
+        }
+        Err(e) => println!("(sin internet para Google: {e})"),
+    }
+
+    // Terminal: apt instala programas y fondos del repositorio; neofetch y cowsay.
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    s.type_text("apt install esenciales fondos")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO fondos", Duration::from_secs(60))?;
+    s.wait_for("TERMINAL_FIN", STEP)?;
+    s.type_text("clear")?;
+    s.monitor("sendkey ret")?;
+    s.type_text("neofetch")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN", STEP)?;
+    s.type_text("fortune | cowsay")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN", STEP)?;
+    thread::sleep(Duration::from_millis(600));
+    shot(&mut s, "jarvis-os-terminal.png")?;
+
+    // Configuración: Personalización, con un fondo de pantalla instalado.
+    s.monitor("sendkey meta_l-i")?;
+    s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
+    s.monitor("sendkey pgdn")?;
+    for _ in 0..7 {
+        s.monitor("sendkey right")?;
+        thread::sleep(Duration::from_millis(150));
+    }
+    s.wait_for("CONFIG_GUARDADA", STEP)?;
+    thread::sleep(Duration::from_millis(800));
+    shot(&mut s, "jarvis-os-configuracion.png")?;
+
+    // Paneles: Win+X, Win+A, Win+N (sobre el escritorio con el fondo nuevo).
+    s.monitor("sendkey meta_l-d")?;
+    s.wait_for("ESCRITORIO_MOSTRAR", STEP)?;
+    thread::sleep(Duration::from_millis(600));
+    shot(&mut s, "jarvis-os-fondo.png")?;
+    for (key, marker, name) in [
+        ("meta_l-x", "enlaces", "jarvis-os-win-x.png"),
+        ("meta_l-a", "rapida", "jarvis-os-win-a.png"),
+        ("meta_l-n", "notificaciones", "jarvis-os-win-n.png"),
+    ] {
+        s.monitor(&format!("sendkey {key}"))?;
+        s.wait_for(&format!("ESCRITORIO_MENU {marker}"), STEP)?;
+        thread::sleep(Duration::from_millis(600));
+        shot(&mut s, name)?;
+        s.monitor("sendkey esc")?;
+        thread::sleep(Duration::from_millis(300));
+    }
+    s.monitor("sendkey meta_l-d")?;
+    s.wait_for("ESCRITORIO_MOSTRAR", STEP)?;
 
     // Alt+Tab con Alt apretado (sendkey con tiempo de espera: mantiene las teclas).
     s.monitor("sendkey alt-tab 3000")?;
@@ -604,9 +741,19 @@ fn ppm_to_png(ppm: &Path, png_path: &Path) -> Result<()> {
 
 // --- disco virtual ---------------------------------------------------------------------------
 
-const DISK_MIB: u64 = 64;
+/// Tamaño de los discos nuevos. (Uno que ya existe no cambia: `cargo xtask disk --reset` crea
+/// uno nuevo, pero borra lo que tenía.)
+const DISK_MIB: u64 = 256;
+/// Clusters de 2 KiB: con 256 MiB quedan ~130 000 (FAT32 necesita al menos 65 525).
+const CLUSTER: u32 = 2048;
 /// Carpetas que se crean aunque estén vacías (git no guarda carpetas vacías).
-const EMPTY_DIRS: [&str; 2] = ["Papelera", "Facultad/Algoritmos"];
+const EMPTY_DIRS: [&str; 5] = [
+    "Papelera",
+    "Facultad/Algoritmos",
+    "Descargas",
+    "Programas/bin",
+    "Sistema/paquetes",
+];
 
 /// El disco persistente de `run`. Si ya existe no se toca: así lo que hagas queda guardado.
 fn disk_image(reset: bool) -> Result<PathBuf> {
@@ -619,10 +766,25 @@ fn disk_image(reset: bool) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Un disco recién creado (tests y capturas: siempre parten del mismo estado).
+/// Un disco recién creado (tests y capturas: siempre parten del mismo estado). El teclado queda
+/// en EE. UU.: QEMU manda las teclas por su nombre en esa distribución (`sendkey slash`).
 fn fresh_disk(name: &str) -> Result<PathBuf> {
     let path = target_dir().join(name);
     create_disk(&path)?;
+    let mut file = open_fatfs(&path)?;
+    let fs =
+        fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(|e| e.to_string())?;
+    let mut cfg = fs
+        .root_dir()
+        .open_dir("Sistema")
+        .and_then(|d| d.create_file("config.ini"))
+        .map_err(|e| e.to_string())?;
+    cfg.write_all(
+        b"# Pruebas automaticas: QEMU tipea con nombres de teclas de EE. UU.\nteclado=us\n",
+    )
+    .map_err(|e| e.to_string())?;
+    drop(cfg);
+    fs.unmount().map_err(|e| e.to_string())?;
     Ok(path)
 }
 
@@ -640,7 +802,7 @@ fn create_disk(path: &Path) -> Result<()> {
     file.set_len(DISK_MIB * 1024 * 1024).map_err(io)?;
     let opts = fatfs::FormatVolumeOptions::new()
         .fat_type(fatfs::FatType::Fat32)
-        .bytes_per_cluster(512)
+        .bytes_per_cluster(CLUSTER)
         .volume_label(*b"JARVIS     ");
     fatfs::format_volume(&mut file, opts).map_err(io)?;
     let fs = fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(io)?;

@@ -59,11 +59,15 @@ pub struct Window {
     pub restore: Option<Rect>,
     pub maximized: bool,
     pub minimized: bool,
+    /// En qué escritorio virtual está (Win+Ctrl+D crea otro).
+    pub desktop: usize,
+    /// Está en otro escritorio virtual (no se ve ni se puede tocar).
+    pub away: bool,
 }
 
 impl Window {
     pub fn visible(&self) -> bool {
-        !self.minimized
+        !self.minimized && !self.away
     }
 
     /// Rectángulos de los botones: (minimizar, maximizar, cerrar).
@@ -122,6 +126,9 @@ pub struct WindowManager {
     /// Ventanas que minimizó "mostrar el escritorio" (Win+D), para volver a mostrarlas.
     peeked: Vec<WinId>,
     cascade: i32,
+    /// Escritorio virtual actual y cuántos hay.
+    current: usize,
+    desktops: usize,
 }
 
 impl WindowManager {
@@ -135,6 +142,8 @@ impl WindowManager {
             next_id: 1,
             peeked: Vec::new(),
             cascade: 0,
+            current: 0,
+            desktops: 1,
         }
     }
 
@@ -164,6 +173,90 @@ impl WindowManager {
         &self.mru
     }
 
+    /// Como [`mru`](Self::mru), pero solo las del escritorio virtual actual (Alt+Tab).
+    pub fn mru_here(&self) -> Vec<WinId> {
+        self.mru
+            .iter()
+            .copied()
+            .filter(|&id| self.get(id).is_some_and(|w| !w.away))
+            .collect()
+    }
+
+    /// (escritorio actual, cuántos hay), contando desde 0.
+    pub fn desktops(&self) -> (usize, usize) {
+        (self.current, self.desktops)
+    }
+
+    /// Win+Ctrl+D: un escritorio virtual nuevo, vacío, y se pasa a él.
+    pub fn new_desktop(&mut self) {
+        self.desktops += 1;
+        self.switch_desktop(self.desktops - 1);
+    }
+
+    /// Win+Ctrl+← / →.
+    pub fn switch_desktop(&mut self, n: usize) {
+        if n >= self.desktops {
+            return;
+        }
+        self.current = n;
+        for w in &mut self.windows {
+            w.away = w.desktop != n;
+        }
+        self.peeked.clear();
+        self.focus_top();
+    }
+
+    /// Win+Ctrl+F4: cierra el escritorio actual; sus ventanas pasan al de la izquierda.
+    pub fn close_desktop(&mut self) {
+        if self.desktops <= 1 {
+            return;
+        }
+        let closing = self.current;
+        let target = closing.saturating_sub(1);
+        for w in &mut self.windows {
+            if w.desktop == closing {
+                w.desktop = target;
+            } else if w.desktop > closing {
+                w.desktop -= 1;
+            }
+        }
+        self.desktops -= 1;
+        self.switch_desktop(target);
+    }
+
+    /// Win+Home: minimiza todas menos la que tiene el foco.
+    pub fn minimize_others(&mut self) {
+        let keep = self.focus;
+        for w in &mut self.windows {
+            if Some(w.id) != keep && !w.away {
+                w.minimized = true;
+            }
+        }
+    }
+
+    /// Win+Shift+M: vuelve a mostrar las minimizadas.
+    pub fn restore_all(&mut self) {
+        for w in &mut self.windows {
+            if !w.away {
+                w.minimized = false;
+            }
+        }
+        self.peeked.clear();
+        self.focus_top();
+    }
+
+    /// Win+Shift+↑: estira la ventana de arriba a abajo (mismo ancho).
+    pub fn stretch_vertical(&mut self, id: WinId) {
+        let work = self.work;
+        let Some(w) = self.get_mut(id) else { return };
+        if w.restore.is_none() {
+            w.restore = Some(w.rect);
+        }
+        w.maximized = false;
+        w.rect.y = work.y;
+        w.rect.h = work.h;
+    }
+
     /// Un lugar razonable para una ventana nueva de `w` × `h`: centrada en la zona de trabajo y
     /// corrida un poco respecto de la anterior (en cascada), como hace Windows.
     pub fn place(&mut self, w: i32, h: i32) -> Rect {
@@ -191,6 +284,8 @@ impl WindowManager {
             restore: None,
             maximized: false,
             minimized: false,
+            desktop: self.current,
+            away: false,
         });
         self.set_focus(Some(id));
         self.peeked.clear();
@@ -230,6 +325,13 @@ impl WindowManager {
 
     /// Trae la ventana adelante, la restaura si estaba minimizada y le da el foco.
     pub fn activate(&mut self, id: WinId) {
+        let Some(pos) = self.windows.iter().position(|w| w.id == id) else {
+            return;
+        };
+        let desktop = self.windows[pos].desktop;
+        if desktop != self.current {
+            self.switch_desktop(desktop);
+        }
         let Some(pos) = self.windows.iter().position(|w| w.id == id) else {
             return;
         };
@@ -360,7 +462,9 @@ impl WindowManager {
     /// Win+M: minimiza todo (sin recordar qué).
     pub fn minimize_all(&mut self) {
         for w in &mut self.windows {
-            w.minimized = true;
+            if !w.away {
+                w.minimized = true;
+            }
         }
         self.focus = None;
         self.peeked.clear();
@@ -496,5 +600,30 @@ mod tests {
         wm.resize(ids[0], 10, 10);
         let r = wm.get(ids[0]).unwrap().rect;
         assert_eq!((r.w, r.h), (MIN_W, MIN_H));
+    }
+
+    #[test]
+    fn escritorios_virtuales() {
+        let (mut wm, ids) = wm_with(2);
+        wm.new_desktop();
+        assert_eq!(wm.desktops(), (1, 2));
+        assert_eq!(wm.focused(), None, "el escritorio nuevo está vacío");
+        assert!(wm.windows().iter().all(|w| !w.visible()));
+        let c = wm.open(Rect::new(0, 100, 500, 400));
+        assert_eq!(wm.mru_here(), [c]);
+        wm.switch_desktop(0);
+        assert_eq!(wm.focused(), Some(ids[1]));
+        assert!(!wm.get(c).unwrap().visible());
+        // Activar una ventana de otro escritorio lleva a ese escritorio.
+        wm.activate(c);
+        assert_eq!(wm.desktops(), (1, 2));
+        // Cerrar el escritorio: sus ventanas pasan al de la izquierda.
+        wm.close_desktop();
+        assert_eq!(wm.desktops(), (0, 1));
+        assert!(wm.windows().iter().all(|w| w.visible()));
+        wm.minimize_others();
+        assert_eq!(wm.windows().iter().filter(|w| w.visible()).count(), 1);
+        wm.restore_all();
+        assert_eq!(wm.windows().iter().filter(|w| w.visible()).count(), 3);
     }
 }

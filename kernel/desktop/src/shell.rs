@@ -34,14 +34,16 @@ pub enum Launcher {
 }
 
 /// Los íconos fijos de la barra, en orden (los de la imagen de referencia + inicio y la web).
-pub const LAUNCHERS: [Launcher; 8] = [
+pub const LAUNCHERS: [Launcher; 10] = [
     Launcher::Start,
     Launcher::App(AppKind::Console),
+    Launcher::App(AppKind::Terminal),
     Launcher::App(AppKind::Monitor),
     Launcher::Capture,
     Launcher::App(AppKind::Files),
     Launcher::App(AppKind::Music),
     Launcher::App(AppKind::Browser),
+    Launcher::App(AppKind::Settings),
     Launcher::Jarvis,
 ];
 
@@ -60,6 +62,8 @@ pub fn launcher_name(l: Launcher) -> &'static str {
         Launcher::App(AppKind::Console) => "Consola JARVIS (Win+R)",
         Launcher::App(AppKind::Monitor) => "Monitor (Ctrl+Shift+Esc)",
         Launcher::App(AppKind::Files) => "Archivos (Win+E)",
+        Launcher::App(AppKind::Terminal) => "Terminal (Ctrl+Alt+T)",
+        Launcher::App(AppKind::Settings) => "Configuración (Win+I)",
         Launcher::App(k) => name_of(k),
         Launcher::Capture => "Captura (Impr Pant)",
         Launcher::Jarvis => "JARVIS · escritorio (Win+D)",
@@ -325,9 +329,11 @@ pub struct StartMenu {
     pub selected: usize,
 }
 
-const MENU_APPS: [AppKind; 6] = [
+const MENU_APPS: [AppKind; 8] = [
     AppKind::Files,
     AppKind::Browser,
+    AppKind::Terminal,
+    AppKind::Settings,
     AppKind::Monitor,
     AppKind::Console,
     AppKind::Editor,
@@ -599,14 +605,23 @@ pub fn draw_lock(
     h: usize,
     now: Option<DateTime>,
     big: &mut VectorText,
+    h24: bool,
+    // Con PIN: (cuántos dígitos se escribieron, el último estuvo mal).
+    pin: Option<(usize, bool)>,
 ) {
+    use core::fmt::Write;
     let (w, h) = (w as i32, h as i32);
     c.fill_rect(0, 0, w, h, theme::VOID);
     jarvis_gfx::shapes::glow(c, w / 2, h / 2, h / 2, Color::hex(0x0a2a66), 70);
     let mut time = StrBuf::<8>::new();
     let mut date = StrBuf::<48>::new();
     if let Some(t) = now {
-        let _ = t.write_time(&mut time);
+        if h24 {
+            let _ = t.write_time(&mut time);
+        } else {
+            let hour = if t.hour % 12 == 0 { 12 } else { t.hour % 12 };
+            let _ = write!(time, "{hour}:{:02}", t.minute);
+        }
         let _ = t.write_date(&mut date);
     }
     let tw = big.width(time.as_str());
@@ -614,9 +629,30 @@ pub fn draw_lock(
     let st = label(theme::CYAN.scale(200));
     let dw = text::width(date.as_str(), &st);
     text::draw(c, (w - dw) / 2, h / 2 + 10, date.as_str(), &st);
-    let hint = "JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC";
+    let hint = match pin {
+        None => "JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC",
+        Some(_) => "JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER",
+    };
     let st = label(theme::TEXT_DIM);
     text::draw(c, (w - text::width(hint, &st)) / 2, h - 90, hint, &st);
+    if let Some((n, wrong)) = pin {
+        let f = Rect::new((w - 260) / 2, h / 2 + 60, 260, 44);
+        rounded_rect(c, f.x, f.y, f.w, f.h, 8, FIELD_BG, 255);
+        let rim = if wrong { theme::AMBER } else { theme::CYAN };
+        rounded_outline(c, f.x, f.y, f.w, f.h, 8, rim);
+        for i in 0..n as i32 {
+            circle(c, f.x + 24 + i * 30, f.y + f.h / 2, 6, theme::TEXT, true);
+        }
+        if n == 0 {
+            let st = light(theme::TEXT_DIM);
+            text::draw(c, f.x + 16, f.y + 13, "PIN", &st);
+        }
+        if wrong {
+            let msg = "PIN INCORRECTO. PROBÁ OTRA VEZ.";
+            let st = label(theme::AMBER);
+            text::draw(c, (w - text::width(msg, &st)) / 2, f.y + f.h + 16, msg, &st);
+        }
+    }
 }
 
 pub fn power_rect(w: usize, h: usize) -> Rect {
