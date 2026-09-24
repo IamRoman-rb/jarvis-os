@@ -1,9 +1,10 @@
 //! `cargo xtask <comando>`: arma la imagen booteable de JARVIS-OS y la corre en QEMU.
 //!
 //! - `build`       compila el kernel y crea `target/jarvis-os-uefi.img`
-//! - `run`         abre QEMU con ventana y el disco persistente `target/disco.img`
-//! - `test`        de punta a punta sin ventana: teclado, mouse, Archivos y disco (CI)
-//! - `screenshot`  capturas: JARVIS en reposo y hablando, Archivos y un diálogo (en `target/`)
+//! - `run`         abre QEMU con ventana, el disco persistente `target/disco.img`, red, sonido y
+//!   el puente HTTPS del navegador (ver `puente.rs`)
+//! - `test`        de punta a punta sin ventana: teclado, mouse, ventanas, disco y red (CI)
+//! - `screenshot`  capturas del escritorio, las apps y los menús (en `target/`)
 //! - `vdi`         convierte la imagen a `target/jarvis-os.vdi` para VirtualBox
 //! - `disk`        crea el disco virtual `target/disco.img` si no existe (`--reset` lo regenera)
 
@@ -16,6 +17,8 @@ use std::process::{Child, Command, ExitCode, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
+
+mod puente;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -135,6 +138,17 @@ fn ovmf() -> Result<(PathBuf, Option<PathBuf>)> {
 }
 
 fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
+    // Sonido (el parlante de la PC): solo con ventana. En Windows, DirectSound; en otros
+    // sistemas, el que diga QEMU_AUDIO (por ejemplo "pa" o "alsa"), o ninguno.
+    let audio = if headless {
+        None
+    } else if let Ok(driver) = env::var("QEMU_AUDIO") {
+        Some(driver)
+    } else if cfg!(windows) {
+        Some("dsound".to_string())
+    } else {
+        None
+    };
     let (code, vars) = ovmf()?;
     let mut cmd = Command::new(qemu_binary());
     if cfg!(windows) {
@@ -142,19 +156,21 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         // está disponible, QEMU sigue con el siguiente acelerador (tcg: emulación por software).
         cmd.args(["-accel", "whpx,kernel-irqchip=off", "-accel", "tcg"]);
     }
+    let machine = match &audio {
+        Some(driver) => {
+            cmd.arg("-audiodev").arg(format!("{driver},id=sonido"));
+            "q35,pcspk-audiodev=sonido"
+        }
+        None => "q35",
+    };
     cmd.args([
-        "-machine",
-        "q35",
-        "-m",
-        "512M",
-        "-rtc",
-        "base=utc",
-        "-no-reboot",
-        "-serial",
-        "stdio",
-    ])
-    .arg("-drive")
-    .arg(format!(
+        "-machine", machine, "-m", "1G", "-rtc", "base=utc", "-serial", "stdio",
+    ]);
+    if headless {
+        // En los tests, un reinicio es un error (triple fault): mejor que QEMU termine.
+        cmd.arg("-no-reboot");
+    }
+    cmd.arg("-drive").arg(format!(
         "if=pflash,format=raw,readonly=on,file={}",
         code.display()
     ));
@@ -172,6 +188,14 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
             disk.display()
         ))
         .args(["-device", "virtio-blk-pci,drive=disco,disable-modern=on"]);
+    // Placa de red virtio-net con la red "user" de QEMU: DHCP (10.0.2.15), DNS (10.0.2.3) y
+    // salida a internet por el anfitrión, que se ve como 10.0.2.2.
+    cmd.args([
+        "-netdev",
+        "user,id=red",
+        "-device",
+        "virtio-net-pci,netdev=red,disable-modern=on",
+    ]);
     if headless {
         cmd.args(["-display", "none"]);
     }
@@ -179,6 +203,7 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
 }
 
 fn run(image: &Path, disk: &Path) -> Result<()> {
+    puente::start();
     let status = qemu(image, disk, false)?
         .status()
         .map_err(|e| format!("no pude abrir QEMU ({}): {e}", qemu_binary().display()))?;
@@ -297,15 +322,19 @@ impl Session {
 }
 
 impl Session {
-    /// Tipea `text` tecla por tecla (letras minúsculas, dígitos y guiones).
+    /// Tipea `text` tecla por tecla (minúsculas, dígitos, espacios y `- . : /`).
     fn type_text(&mut self, text: &str) -> Result<()> {
         for c in text.chars() {
-            let key = if c == '-' {
-                "minus".to_string()
-            } else {
-                c.to_string()
+            let key = match c {
+                '-' => "minus".to_string(),
+                '.' => "dot".to_string(),
+                '/' => "slash".to_string(),
+                ':' => "shift-semicolon".to_string(),
+                ' ' => "spc".to_string(),
+                c => c.to_string(),
             };
             self.monitor(&format!("sendkey {key}"))?;
+            thread::sleep(Duration::from_millis(20));
         }
         Ok(())
     }
@@ -332,15 +361,35 @@ impl Drop for Session {
 
 const STEP: Duration = Duration::from_secs(20);
 
+/// Página que sirve el anfitrión en los tests y las capturas del navegador.
+const TEST_PAGE: &str = "<!DOCTYPE html><html><head><title>Red de JARVIS-OS</title></head><body>\
+<h1>La red de JARVIS-OS funciona</h1>\
+<p>Esta página viajó desde la computadora anfitriona hasta el kernel por la placa de red \
+<b>virtio-net</b>, la pila <b>TCP/IP</b> (smoltcp) y el cliente <b>HTTP</b> propio.</p>\
+<h2>Qué pasó para que la veas</h2><ol>\
+<li>El kernel pidió una dirección IP por DHCP (10.0.2.15).</li>\
+<li>Abrió una conexión TCP con el anfitrión (10.0.2.2).</li>\
+<li>Mandó <b>GET /</b> y juntó la respuesta.</li>\
+<li>El navegador convirtió el HTML en texto con títulos, listas y enlaces.</li></ol>\
+<h2>Enlaces</h2><ul><li><a href=\"http://example.com/\">example.com</a></li>\
+<li><a href=\"https://es.wikipedia.org/wiki/Kernel\">Wikipedia: Kernel</a></li></ul>\
+<blockquote>Todo esto corre sobre un kernel escrito desde cero en Rust.</blockquote>\
+</body></html>";
+
 /// Prueba de punta a punta, como la usaría una persona:
-/// 1. arranca y dibuja el HUD; Espacio → JARVIS habla (IRQ1 → asistente);
-/// 2. Tab → se abre Archivos y el kernel lee la raíz del disco (virtio-blk + FAT32);
-/// 3. F7, "prueba", Enter → se crea una carpeta (escritura en el disco);
-/// 4. el mouse se mueve y hace clic en una fila (IRQ12 → paquetes → selección);
-/// 5. se cierra QEMU y `fatfs` verifica en el archivo del disco que `/prueba` quedó escrita.
+/// 1. arranca, dibuja el HUD y consigue una IP por DHCP (virtio-net + smoltcp);
+/// 2. Espacio → JARVIS habla (IRQ1 → asistente);
+/// 3. Tab → Archivos lee la raíz del disco; F7, "prueba", Enter → crea una carpeta;
+/// 4. el mouse hace clic en una fila (IRQ12 → paquetes → selección);
+/// 5. Win+R → Consola; "ir http://10.0.2.2:PUERTO/" → el navegador descarga la página que
+///    sirve este mismo xtask (DNS no: es una IP; TCP y HTTP sí);
+/// 6. Alt+Tab cambia de ventana; Win+D muestra el escritorio; Impr Pant guarda una captura;
+/// 7. se cierra QEMU y `fatfs` verifica en el disco que `/prueba` y la captura quedaron escritas.
 fn test(image: &Path, disk: &Path) -> Result<()> {
+    let port = puente::test_server(TEST_PAGE)?;
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.wait_for("RED_IP 10.0.2.15", STEP)?;
     s.monitor("sendkey spc")?;
     s.wait_for("JARVIS_HABLA", STEP)?;
     s.monitor("sendkey tab")?;
@@ -349,16 +398,61 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.type_text("prueba")?;
     s.monitor("sendkey ret")?;
     s.wait_for("ARCHIVOS_CREADO /prueba", STEP)?;
-    // El cursor arranca en el centro (640, 400); la fila 2 de la lista está en y ≈ 350.
+    // El cursor arranca en el centro (640, 400); ahí hay una fila de la lista de Archivos.
     s.monitor("mouse_move -40 -50")?;
     thread::sleep(Duration::from_millis(200));
     s.monitor("mouse_button 1")?;
     s.monitor("mouse_button 0")?;
     s.wait_for("ARCHIVOS_SELECCION", STEP)?;
+
+    s.monitor("sendkey meta_l-r")?;
+    s.wait_for("VENTANA_ABIERTA Consola JARVIS", STEP)?;
+    s.type_text(&format!("ir http://10.0.2.2:{port}/"))?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("VENTANA_ABIERTA Navegador", STEP)?;
+    s.wait_for("RED_RESPUESTA 200", STEP)?;
+    s.monitor("sendkey alt-tab")?;
+    s.wait_for("VENTANA_FOCO", STEP)?;
+    s.monitor("sendkey meta_l-d")?;
+    s.wait_for("ESCRITORIO_MOSTRAR", STEP)?;
+    s.monitor("sendkey print")?;
+    s.wait_for("CAPTURA /Imágenes/", STEP)?;
     s.quit();
     drop(s);
     verify_dir_on_disk(disk, "prueba")?;
-    println!("ok: arranque, teclado, mouse, Archivos y escritura en disco verificados");
+    verify_capture_on_disk(disk)?;
+    println!("ok: arranque, red, teclado, mouse, ventanas, navegador y disco verificados");
+    Ok(())
+}
+
+/// Verifica con `fatfs` que en /Imágenes haya una captura BMP.
+fn verify_capture_on_disk(disk: &Path) -> Result<()> {
+    let io = |e: std::io::Error| format!("disco {}: {e}", disk.display());
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(disk)
+        .map_err(io)?;
+    let fs = fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(io)?;
+    let dir = fs
+        .root_dir()
+        .open_dir("Imágenes")
+        .map_err(|e| format!("no hay /Imágenes: {e}"))?;
+    let capture = dir
+        .iter()
+        .filter_map(|e| e.ok())
+        .find(|e| e.file_name().starts_with("Captura") && e.file_name().ends_with(".bmp"))
+        .ok_or("no quedó la captura en /Imágenes")?;
+    let mut data = Vec::new();
+    capture.to_file().read_to_end(&mut data).map_err(io)?;
+    if !data.starts_with(b"BM") {
+        return Err("la captura no es un BMP".into());
+    }
+    println!(
+        "[disco] /Imágenes/{} ({} bytes, verificado con fatfs)",
+        capture.file_name(),
+        data.len()
+    );
     Ok(())
 }
 
@@ -378,17 +472,20 @@ fn verify_dir_on_disk(disk: &Path, dir: &str) -> Result<()> {
     Ok(())
 }
 
-/// Capturas: JARVIS en reposo y hablando, el gestor de archivos y un diálogo.
+/// Capturas: JARVIS en reposo y hablando, Archivos y un diálogo, el monitor, el navegador, el
+/// menú de inicio, Alt+Tab y la vista de tareas.
 fn screenshot(image: &Path, disk: &Path) -> Result<()> {
+    let port = puente::test_server(TEST_PAGE)?;
+    let shot = |s: &mut Session, name: &str| s.screenshot(&target_dir().join(name));
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.wait_for("JARVIS_REPOSO", Duration::from_secs(30))?;
-    thread::sleep(Duration::from_millis(600)); // que termine de apagarse el brillo
-    s.screenshot(&target_dir().join("jarvis-os.png"))?;
+    thread::sleep(Duration::from_millis(1500)); // que termine de apagarse el brillo
+    shot(&mut s, "jarvis-os.png")?;
     s.monitor("sendkey spc")?;
     s.wait_for("JARVIS_HABLA", STEP)?;
     thread::sleep(Duration::from_millis(1200)); // a mitad de la frase
-    s.screenshot(&target_dir().join("jarvis-os-hablando.png"))?;
+    shot(&mut s, "jarvis-os-hablando.png")?;
 
     // Archivos: /Documentos con "Bienvenida.txt" seleccionado (vista previa en el inspector).
     s.monitor("sendkey tab")?;
@@ -399,12 +496,45 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("ARCHIVOS_SELECCION Bienvenida.txt", STEP)?;
     s.monitor("mouse_move 150 80")?; // que se vea el cursor
     thread::sleep(Duration::from_millis(500));
-    s.screenshot(&target_dir().join("jarvis-os-archivos.png"))?;
-
+    shot(&mut s, "jarvis-os-archivos.png")?;
     s.monitor("sendkey f7")?;
     s.type_text("tareas")?;
     thread::sleep(Duration::from_millis(500));
-    s.screenshot(&target_dir().join("jarvis-os-dialogo.png"))
+    shot(&mut s, "jarvis-os-dialogo.png")?;
+    s.monitor("sendkey esc")?;
+
+    // Monitor del sistema (Ctrl+Shift+Esc), con unos segundos de historia en los gráficos.
+    s.monitor("sendkey ctrl-shift-esc")?;
+    s.wait_for("VENTANA_ABIERTA Monitor", STEP)?;
+    thread::sleep(Duration::from_secs(6));
+    shot(&mut s, "jarvis-os-monitor.png")?;
+
+    // Navegador con la página de prueba.
+    s.monitor("sendkey meta_l-r")?;
+    s.wait_for("VENTANA_ABIERTA Consola JARVIS", STEP)?;
+    s.type_text(&format!("ir http://10.0.2.2:{port}/"))?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("RED_RESPUESTA 200", STEP)?;
+    thread::sleep(Duration::from_millis(800));
+    shot(&mut s, "jarvis-os-navegador.png")?;
+
+    // Alt+Tab con Alt apretado (sendkey con tiempo de espera: mantiene las teclas).
+    s.monitor("sendkey alt-tab 3000")?;
+    s.wait_for("ESCRITORIO_MENU alt-tab", STEP)?;
+    thread::sleep(Duration::from_millis(600));
+    shot(&mut s, "jarvis-os-alt-tab.png")?;
+    thread::sleep(Duration::from_millis(2500));
+
+    // Vista de tareas (Win+Tab) y menú de inicio (Win).
+    s.monitor("sendkey meta_l-tab")?;
+    s.wait_for("ESCRITORIO_MENU tareas", STEP)?;
+    thread::sleep(Duration::from_millis(600));
+    shot(&mut s, "jarvis-os-tareas.png")?;
+    s.monitor("sendkey esc")?;
+    s.monitor("sendkey meta_l")?;
+    s.wait_for("ESCRITORIO_MENU inicio", STEP)?;
+    thread::sleep(Duration::from_millis(600));
+    shot(&mut s, "jarvis-os-inicio.png")
 }
 
 /// Convierte el PPM binario (P6) que genera QEMU a PNG.

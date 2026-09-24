@@ -16,9 +16,11 @@ bootloader_api = "0.11.17"
 jarvis-desktop = { path = "../desktop" }
 jarvis-fs = { path = "../fs" }
 jarvis-gfx = { path = "../gfx" }
+jarvis-net = { path = "../net" }
 linked_list_allocator = "0.10.6"
 pc-keyboard = "0.9.0"
 pic8259 = "0.11.0"
+smoltcp = { version = "0.12", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp", "socket-dhcpv4", "socket-dns"] }
 spin = "0.12.3"
 x86_64 = { version = "0.15.5", default-features = false, features = ["instructions", "abi_x86_interrupt"] }
 

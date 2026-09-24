@@ -302,22 +302,31 @@ impl<'a> Canvas<'a> {
     }
 
     pub fn fill_rect(&mut self, x: i32, y: i32, w: i32, h: i32, c: Color) {
-        if self.clip[0].is_none() && self.bytes_per_pixel <= 4 {
-            // Camino rápido (sin recorte): se escriben los bytes de cada fila directo.
-            let r = Rect::new(x, y, w, h).clamp(self.width, self.height);
-            let px = self.encode(c);
-            let bpp = self.bytes_per_pixel;
-            for yy in r.y..r.y + r.h {
-                let start = (yy as usize * self.stride + r.x as usize) * bpp;
-                for chunk in self.buf[start..start + r.w as usize * bpp].chunks_exact_mut(bpp) {
-                    chunk.copy_from_slice(&px[..bpp]);
-                }
-            }
+        let target = Rect::new(x, y, w, h).clamp(self.width, self.height);
+        if target.is_empty() {
             return;
         }
-        for yy in y.max(0)..(y + h).min(self.height as i32) {
-            for xx in x.max(0)..(x + w).min(self.width as i32) {
-                self.put(xx, yy, c);
+        // Se escriben los bytes de cada fila directo, en la parte del rectángulo que cae dentro
+        // de cada zona de recorte (o en todo el rectángulo si no hay recorte).
+        let mut areas = [None; MAX_CLIP];
+        if self.clip[0].is_some() {
+            areas = self.clip;
+        } else {
+            areas[0] = Some(target);
+        }
+        let px = self.encode(c);
+        let bpp = self.bytes_per_pixel.min(4);
+        let stride_bpp = self.bytes_per_pixel;
+        for area in areas.iter().flatten() {
+            let Some(r) = area.intersection(&target) else {
+                continue;
+            };
+            for yy in r.y..r.y + r.h {
+                let start = (yy as usize * self.stride + r.x as usize) * stride_bpp;
+                let row = &mut self.buf[start..start + r.w as usize * stride_bpp];
+                for chunk in row.chunks_exact_mut(stride_bpp) {
+                    chunk[..bpp].copy_from_slice(&px[..bpp]);
+                }
             }
         }
     }

@@ -342,7 +342,7 @@ mod tests {
         let mut c = Canvas::new(&mut buf, w, h, w, 4, PixelFormat::Rgb).unwrap();
         let drawn = t.draw(&mut c, 10, 10, "12:34", Color::WHITE);
         assert_eq!(drawn, t.width("12:34"));
-        assert!(buf.iter().any(|b| *b == 255));
+        assert!(buf.contains(&255));
         assert_eq!(isqrt(1_000_000), 1000);
         assert_eq!(isqrt(15), 3);
     }

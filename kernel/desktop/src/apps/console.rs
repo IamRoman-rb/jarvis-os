@@ -1,0 +1,384 @@
+//! Consola de JARVIS: le escribís una orden y JARVIS responde (y la esfera "habla").
+//!
+//! Es el lugar del micrófono de la barra: hasta que haya audio (K9) y conexión con Claude (K4),
+//! a JARVIS se le habla escribiendo. Entiende un puñado de órdenes locales (abrir apps, ver
+//! archivos, navegar, estado de la máquina); lo demás lo va a responder Claude.
+
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+use jarvis_fs::BlockDevice;
+use jarvis_gfx::text;
+use jarvis_gfx::{Canvas, Rect, theme};
+
+use super::Ctx;
+use crate::files::format_size;
+use crate::input::{Key, Mods};
+use crate::system::{AppKind, Launch, Power};
+use crate::text_input::TextInput;
+use crate::widgets::{FIELD_BG, WINDOW_BG, draw_fit, ip, label, light, s16};
+
+const LINE_H: i32 = 20;
+const MAX_LINES: usize = 400;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Who {
+    User,
+    Jarvis,
+    Error,
+}
+
+pub struct Console {
+    pub dirty: bool,
+    lines: Vec<(Who, String)>,
+    input: TextInput,
+    /// Órdenes anteriores (↑ ↓ las recorren, como en una terminal).
+    history: Vec<String>,
+    history_pos: Option<usize>,
+    /// Cuántas líneas se subió con la rueda o RePág (0 = pegado al final).
+    scroll: usize,
+}
+
+const HELP: &[&str] = &[
+    "Órdenes que entiendo por ahora:",
+    "  abrir <archivos|monitor|música|navegador|editor>",
+    "  ir <dirección>        abre una página (ej.: ir example.com)",
+    "  buscar <texto>        busca en la web",
+    "  ls [carpeta]          lista una carpeta del disco",
+    "  cat <archivo>         muestra un archivo de texto",
+    "  editar <archivo>      lo abre en el editor",
+    "  hora · estado · red · captura · limpiar",
+    "  decir <texto>         lo digo en voz alta (la esfera)",
+    "  apagar · reiniciar",
+];
+
+impl Default for Console {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Console {
+    pub fn new() -> Self {
+        Console {
+            dirty: true,
+            lines: alloc::vec![(
+                Who::Jarvis,
+                "Consola de JARVIS. Escribí \"ayuda\" para ver qué sé hacer.".into()
+            ),],
+            input: TextInput::new("", 200),
+            history: Vec::new(),
+            history_pos: None,
+            scroll: 0,
+        }
+    }
+
+    pub fn title(&self) -> String {
+        "Consola JARVIS".into()
+    }
+
+    fn say(&mut self, who: Who, text: impl Into<String>) {
+        let text = text.into();
+        for line in text.lines() {
+            self.lines.push((who, line.into()));
+        }
+        if self.lines.len() > MAX_LINES {
+            self.lines.drain(..self.lines.len() - MAX_LINES);
+        }
+    }
+
+    pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect) {
+        c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+        let field = Rect::new(r.x + 12, r.y + r.h - 46, r.w - 24, 34);
+        let area_h = field.y - r.y - 16;
+        let visible = (area_h / LINE_H).max(1) as usize;
+        let end = self.lines.len().saturating_sub(self.scroll);
+        let start = end.saturating_sub(visible);
+        for (i, (who, line)) in self.lines[start..end].iter().enumerate() {
+            let y = r.y + 10 + i as i32 * LINE_H;
+            let (prefix, st) = match who {
+                Who::User => ("> ", s16(theme::CYAN)),
+                Who::Jarvis => ("", s16(theme::TEXT)),
+                Who::Error => ("", s16(theme::AMBER)),
+            };
+            let shown = format!("{prefix}{line}");
+            draw_fit(c, r.x + 16, y, &shown, &st, r.w - 32);
+        }
+        jarvis_gfx::shapes::rounded_rect(c, field.x, field.y, field.w, field.h, 4, FIELD_BG, 255);
+        jarvis_gfx::shapes::rounded_outline(
+            c,
+            field.x,
+            field.y,
+            field.w,
+            field.h,
+            4,
+            theme::CYAN.scale(150),
+        );
+        text::draw(c, field.x + 10, field.y + 9, "JARVIS>", &label(theme::CYAN));
+        let st = s16(theme::TEXT);
+        let x0 = field.x + 96;
+        let shown = tail_fit(&self.input.text, &st, field.w - 110);
+        let tw = text::draw(c, x0, field.y + 9, &shown, &st);
+        c.fill_rect(x0 + tw + 2, field.y + 8, 2, 18, theme::CYAN);
+        if self.scroll > 0 {
+            text::draw_right(
+                c,
+                r.x + r.w - 16,
+                field.y - 22,
+                "(RePág/AvPág para moverse)",
+                &light(theme::TEXT_DIM),
+            );
+        }
+    }
+
+    pub fn wheel(&mut self, delta: i32) {
+        let max = self.lines.len().saturating_sub(1);
+        self.scroll = (self.scroll as i64 - delta as i64 * 3).clamp(0, max as i64) as usize;
+        self.dirty = true;
+    }
+
+    pub fn key<D: BlockDevice>(&mut self, key: Key, mods: Mods, ctx: &mut Ctx<'_, D>) -> bool {
+        if mods.ctrl && matches!(key, Key::Char('l' | 'L')) {
+            self.lines.clear();
+            self.dirty = true;
+            return true;
+        }
+        match key {
+            Key::Enter => {
+                let cmd = core::mem::take(&mut self.input.text);
+                let cmd = cmd.trim().to_string();
+                self.history_pos = None;
+                self.scroll = 0;
+                if !cmd.is_empty() {
+                    self.say(Who::User, cmd.clone());
+                    self.history.push(cmd.clone());
+                    ctx.log.push(format!("CONSOLA {cmd}"));
+                    self.run(&cmd, ctx);
+                }
+            }
+            Key::Up if !self.history.is_empty() => {
+                let pos = self
+                    .history_pos
+                    .map_or(self.history.len() - 1, |p| p.saturating_sub(1));
+                self.history_pos = Some(pos);
+                self.input.text = self.history[pos].clone();
+            }
+            Key::Down => {
+                if let Some(p) = self.history_pos {
+                    if p + 1 < self.history.len() {
+                        self.history_pos = Some(p + 1);
+                        self.input.text = self.history[p + 1].clone();
+                    } else {
+                        self.history_pos = None;
+                        self.input.text.clear();
+                    }
+                }
+            }
+            Key::PageUp => self.wheel(-3),
+            Key::PageDown => self.wheel(3),
+            other => {
+                if !self.input.handle(other) {
+                    return false;
+                }
+            }
+        }
+        self.dirty = true;
+        true
+    }
+
+    /// JARVIS responde: en la consola y en voz (la esfera y el mensaje del escritorio).
+    fn answer<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>, text: impl Into<String>) {
+        let text = text.into();
+        ctx.out.say = Some(text.lines().next().unwrap_or("").into());
+        self.say(Who::Jarvis, text);
+    }
+
+    fn fail(&mut self, text: impl Into<String>) {
+        self.say(Who::Error, text);
+    }
+
+    fn run<D: BlockDevice>(&mut self, cmd: &str, ctx: &mut Ctx<'_, D>) {
+        let (verb, arg) = match cmd.split_once(' ') {
+            Some((v, a)) => (v, a.trim()),
+            None => (cmd, ""),
+        };
+        let verb = verb.to_lowercase();
+        match verb.as_str() {
+            "ayuda" | "help" | "?" => {
+                for l in HELP {
+                    self.say(Who::Jarvis, *l);
+                }
+            }
+            "hola" => self.answer(ctx, "Hola. Estoy acá: escribí \"ayuda\" para ver qué puedo hacer."),
+            "limpiar" | "clear" | "cls" => self.lines.clear(),
+            "hora" | "fecha" => {
+                let msg = match ctx.clock {
+                    Some(t) => {
+                        let mut date = jarvis_gfx::clock::StrBuf::<48>::new();
+                        let _ = t.write_date(&mut date);
+                        format!(
+                            "Son las {:02}:{:02}. Hoy es {}.",
+                            t.hour,
+                            t.minute,
+                            date.as_str().to_lowercase()
+                        )
+                    }
+                    None => "No tengo reloj: el hardware no me dio la hora.".into(),
+                };
+                self.answer(ctx, msg);
+            }
+            "abrir" | "abri" | "abrí" | "open" => {
+                let kind = match arg.to_lowercase().as_str() {
+                    "archivos" | "explorador" => Some(AppKind::Files),
+                    "monitor" | "estado" | "administrador" => Some(AppKind::Monitor),
+                    "musica" | "música" => Some(AppKind::Music),
+                    "navegador" | "web" | "brave" | "internet" => Some(AppKind::Browser),
+                    "editor" | "notas" | "bloc" => Some(AppKind::Editor),
+                    "consola" => Some(AppKind::Console),
+                    _ => None,
+                };
+                match kind {
+                    Some(k) => {
+                        ctx.out.launch.push(Launch::App(k));
+                        self.answer(ctx, format!("Abriendo {}.", super::name_of(k)));
+                    }
+                    None => self.fail(format!("No conozco la app \"{arg}\".")),
+                }
+            }
+            "ir" | "navegar" | "abrir-web" => {
+                if arg.is_empty() {
+                    self.fail("¿A dónde? Por ejemplo: ir example.com");
+                } else {
+                    ctx.out.launch.push(Launch::Browse(arg.into()));
+                    self.answer(ctx, format!("Abriendo {arg} en el navegador."));
+                }
+            }
+            "buscar" | "googlear" => {
+                if arg.is_empty() {
+                    self.fail("¿Qué busco?");
+                } else {
+                    ctx.out
+                        .launch
+                        .push(Launch::Browse(format!("? {arg}")));
+                    self.answer(ctx, format!("Buscando \"{arg}\"."));
+                }
+            }
+            "ls" | "dir" => {
+                let path = if arg.is_empty() { "/" } else { arg };
+                let Some(fs) = ctx.fs.as_deref_mut() else {
+                    self.fail("No hay disco.");
+                    return;
+                };
+                match fs.list(path) {
+                    Ok(entries) => {
+                        let lines: Vec<String> = entries
+                            .iter()
+                            .filter(|e| !e.name.starts_with('.'))
+                            .map(|e| {
+                                if e.is_dir {
+                                    format!("  {}/", e.name)
+                                } else {
+                                    format!("  {:<40} {}", e.name, format_size(e.size as u64))
+                                }
+                            })
+                            .collect();
+                        if lines.is_empty() {
+                            self.say(Who::Jarvis, "  (vacía)");
+                        }
+                        for l in lines {
+                            self.say(Who::Jarvis, l);
+                        }
+                    }
+                    Err(e) => self.fail(format!("{path}: {e}")),
+                }
+            }
+            "cat" | "ver" | "type" => {
+                let Some(fs) = ctx.fs.as_deref_mut() else {
+                    self.fail("No hay disco.");
+                    return;
+                };
+                match fs.read_prefix(arg, 16 * 1024) {
+                    Ok(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes).replace('\t', "    ");
+                        for l in text.lines().take(200) {
+                            self.say(Who::Jarvis, l.to_string());
+                        }
+                    }
+                    Err(e) => self.fail(format!("{arg}: {e}")),
+                }
+            }
+            "editar" | "edit" | "nano" => {
+                if arg.is_empty() {
+                    ctx.out.launch.push(Launch::App(AppKind::Editor));
+                } else {
+                    ctx.out.launch.push(Launch::Edit(arg.into()));
+                }
+                self.answer(ctx, "Abriendo el editor.");
+            }
+            "estado" | "top" => {
+                let s = ctx.stats;
+                let msg = format!(
+                    "CPU {} % · memoria {} de {} · {} FPS · encendido hace {}",
+                    s.cpu_pct,
+                    format_size(s.heap_used),
+                    format_size(s.heap_total),
+                    s.fps,
+                    crate::widgets::duration(s.uptime_ms)
+                );
+                self.answer(ctx, msg);
+            }
+            "red" | "ip" | "ipconfig" => {
+                let n = &ctx.stats.net;
+                let msg = match (n.present, n.ip) {
+                    (false, _) => "No encontré una placa de red.".into(),
+                    (true, None) => "La placa de red está, pero todavía no tengo dirección (DHCP).".into(),
+                    (true, Some(a)) => format!(
+                        "Mi dirección es {}{}{}.",
+                        ip(a),
+                        n.gateway.map(|g| format!(", la puerta de enlace {}", ip(g))).unwrap_or_default(),
+                        n.dns.map(|d| format!(" y el DNS {}", ip(d))).unwrap_or_default()
+                    ),
+                };
+                self.answer(ctx, msg);
+            }
+            "captura" | "screenshot" => {
+                ctx.out.screenshot = true;
+                self.answer(ctx, "Captura en camino: queda en /Imágenes.");
+            }
+            "decir" | "di" | "say" => {
+                if arg.is_empty() {
+                    self.fail("¿Qué digo?");
+                } else {
+                    self.answer(ctx, arg.to_string());
+                }
+            }
+            "apagar" | "shutdown" => {
+                self.answer(ctx, "Apagando. Hasta luego.");
+                ctx.out.power = Some(Power::Shutdown);
+            }
+            "reiniciar" | "reboot" => {
+                self.answer(ctx, "Reiniciando.");
+                ctx.out.power = Some(Power::Reboot);
+            }
+            _ => self.answer(
+                ctx,
+                "Todavía no entiendo eso: cuando me conecten con Claude voy a poder responderte. Escribí \"ayuda\".",
+            ),
+        }
+    }
+}
+
+/// Los últimos caracteres de `s` que entran en `max_w` (el cursor siempre queda a la vista).
+fn tail_fit(s: &str, st: &text::Style, max_w: i32) -> String {
+    let mut out: Vec<char> = Vec::new();
+    for ch in s.chars().rev() {
+        out.push(ch);
+        let candidate: String = out.iter().rev().collect();
+        if text::width(&candidate, st) > max_w {
+            out.pop();
+            break;
+        }
+    }
+    out.iter().rev().collect()
+}

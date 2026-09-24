@@ -9,10 +9,13 @@ use alloc::vec::Vec;
 
 use jarvis_fs::{BlockDevice, DirEntry, FileSystem, FsError, Timestamp};
 
-use crate::input::Key;
+use crate::input::{Key, Mods};
 use crate::text_input::TextInput;
 
 pub const TRASH: &str = "/Papelera";
+/// Adentro de la Papelera: de dónde vino cada cosa ("nombre<TAB>ruta original" por línea), para
+/// poder restaurarla. Los nombres que empiezan con "." no se muestran.
+pub const TRASH_INDEX: &str = "/Papelera/.origen";
 /// Accesos rápidos del panel lateral: (nombre, ruta).
 pub const SHORTCUTS: [(&str, &str); 6] = [
     ("Inicio", "/"),
@@ -76,6 +79,14 @@ impl Kind {
             Kind::Binary => "archivo",
         }
     }
+}
+
+/// Columna por la que se ordena la lista (clic en el encabezado).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Column {
+    Name,
+    Size,
+    Modified,
 }
 
 pub enum Dialog {
@@ -159,6 +170,14 @@ pub struct FilesApp {
     /// La ventana cambió y hay que redibujarla.
     pub dirty: bool,
     pub opened: bool,
+    /// Archivo que se pidió abrir (Enter o doble clic): la ventana decide con qué app.
+    pub open_request: Option<String>,
+    /// Lo copiado o cortado (Ctrl+C / Ctrl+X): (ruta, es_cortar).
+    pub clipboard: Option<(String, bool)>,
+    pub sort: (Column, bool),
+    /// Búsqueda por tipeo: las letras escritas hace poco (como en el Explorador de Windows).
+    typed: String,
+    typed_ms: u64,
 }
 
 pub fn join(dir: &str, name: &str) -> String {
@@ -180,11 +199,26 @@ fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-fn sort_key(e: &DirEntry) -> (bool, String) {
-    (
-        !e.is_dir,
-        e.name.chars().flat_map(char::to_lowercase).collect(),
-    )
+fn lower(name: &str) -> String {
+    name.chars().flat_map(char::to_lowercase).collect()
+}
+
+/// Carpetas primero; después por la columna elegida.
+fn sort_entries(entries: &mut [DirEntry], (column, ascending): (Column, bool)) {
+    entries.sort_by(|a, b| {
+        let by = match column {
+            Column::Name => lower(&a.name).cmp(&lower(&b.name)),
+            Column::Size => a.size.cmp(&b.size),
+            Column::Modified => a.modified.cmp(&b.modified),
+        };
+        let by = if ascending { by } else { by.reverse() };
+        b.is_dir.cmp(&a.is_dir).then(by)
+    });
+}
+
+/// Los archivos ocultos (atributo de FAT o nombre con "." adelante) no se muestran.
+fn visible(e: &DirEntry) -> bool {
+    !e.hidden && !e.name.starts_with('.')
 }
 
 /// "notas.txt" + 2 → "notas (2).txt"
@@ -217,6 +251,11 @@ impl FilesApp {
             total_bytes: 0,
             dirty: true,
             opened: false,
+            open_request: None,
+            clipboard: None,
+            sort: (Column::Name, true),
+            typed: String::new(),
+            typed_ms: 0,
         }
     }
 
@@ -264,7 +303,8 @@ impl FilesApp {
     ) -> bool {
         match fs.list(path) {
             Ok(mut entries) => {
-                entries.sort_by_key(sort_key);
+                entries.retain(visible);
+                sort_entries(&mut entries, self.sort);
                 self.cwd = path.into();
                 self.entries = entries;
                 self.selected = 0;
@@ -303,7 +343,8 @@ impl FilesApp {
             .map(String::from)
             .or_else(|| self.selected_entry().map(|e| e.name.clone()));
         if let Ok(mut entries) = fs.list(&self.cwd) {
-            entries.sort_by_key(sort_key);
+            entries.retain(visible);
+            sort_entries(&mut entries, self.sort);
             self.entries = entries;
         }
         if let Some(name) = keep
@@ -406,13 +447,8 @@ impl FilesApp {
             if let Some(path) = self.selected_path() {
                 self.navigate(fs, &path, now_ms, log);
             }
-        } else {
-            self.notify(
-                "La vista previa está en el inspector (todavía no hay editor).",
-                false,
-                now_ms,
-                log,
-            );
+        } else if let Some(path) = self.selected_path() {
+            self.open_request = Some(path);
         }
     }
 
@@ -560,6 +596,9 @@ impl FilesApp {
             Dialog::ConfirmDelete(name) => {
                 let path = join(&self.cwd, name);
                 fs.remove(&path).map(|()| {
+                    if self.cwd == TRASH {
+                        Self::index_remove(fs, Some(name), now);
+                    }
                     log.push(format!("ARCHIVOS_BORRADO {path}"));
                     (format!("\"{name}\" se borró."), None)
                 })
@@ -571,6 +610,7 @@ impl FilesApp {
                         .try_for_each(|e| fs.remove(&join(TRASH, &e.name)))
                 });
                 result.map(|()| {
+                    Self::index_remove(fs, None, now);
                     log.push("ARCHIVOS_PAPELERA_VACIA".into());
                     ("La Papelera está vacía.".into(), None)
                 })
@@ -619,7 +659,189 @@ impl FilesApp {
             current = join(&dir, &target);
         }
         fs.move_to(&current, TRASH)?;
+        // Si no se puede anotar el origen, igual queda en la Papelera (solo no se podrá
+        // restaurar a su lugar automáticamente).
+        let _ = Self::index_add(fs, &target, path, now);
         Ok(join(TRASH, &target))
+    }
+
+    fn read_index<D: BlockDevice>(fs: &mut FileSystem<D>) -> Vec<(String, String)> {
+        let data = fs.read_file(TRASH_INDEX).unwrap_or_default();
+        String::from_utf8_lossy(&data)
+            .lines()
+            .filter_map(|l| l.split_once('\t'))
+            .map(|(n, p)| (n.to_string(), p.to_string()))
+            .collect()
+    }
+
+    fn write_index<D: BlockDevice>(
+        fs: &mut FileSystem<D>,
+        index: &[(String, String)],
+        now: Timestamp,
+    ) -> Result<(), FsError> {
+        let text: String = index.iter().map(|(n, p)| format!("{n}\t{p}\n")).collect();
+        fs.write_file(TRASH_INDEX, text.as_bytes(), now)
+    }
+
+    fn index_add<D: BlockDevice>(
+        fs: &mut FileSystem<D>,
+        name: &str,
+        origin: &str,
+        now: Timestamp,
+    ) -> Result<(), FsError> {
+        let mut index = Self::read_index(fs);
+        index.retain(|(n, _)| !n.eq_ignore_ascii_case(name));
+        index.push((name.to_string(), origin.to_string()));
+        Self::write_index(fs, &index, now)
+    }
+
+    fn index_remove<D: BlockDevice>(fs: &mut FileSystem<D>, name: Option<&str>, now: Timestamp) {
+        let mut index = Self::read_index(fs);
+        match name {
+            Some(name) => index.retain(|(n, _)| !n.eq_ignore_ascii_case(name)),
+            None => index.clear(),
+        }
+        let _ = Self::write_index(fs, &index, now);
+    }
+
+    /// Restaura lo seleccionado de la Papelera a la carpeta de donde vino (si esa carpeta ya
+    /// no existe, se vuelve a crear). Si ahí ya hay algo con ese nombre, se agrega " (2)".
+    pub fn restore_selected<D: BlockDevice>(
+        &mut self,
+        fs: &mut FileSystem<D>,
+        now: Timestamp,
+        now_ms: u64,
+        log: &mut Vec<String>,
+    ) {
+        if self.cwd != TRASH {
+            return;
+        }
+        let Some(entry) = self.selected_entry() else {
+            return;
+        };
+        let name = entry.name.clone();
+        let origin = Self::read_index(fs)
+            .into_iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(&name))
+            .map(|(_, p)| p)
+            .unwrap_or_else(|| join("/", &name));
+        let dir = parent(&origin);
+        let result = restore_to(fs, &name, &origin, now);
+        match result {
+            Ok(dest) => {
+                Self::index_remove(fs, Some(&name), now);
+                log.push(format!("ARCHIVOS_RESTAURADO {dest}"));
+                self.reload(fs, None);
+                self.notify(format!("\"{name}\" volvió a {dir}."), false, now_ms, log);
+            }
+            Err(e) => self.notify(error_message(e), true, now_ms, log),
+        }
+    }
+
+    // --- copiar, cortar y pegar ----------------------------------------------------------------
+
+    pub fn copy_selected(&mut self, cut: bool, now_ms: u64, log: &mut Vec<String>) {
+        let Some(path) = self.selected_path() else {
+            return;
+        };
+        let name = basename(&path).to_string();
+        log.push(format!(
+            "ARCHIVOS_{} {path}",
+            if cut { "CORTADO" } else { "COPIADO" }
+        ));
+        self.clipboard = Some((path, cut));
+        let verb = if cut { "cortado" } else { "copiado" };
+        self.notify(
+            format!("\"{name}\" {verb}: Ctrl+V lo pega en otra carpeta."),
+            false,
+            now_ms,
+            log,
+        );
+    }
+
+    pub fn paste<D: BlockDevice>(
+        &mut self,
+        fs: &mut FileSystem<D>,
+        now: Timestamp,
+        now_ms: u64,
+        log: &mut Vec<String>,
+    ) {
+        let Some((src, cut)) = self.clipboard.clone() else {
+            self.notify("No hay nada copiado.", false, now_ms, log);
+            return;
+        };
+        let name = basename(&src).to_string();
+        let same_dir = parent(&src).eq_ignore_ascii_case(&self.cwd);
+        let result = if cut && same_dir {
+            Ok(name.clone())
+        } else if cut {
+            move_unique(fs, &src, &self.cwd)
+        } else {
+            let target = unique_name(fs, &self.cwd, &name);
+            fs.copy(&src, &join(&self.cwd, &target), now)
+                .map(|()| target)
+        };
+        match result {
+            Ok(target) => {
+                if cut {
+                    self.clipboard = None;
+                }
+                log.push(format!("ARCHIVOS_PEGADO {}", join(&self.cwd, &target)));
+                self.reload(fs, Some(&target));
+                self.notify(format!("\"{target}\" pegado."), false, now_ms, log);
+            }
+            Err(e) => self.notify(error_message(e), true, now_ms, log),
+        }
+    }
+
+    pub fn sort_by(&mut self, column: Column) {
+        self.sort = if self.sort.0 == column {
+            (column, !self.sort.1)
+        } else {
+            // Como en el Explorador: la fecha arranca por lo más nuevo.
+            (column, column != Column::Modified)
+        };
+        let keep = self.selected_entry().map(|e| e.name.clone());
+        sort_entries(&mut self.entries, self.sort);
+        if let Some(name) = keep
+            && let Some(i) = self.entries.iter().position(|e| e.name == name)
+        {
+            self.selected = i;
+        }
+        self.dirty = true;
+    }
+
+    /// Rueda del mouse: mueve la lista sin cambiar la selección.
+    pub fn scroll_by(&mut self, delta: i32, visible: usize) {
+        let max = self.entries.len().saturating_sub(visible.max(1));
+        let next = (self.scroll as i64 + delta as i64).clamp(0, max as i64) as usize;
+        if next != self.scroll {
+            self.scroll = next;
+            self.dirty = true;
+        }
+    }
+
+    /// Búsqueda por tipeo: selecciona el primer elemento cuyo nombre empieza con lo escrito
+    /// (si pasa más de 1 segundo entre teclas, empieza una búsqueda nueva).
+    fn type_ahead<D: BlockDevice>(
+        &mut self,
+        fs: &mut FileSystem<D>,
+        c: char,
+        now_ms: u64,
+        log: &mut Vec<String>,
+    ) {
+        if now_ms.saturating_sub(self.typed_ms) > 1000 {
+            self.typed.clear();
+        }
+        self.typed_ms = now_ms;
+        self.typed.extend(c.to_lowercase());
+        let found = self
+            .entries
+            .iter()
+            .position(|e| lower(&e.name).starts_with(&self.typed));
+        if let Some(i) = found {
+            self.select(fs, i, log);
+        }
     }
 
     /// Teclas de la app. Devuelve `false` si la tecla no se usó (Esc sin diálogo: la usa el
@@ -628,6 +850,7 @@ impl FilesApp {
         &mut self,
         fs: &mut FileSystem<D>,
         key: Key,
+        mods: Mods,
         now: Timestamp,
         now_ms: u64,
         log: &mut Vec<String>,
@@ -648,6 +871,36 @@ impl FilesApp {
             }
             return true;
         }
+        // Atajos del Explorador de Windows.
+        if mods.ctrl {
+            match key {
+                Key::Char('c' | 'C') => self.copy_selected(false, now_ms, log),
+                Key::Char('x' | 'X') => self.copy_selected(true, now_ms, log),
+                Key::Char('v' | 'V') => self.paste(fs, now, now_ms, log),
+                Key::Char('n' | 'N') if mods.shift => self.start_new_folder(),
+                _ => return false,
+            }
+            return true;
+        }
+        if mods.alt {
+            match key {
+                Key::Up => self.go_up(fs, now_ms, log),
+                Key::Left => self.go_back(fs, now_ms, log),
+                _ => return false,
+            }
+            return true;
+        }
+        match key {
+            Key::F(5) => {
+                self.reload(fs, None);
+                return true;
+            }
+            Key::Char(c) if !c.is_control() && c != ' ' => {
+                self.type_ahead(fs, c, now_ms, log);
+                return true;
+            }
+            _ => {}
+        }
         match key {
             Key::Up => self.move_selection(fs, -1, log),
             Key::Down => self.move_selection(fs, 1, log),
@@ -666,6 +919,77 @@ impl FilesApp {
         }
         true
     }
+}
+
+/// Crea la carpeta `dir` y las que falten en el camino.
+fn ensure_dir<D: BlockDevice>(
+    fs: &mut FileSystem<D>,
+    dir: &str,
+    now: Timestamp,
+) -> Result<(), FsError> {
+    if dir == "/" || fs.exists(dir) {
+        return Ok(());
+    }
+    ensure_dir(fs, &parent(dir), now)?;
+    fs.mkdir(dir, now)
+}
+
+/// `name`, o "name (2)", "name (3)"… el primero que no exista en `dir`.
+fn unique_name<D: BlockDevice>(fs: &mut FileSystem<D>, dir: &str, name: &str) -> String {
+    let mut target = name.to_string();
+    let mut n = 2;
+    while fs.exists(&join(dir, &target)) {
+        target = with_suffix(name, n);
+        n += 1;
+    }
+    target
+}
+
+/// Mueve `src` a la carpeta `dir`; si ahí ya hay algo con ese nombre, le agrega " (2)".
+/// Devuelve el nombre final.
+fn move_unique<D: BlockDevice>(
+    fs: &mut FileSystem<D>,
+    src: &str,
+    dir: &str,
+) -> Result<String, FsError> {
+    if !fs.exists(src) {
+        return Err(FsError::NotFound);
+    }
+    let name = basename(src).to_string();
+    let target = unique_name(fs, dir, &name);
+    if target != name {
+        // Se renombra en el origen para que no choque en el destino.
+        fs.rename(src, &target)?;
+    }
+    let moving = join(&parent(src), &target);
+    if let Err(e) = fs.move_to(&moving, dir) {
+        if target != name {
+            let _ = fs.rename(&moving, &name);
+        }
+        return Err(e);
+    }
+    Ok(target)
+}
+
+/// Saca `name` de la Papelera y lo devuelve a `origin` (su ruta original).
+fn restore_to<D: BlockDevice>(
+    fs: &mut FileSystem<D>,
+    name: &str,
+    origin: &str,
+    now: Timestamp,
+) -> Result<String, FsError> {
+    let dir = parent(origin);
+    ensure_dir(fs, &dir, now)?;
+    let here = join(TRASH, name);
+    let wanted = basename(origin);
+    if wanted != name && !fs.exists(&join(TRASH, wanted)) {
+        // Vuelve a su nombre original (en la Papelera pudo tener " (2)").
+        fs.rename(&here, wanted)?;
+        let target = move_unique(fs, &join(TRASH, wanted), &dir)?;
+        return Ok(join(&dir, &target));
+    }
+    let target = move_unique(fs, &here, &dir)?;
+    Ok(join(&dir, &target))
 }
 
 /// Mensaje para el usuario, con mayúscula inicial.

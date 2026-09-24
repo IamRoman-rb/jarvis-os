@@ -1,0 +1,297 @@
+//! HTTP/1.1, del lado del cliente: armar el pedido y entender la respuesta.
+//!
+//! El kernel abre la conexión TCP y le pasa los bytes crudos a [`parse_response`]. Las
+//! redirecciones (301, 302…) las maneja [`Fetch`]: dice a dónde conectarse y, con cada
+//! respuesta, si terminó o hay que ir a otra dirección.
+//!
+//! HTTPS: el cifrado TLS todavía no está en el kernel. Esas páginas se piden a un **puente en el
+//! anfitrión** (lo levanta `cargo xtask run`), con la dirección completa en el pedido, como a
+//! un proxy HTTP: `GET https://sitio/camino HTTP/1.1`. El puente hace el TLS y devuelve la
+//! respuesta en texto plano.
+
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+use super::url::{Scheme, Url};
+use crate::system::HttpResponse;
+
+/// Dirección del anfitrión vista desde QEMU (red "user": la puerta de enlace es el host).
+pub const PROXY_HOST: [u8; 4] = [10, 0, 2, 2];
+pub const PROXY_PORT: u16 = 8118;
+const MAX_REDIRECTS: u32 = 5;
+
+/// A quién conectarse y qué mandarle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// Directo al servidor (HTTP): hay que resolver el nombre con DNS.
+    Direct { host: String, port: u16 },
+    /// Al puente del anfitrión (HTTPS).
+    Proxy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Connect {
+    pub target: Target,
+    pub request: Vec<u8>,
+}
+
+pub fn request(url: &Url, via_proxy: bool) -> Vec<u8> {
+    let target = if via_proxy {
+        url.to_string()
+    } else {
+        url.path.clone()
+    };
+    format!(
+        "GET {target} HTTP/1.1\r\n\
+         Host: {}\r\n\
+         User-Agent: JARVIS-OS/0.1 (navegador de texto)\r\n\
+         Accept: text/html,text/plain;q=0.9,*/*;q=0.5\r\n\
+         Accept-Language: es-AR,es;q=0.9,en;q=0.5\r\n\
+         Accept-Encoding: identity\r\n\
+         Connection: close\r\n\r\n",
+        url.host
+    )
+    .into_bytes()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Parsed {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Parsed {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// Interpreta una respuesta completa (el servidor cerró la conexión).
+pub fn parse_response(raw: &[u8]) -> Result<Parsed, String> {
+    let end = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or("respuesta incompleta (sin fin de cabeceras)")?;
+    let head = String::from_utf8_lossy(&raw[..end]);
+    let mut lines = head.split("\r\n");
+    let status_line = lines.next().unwrap_or("");
+    let mut parts = status_line.split_whitespace();
+    let version = parts.next().unwrap_or("");
+    if !version.starts_with("HTTP/") {
+        return Err(format!("no es una respuesta HTTP: {status_line}"));
+    }
+    let status: u16 = parts
+        .next()
+        .and_then(|s| s.parse().ok())
+        .ok_or("código de estado inválido")?;
+    let headers: Vec<(String, String)> = lines
+        .filter_map(|l| l.split_once(':'))
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .collect();
+    let mut parsed = Parsed {
+        status,
+        headers,
+        body: Vec::new(),
+    };
+    let body = &raw[end + 4..];
+    parsed.body = if parsed
+        .header("transfer-encoding")
+        .is_some_and(|v| v.to_ascii_lowercase().contains("chunked"))
+    {
+        dechunk(body)?
+    } else if let Some(len) = parsed
+        .header("content-length")
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        body[..len.min(body.len())].to_vec()
+    } else {
+        body.to_vec()
+    };
+    if let Some(enc) = parsed.header("content-encoding")
+        && !enc.eq_ignore_ascii_case("identity")
+    {
+        return Err(format!(
+            "el servidor mandó la página comprimida ({enc}) y todavía no sé descomprimir"
+        ));
+    }
+    Ok(parsed)
+}
+
+/// "Transfer-Encoding: chunked": trozos precedidos por su tamaño en hexadecimal.
+fn dechunk(mut b: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    loop {
+        let eol = b
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or("trozo sin tamaño")?;
+        let size_str = String::from_utf8_lossy(&b[..eol]);
+        let size_str = size_str.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_str, 16).map_err(|_| "tamaño de trozo inválido")?;
+        b = &b[eol + 2..];
+        if size == 0 {
+            return Ok(out);
+        }
+        if b.len() < size {
+            // La conexión se cortó a la mitad: se muestra lo que llegó.
+            out.extend_from_slice(b);
+            return Ok(out);
+        }
+        out.extend_from_slice(&b[..size]);
+        b = b.get(size + 2..).unwrap_or(&[]);
+    }
+}
+
+/// Una descarga con redirecciones.
+pub struct Fetch {
+    pub url: Url,
+    redirects: u32,
+}
+
+pub enum Step {
+    Connect(Connect),
+    Done(HttpResponse),
+    Failed(String),
+}
+
+impl Fetch {
+    pub fn start(url: &str) -> (Fetch, Step) {
+        match Url::parse(url) {
+            Some(u) => {
+                let f = Fetch {
+                    url: u,
+                    redirects: 0,
+                };
+                let step = f.connect();
+                (f, step)
+            }
+            None => (
+                Fetch {
+                    url: Url {
+                        scheme: Scheme::About,
+                        host: String::new(),
+                        port: 0,
+                        path: String::new(),
+                    },
+                    redirects: 0,
+                },
+                Step::Failed(format!("dirección inválida: {url}")),
+            ),
+        }
+    }
+
+    fn connect(&self) -> Step {
+        match self.url.scheme {
+            Scheme::Http => Step::Connect(Connect {
+                target: Target::Direct {
+                    host: self.url.host.clone(),
+                    port: self.url.port,
+                },
+                request: request(&self.url, false),
+            }),
+            Scheme::Https => Step::Connect(Connect {
+                target: Target::Proxy,
+                request: request(&self.url, true),
+            }),
+            _ => Step::Failed("el kernel solo descarga http:// y https://".into()),
+        }
+    }
+
+    /// Llegó la respuesta completa de la conexión anterior.
+    pub fn on_response(&mut self, raw: &[u8]) -> Step {
+        let parsed = match parse_response(raw) {
+            Ok(p) => p,
+            Err(e) => return Step::Failed(e),
+        };
+        if (300..400).contains(&parsed.status)
+            && let Some(loc) = parsed.header("location")
+        {
+            self.redirects += 1;
+            if self.redirects > MAX_REDIRECTS {
+                return Step::Failed("demasiadas redirecciones".into());
+            }
+            match self.url.join(loc) {
+                Some(next) => {
+                    self.url = next;
+                    return self.connect();
+                }
+                None => return Step::Failed(format!("redirección inválida: {loc}")),
+            }
+        }
+        Step::Done(HttpResponse {
+            status: parsed.status,
+            content_type: parsed.header("content-type").unwrap_or("").to_string(),
+            url: self.url.to_string(),
+            body: parsed.body,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn respuesta_simple_y_por_trozos() {
+        let raw =
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 5\r\n\r\nhola!extra";
+        let p = parse_response(raw).unwrap();
+        assert_eq!((p.status, p.body.as_slice()), (200, &b"hola!"[..]));
+        assert_eq!(p.header("CONTENT-TYPE"), Some("text/html"));
+
+        let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nJARV\r\n2;x=y\r\nIS\r\n0\r\n\r\n";
+        assert_eq!(parse_response(raw).unwrap().body, b"JARVIS");
+        assert!(parse_response(b"basura").is_err());
+        assert!(parse_response(b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\nxx").is_err());
+    }
+
+    #[test]
+    fn sigue_redirecciones() {
+        let (mut f, step) = Fetch::start("http://example.com/viejo");
+        let Step::Connect(c) = step else { panic!() };
+        assert_eq!(
+            c.target,
+            Target::Direct {
+                host: "example.com".into(),
+                port: 80
+            }
+        );
+        assert!(
+            c.request
+                .starts_with(b"GET /viejo HTTP/1.1\r\nHost: example.com\r\n")
+        );
+        // Redirección a HTTPS: el próximo pedido va al puente, con la dirección completa.
+        let step =
+            f.on_response(b"HTTP/1.1 301 Moved\r\nLocation: https://example.com/nuevo\r\n\r\n");
+        let Step::Connect(c) = step else { panic!() };
+        assert_eq!(c.target, Target::Proxy);
+        assert!(
+            c.request
+                .starts_with(b"GET https://example.com/nuevo HTTP/1.1")
+        );
+        let step = f.on_response(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nlisto");
+        let Step::Done(r) = step else { panic!() };
+        assert_eq!(
+            (r.url.as_str(), r.body.as_slice()),
+            ("https://example.com/nuevo", &b"listo"[..])
+        );
+    }
+
+    #[test]
+    fn corta_los_bucles_de_redirecciones() {
+        let (mut f, _) = Fetch::start("http://a.com/");
+        let mut last = None;
+        for _ in 0..10 {
+            last = Some(f.on_response(b"HTTP/1.1 302 Found\r\nLocation: /otra\r\n\r\n"));
+            if matches!(last, Some(Step::Failed(_))) {
+                break;
+            }
+        }
+        assert!(matches!(last, Some(Step::Failed(_))));
+    }
+}

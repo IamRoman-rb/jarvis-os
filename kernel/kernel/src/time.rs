@@ -16,7 +16,7 @@ const CALIBRATION_MS: u32 = 50;
 static TSC_START: AtomicU64 = AtomicU64::new(0);
 static TSC_PER_MS: AtomicU64 = AtomicU64::new(0);
 
-fn rdtsc() -> u64 {
+pub fn rdtsc() -> u64 {
     // SAFETY: `rdtsc` existe en toda CPU x86_64 y solo lee un contador; no toca memoria.
     unsafe { core::arch::x86_64::_rdtsc() }
 }

@@ -1,7 +1,7 @@
 //! Dibujo y clics de la ventana Archivos (según `design/stitch/…gestor_de_archivos…`).
 //!
 //! ```text
-//! ┌ ● ● ●  [FAT32]  /Documentos ─────────────────────────────── DISCO JARVIS · virtio-blk ┐
+//! ┌─ (barra de título: la dibuja el gestor de ventanas) ────────────────────────────────────┐
 //! │ ← ↑  [ /Documentos                        ]  +CARPETA  +ARCHIVO  RENOMBRAR  PAPELERA │
 //! │ ACCESOS        │ NOMBRE                        TAMAÑO   MODIFICADO │ INSPECTOR          │
 //! │ Inicio         │ ▸ Facultad                                        │ ícono, nombre,     │
@@ -23,10 +23,12 @@ use jarvis_gfx::text::{self, Size, Style, Weight};
 use jarvis_gfx::{Canvas, Color, Rect, theme};
 
 use crate::files::{
-    Dialog, FilesApp, Kind, PREVIEW_LINES, Preview, SHORTCUTS, format_date, format_size, join,
+    Column, Dialog, FilesApp, Kind, PREVIEW_LINES, Preview, SHORTCUTS, format_date, format_size,
+    join,
 };
 
-const TITLE_H: i32 = 36;
+/// La barra de título ahora la dibuja el gestor de ventanas.
+const TITLE_H: i32 = 0;
 const TOOLBAR_H: i32 = 48;
 const STATUS_H: i32 = 32;
 const SIDEBAR_W: i32 = 210;
@@ -49,6 +51,8 @@ pub enum Action {
     Rename,
     Delete,
     EmptyTrash,
+    Restore,
+    Paste,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,13 +63,13 @@ pub enum Hit {
     Action(Action),
     Shortcut(usize),
     Row(usize),
+    Sort(Column),
     DialogAccept,
     DialogCancel,
 }
 
 pub struct Layout {
     pub window: Rect,
-    title: Rect,
     toolbar: Rect,
     sidebar: Rect,
     list: Rect,
@@ -85,22 +89,16 @@ fn label(color: Color) -> Style {
     Style::new(Weight::Regular, Size::Size16, color).tracking(2)
 }
 
-/// Zona de la ventana en una pantalla de `w` × `h` (deja libres la barra de íconos y el reloj).
-pub fn window_rect(w: usize, h: usize) -> Rect {
-    let (w, h) = (w as i32, h as i32);
-    Rect::new(18, 170, w - 36, h - 170 - 20)
-}
-
 impl Layout {
-    pub fn new(app: &FilesApp, width: usize, height: usize) -> Layout {
-        let window = window_rect(width, height);
+    /// `window`: la zona del contenido de la ventana (el gestor de ventanas dibuja el marco y la
+    /// barra de título alrededor).
+    pub fn new(app: &FilesApp, window: Rect) -> Layout {
         let Rect { x, y, w, h } = window;
-        let title = Rect::new(x, y, w, TITLE_H);
         let toolbar = Rect::new(x, y + TITLE_H, w, TOOLBAR_H);
         let body_y = y + TITLE_H + TOOLBAR_H;
         let body_h = h - TITLE_H - TOOLBAR_H - STATUS_H;
         let sidebar = Rect::new(x, body_y, SIDEBAR_W, body_h);
-        let show_inspector = w >= SIDEBAR_W + INSPECTOR_W + 400;
+        let show_inspector = w >= SIDEBAR_W + INSPECTOR_W + 360;
         let inspector =
             show_inspector.then(|| Rect::new(x + w - INSPECTOR_W, body_y, INSPECTOR_W, body_h));
         let list_w = w - SIDEBAR_W - if show_inspector { INSPECTOR_W } else { 0 };
@@ -110,15 +108,18 @@ impl Layout {
         let by = toolbar.y + 9;
         let back = Rect::new(x + 12, by, 32, 30);
         let up = Rect::new(x + 50, by, 32, 30);
-        let mut specs: Vec<(Action, &'static str)> = alloc::vec![
-            (Action::NewFolder, "+ CARPETA"),
-            (Action::NewFile, "+ ARCHIVO"),
-            (Action::Rename, "RENOMBRAR")
-        ];
+        let mut specs: Vec<(Action, &'static str)> = Vec::new();
         if app.in_trash() {
+            specs.push((Action::Restore, "RESTAURAR"));
             specs.push((Action::Delete, "BORRAR"));
             specs.push((Action::EmptyTrash, "VACIAR"));
         } else {
+            specs.push((Action::NewFolder, "+ CARPETA"));
+            specs.push((Action::NewFile, "+ ARCHIVO"));
+            specs.push((Action::Rename, "RENOMBRAR"));
+            if app.clipboard.is_some() {
+                specs.push((Action::Paste, "PEGAR"));
+            }
             specs.push((Action::Delete, "PAPELERA"));
         }
         let mut right = x + w - 12;
@@ -133,7 +134,6 @@ impl Layout {
         let path = Rect::new(x + 92, by, (right - 8) - (x + 92), 30);
         Layout {
             window,
-            title,
             toolbar,
             sidebar,
             list,
@@ -219,6 +219,17 @@ impl Layout {
         }
         if let Some(i) = (0..SHORTCUTS.len()).find(|&i| self.shortcut_rect(i).contains(x, y)) {
             return Hit::Shortcut(i);
+        }
+        let header = Rect::new(self.list.x, self.list.y, self.list.w, LIST_HEADER_H);
+        if header.contains(x, y) {
+            let size_x = self.list.x + self.list.w - 190;
+            return Hit::Sort(if x < size_x - 110 {
+                Column::Name
+            } else if x < size_x + 20 {
+                Column::Size
+            } else {
+                Column::Modified
+            });
         }
         for v in 0..self.visible_rows() {
             let index = app.scroll + v;
@@ -335,11 +346,7 @@ fn button(c: &mut Canvas<'_>, r: Rect, text_label: &str, color: Color, fill: u8)
 
 pub fn draw(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
     let w = l.window;
-    // Opaca: con transparencia se veía el panel de estado del fondo a través de la lista.
-    rounded_rect(c, w.x, w.y, w.w, w.h, 12, WINDOW_BG, 255);
-    rounded_outline(c, w.x, w.y, w.w, w.h, 12, theme::CYAN.scale(90));
-
-    draw_title(c, app, l);
+    c.fill_rect(w.x, w.y, w.w, w.h, WINDOW_BG);
     draw_toolbar(c, app, l);
     draw_sidebar(c, app, l);
     draw_list(c, app, l, has_disk);
@@ -350,51 +357,6 @@ pub fn draw(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
     if let Some(dialog) = &app.dialog {
         draw_dialog(c, dialog, l);
     }
-}
-
-fn draw_title(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
-    let t = l.title;
-    for (i, col) in [theme::CRIMSON, theme::AMBER, theme::CYAN]
-        .into_iter()
-        .enumerate()
-    {
-        circle(
-            c,
-            t.x + 20 + i as i32 * 18,
-            t.y + t.h / 2,
-            5,
-            col.scale(210),
-            true,
-        );
-    }
-    let chip = Rect::new(t.x + 84, t.y + 8, 70, 20);
-    rounded_outline(c, chip.x, chip.y, chip.w, chip.h, 4, theme::CYAN.scale(140));
-    circle(c, chip.x + 10, chip.y + 10, 3, theme::CYAN, true);
-    text::draw(c, chip.x + 18, chip.y + 2, "FAT32", &label(theme::CYAN));
-    kind_icon(c, Kind::Folder, t.x + 172, t.y + 8, 1);
-    let right = text::draw_right(
-        c,
-        t.x + t.w - 16,
-        t.y + 10,
-        "DISCO JARVIS · virtio-blk",
-        &label(theme::TEXT_DIM),
-    );
-    let max = t.w - 172 - 30 - right - 40;
-    text::draw(
-        c,
-        t.x + 200,
-        t.y + 10,
-        &text::fit(&app.cwd, &s16(theme::TEXT), max),
-        &s16(theme::TEXT),
-    );
-    line(
-        c,
-        t.x + 1,
-        t.y + t.h - 1,
-        t.x + t.w - 2,
-        t.y + t.h - 1,
-        theme::PANEL_RIM,
-    );
 }
 
 fn draw_toolbar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
@@ -416,6 +378,7 @@ fn draw_toolbar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
     );
     for (action, text_label, r) in &l.buttons {
         let color = match action {
+            Action::Restore | Action::Paste => theme::CYAN,
             Action::Delete if app.in_trash() => theme::CRIMSON,
             Action::EmptyTrash => theme::CRIMSON,
             Action::Delete => theme::AMBER,
@@ -494,9 +457,27 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
     let r = l.list;
     let size_x = r.x + r.w - 190;
     let date_x = r.x + r.w - 16;
-    text::draw(c, r.x + 20, r.y + 8, "NOMBRE", &label(theme::TEXT_DIM));
-    text::draw_right(c, size_x, r.y + 8, "TAMAÑO", &label(theme::TEXT_DIM));
-    text::draw_right(c, date_x, r.y + 8, "MODIFICADO", &label(theme::TEXT_DIM));
+    // El encabezado de la columna por la que se ordena va en celeste, con un triángulo.
+    let (column, ascending) = app.sort;
+    for (col, name, anchor) in [
+        (Column::Name, "NOMBRE", None),
+        (Column::Size, "TAMAÑO", Some(size_x)),
+        (Column::Modified, "MODIFICADO", Some(date_x)),
+    ] {
+        let active = col == column;
+        let st = label(if active { theme::CYAN } else { theme::TEXT_DIM });
+        let (x0, w) = match anchor {
+            None => (r.x + 20, text::draw(c, r.x + 20, r.y + 8, name, &st)),
+            Some(right) => {
+                let right = if active { right - 14 } else { right };
+                let w = text::draw_right(c, right, r.y + 8, name, &st);
+                (right - w, w)
+            }
+        };
+        if active {
+            sort_mark(c, x0 + w + 8, r.y + 15, ascending);
+        }
+    }
     line(
         c,
         r.x,
@@ -587,6 +568,14 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         let h = (track.h * visible as i32 / total as i32).max(12);
         let y = track.y + (track.h - h) * app.scroll as i32 / (total - visible) as i32;
         c.fill_rect(track.x, y, track.w, h, theme::CYAN.scale(180));
+    }
+}
+
+/// Triángulo de 7 px: hacia arriba (ascendente) o hacia abajo.
+fn sort_mark(c: &mut Canvas<'_>, x: i32, y: i32, ascending: bool) {
+    for i in 0..4 {
+        let row = if ascending { y - 2 + i } else { y + 1 - i };
+        line(c, x - i, row, x + i, row, theme::CYAN);
     }
 }
 
@@ -717,7 +706,7 @@ fn draw_status(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
     text::draw(c, s.x + 16, ty, &left, &s16(theme::TEXT));
     let mid = format!("libre: {}", format_size(app.free_bytes));
     text::draw(c, s.x + s.w / 3, ty, &mid, &s16(theme::TEXT_DIM));
-    let help = "TAB JARVIS · F7 CARPETA · F2 RENOMBRAR · SUPR PAPELERA";
+    let help = "CTRL+C/X/V · F2 RENOMBRAR · SUPR PAPELERA";
     let right = if has_disk {
         "SINCRONIZADO"
     } else {
