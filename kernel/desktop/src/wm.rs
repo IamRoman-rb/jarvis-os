@@ -66,6 +66,64 @@ pub enum Side {
     Right,
 }
 
+/// Plantillas de distribución (Win+Z), como las de Windows 11 y las de KDE.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layout {
+    /// Dos mitades.
+    Halves,
+    /// Tres columnas iguales.
+    Thirds,
+    /// Dos tercios + un tercio.
+    TwoThirds,
+    /// Cuatro cuartos.
+    Quarters,
+    /// Una grande a la izquierda y dos apiladas a la derecha.
+    BigLeft,
+    /// Columna ancha en el medio y dos angostas (para pantallas anchas).
+    Center,
+}
+
+pub const LAYOUTS: [Layout; 6] = [
+    Layout::Halves,
+    Layout::Thirds,
+    Layout::TwoThirds,
+    Layout::Quarters,
+    Layout::BigLeft,
+    Layout::Center,
+];
+
+impl Layout {
+    /// Las zonas, como fracciones de la zona de trabajo: (x, y, ancho, alto) en milésimos.
+    fn fractions(self) -> &'static [(i32, i32, i32, i32)] {
+        match self {
+            Layout::Halves => &[(0, 0, 500, 1000), (500, 0, 500, 1000)],
+            Layout::Thirds => &[(0, 0, 333, 1000), (333, 0, 334, 1000), (667, 0, 333, 1000)],
+            Layout::TwoThirds => &[(0, 0, 667, 1000), (667, 0, 333, 1000)],
+            Layout::Quarters => &[
+                (0, 0, 500, 500),
+                (500, 0, 500, 500),
+                (0, 500, 500, 500),
+                (500, 500, 500, 500),
+            ],
+            Layout::BigLeft => &[(0, 0, 500, 1000), (500, 0, 500, 500), (500, 500, 500, 500)],
+            Layout::Center => &[(0, 0, 250, 1000), (250, 0, 500, 1000), (750, 0, 250, 1000)],
+        }
+    }
+
+    /// Las zonas dentro de `area`, sin huecos entre ellas.
+    pub fn zones(self, area: Rect) -> Vec<Rect> {
+        let at = |v: i32, len: i32| v * len / 1000;
+        self.fractions()
+            .iter()
+            .map(|&(x, y, w, h)| {
+                let (x0, y0) = (area.x + at(x, area.w), area.y + at(y, area.h));
+                let (x1, y1) = (area.x + at(x + w, area.w), area.y + at(y + h, area.h));
+                Rect::new(x0, y0, x1 - x0, y1 - y0)
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Window {
     pub id: WinId,
@@ -455,6 +513,91 @@ impl WindowManager {
             w.rect = target;
         }
         self.activate(id);
+    }
+
+    /// Acopla la ventana a una zona cualquiera (una distribución de Win+Z, un cuarto). Al
+    /// restaurarla vuelve a su tamaño de antes.
+    pub fn snap_to(&mut self, id: WinId, target: Rect) {
+        let Some(w) = self.get_mut(id) else { return };
+        if w.restore.is_none() {
+            w.restore = Some(w.rect);
+        }
+        w.maximized = false;
+        w.rect = target;
+        self.activate(id);
+    }
+
+    /// Win+↑ / Win+↓ con la ventana acoplada a una mitad: pasa al cuarto de arriba o de abajo
+    /// (y desde un cuarto, vuelve a la mitad), como en Windows. `false` si no estaba acoplada.
+    pub fn snap_vertical(&mut self, id: WinId, up: bool) -> bool {
+        let Some(rect) = self.get(id).map(|w| w.rect) else {
+            return false;
+        };
+        let halves = Layout::Halves.zones(self.work);
+        let quarters = Layout::Quarters.zones(self.work);
+        for (side, half) in halves.iter().enumerate() {
+            let (top, bottom) = (quarters[side], quarters[side + 2]);
+            let target = if rect == *half {
+                if up { top } else { bottom }
+            } else if (rect == top && !up) || (rect == bottom && up) {
+                *half
+            } else {
+                continue;
+            };
+            self.snap_to(id, target);
+            return true;
+        }
+        false
+    }
+
+    /// Las ventanas a la vista en el escritorio actual, de la de atrás a la de adelante.
+    fn shown(&self) -> Vec<WinId> {
+        self.windows
+            .iter()
+            .filter(|w| w.visible())
+            .map(|w| w.id)
+            .collect()
+    }
+
+    /// Win+Shift+T: reparte todas las ventanas a la vista en una grilla (mosaico). Devuelve
+    /// cuántas acomodó.
+    pub fn tile(&mut self) -> usize {
+        let ids = self.shown();
+        let n = ids.len() as i32;
+        if n == 0 {
+            return 0;
+        }
+        let work = self.work;
+        let cols = (1..=n).find(|c| c * c >= n).unwrap_or(1);
+        let rows = (n + cols - 1) / cols;
+        for (i, id) in ids.iter().enumerate() {
+            let (r, c) = (i as i32 / cols, i as i32 % cols);
+            // La última fila, si tiene menos, se estira para no dejar huecos.
+            let in_row = if r == rows - 1 { n - r * cols } else { cols };
+            let x0 = work.x + c * work.w / in_row;
+            let x1 = work.x + (c + 1) * work.w / in_row;
+            let y0 = work.y + r * work.h / rows;
+            let y1 = work.y + (r + 1) * work.h / rows;
+            self.snap_to(*id, Rect::new(x0, y0, x1 - x0, y1 - y0));
+        }
+        ids.len()
+    }
+
+    /// Win+Shift+C: en cascada (en escalera, cada una un poco más abajo y a la derecha).
+    pub fn cascade(&mut self) -> usize {
+        let ids = self.shown();
+        let work = self.work;
+        let (w, h) = (work.w * 3 / 5, work.h * 3 / 5);
+        for (i, id) in ids.iter().enumerate() {
+            let step = (i as i32 % 8) * 36;
+            if let Some(win) = self.get_mut(*id) {
+                win.maximized = false;
+                win.restore = None;
+                win.rect = Rect::new(work.x + 24 + step, work.y + 16 + step, w, h);
+            }
+            self.activate(*id);
+        }
+        ids.len()
     }
 
     /// Mueve la ventana (arrastrando la barra de título). La barra siempre queda a la vista.

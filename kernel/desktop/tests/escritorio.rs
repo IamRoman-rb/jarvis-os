@@ -97,6 +97,14 @@ fn acoplar_maximizar_y_minimizar_con_el_teclado() {
     t.combo(Mods::WIN, Key::Left);
     let r = t.window(AppKind::Monitor);
     assert_eq!((r.x, r.w), (0, W as i32 / 2));
+    // Acoplada a la izquierda, Win+↑ la lleva al cuarto de arriba (como en Windows 11) y otro
+    // Win+↑ la maximiza.
+    t.combo(Mods::WIN, Key::Up);
+    let r = t.window(AppKind::Monitor);
+    assert_eq!(
+        (r.x, r.w, r.h),
+        (0, W as i32 / 2, t.d.window_manager().work_area().h / 2)
+    );
     t.combo(Mods::WIN, Key::Up);
     let r = t.window(AppKind::Monitor);
     assert_eq!((r.x, r.w), (0, W as i32));

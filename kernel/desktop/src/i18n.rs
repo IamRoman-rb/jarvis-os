@@ -267,6 +267,7 @@ static EN: &[(&str, &str)] = &[
     ("DESINSTALAR", "UNINSTALL"),
     ("DETENER", "STOP"),
     ("DISCO", "DISK"),
+    ("DISTRIBUCIONES (WIN+Z)", "LAYOUTS (WIN+Z)"),
     ("Del tema", "Theme's own"),
     ("Denegar", "Deny"),
     ("Desactivado", "Off"),
@@ -372,6 +373,10 @@ static EN: &[(&str, &str)] = &[
     ("Facultad", "University"),
     ("Febrero", "February"),
     ("Firewall", "Firewall"),
+    (
+        "Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan",
+        "Arrows or mouse: the zone for this window · Enter places it · the others fill in",
+    ),
     (
         "Fondo blanco como en otros navegadores (si no, oscuro)",
         "White background like other browsers (otherwise dark)",
@@ -947,6 +952,7 @@ static PT: &[(&str, &str)] = &[
     ("DESINSTALAR", "DESINSTALAR"),
     ("DETENER", "PARAR"),
     ("DISCO", "DISCO"),
+    ("DISTRIBUCIONES (WIN+Z)", "LAYOUTS (WIN+Z)"),
     ("Del tema", "Do tema"),
     ("Denegar", "Negar"),
     ("Desactivado", "Desativado"),
@@ -1052,6 +1058,10 @@ static PT: &[(&str, &str)] = &[
     ("Facultad", "Faculdade"),
     ("Febrero", "Fevereiro"),
     ("Firewall", "Firewall"),
+    (
+        "Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan",
+        "Setas ou mouse: a zona para esta janela · Enter a posiciona · as outras completam",
+    ),
     (
         "Fondo blanco como en otros navegadores (si no, oscuro)",
         "Fundo branco como em outros navegadores (se não, escuro)",
@@ -1546,6 +1556,24 @@ static EN_F: &[(&str, &str)] = &[
         "{} de {} · flechas para ver más",
         "{} of {} · arrows to see more",
     ),
+    (
+        "{} elementos copiados: Ctrl+V los pega en otra carpeta.",
+        "{} items copied: Ctrl+V pastes them in another folder.",
+    ),
+    (
+        "{} elementos cortados: Ctrl+V los pega en otra carpeta.",
+        "{} items cut: Ctrl+V pastes them in another folder.",
+    ),
+    (
+        "{} elementos están en la Papelera.",
+        "{} items are in the Trash.",
+    ),
+    ("{} elementos pegados.", "{} items pasted."),
+    (
+        "{} elementos se borran para siempre.",
+        "{} items will be deleted forever.",
+    ),
+    ("{} elementos se borraron.", "{} items were deleted."),
     ("{} elementos · {}", "{} items · {}"),
     ("{} libres", "{} free"),
     ("{} min", "{} min"),
@@ -1554,9 +1582,14 @@ static EN_F: &[(&str, &str)] = &[
         "{} renglones más arriba · AvPág vuelve",
         "{} lines above · PgDn goes back",
     ),
+    ("{} seleccionados de {} · {}", "{} selected of {} · {}"),
     ("{} · Navegador", "{} · Browser"),
     ("{}{} · Editor", "{}{} · Editor"),
     ("¿Mover \"{}\" a la Papelera?", "Move \"{}\" to the Trash?"),
+    (
+        "¿Mover {} elementos a la Papelera?",
+        "Move {} items to the Trash?",
+    ),
 ];
 
 static PT_F: &[(&str, &str)] = &[
@@ -1636,6 +1669,24 @@ static PT_F: &[(&str, &str)] = &[
         "{} de {} · flechas para ver más",
         "{} de {} · setas para ver mais",
     ),
+    (
+        "{} elementos copiados: Ctrl+V los pega en otra carpeta.",
+        "{} itens copiados: Ctrl+V os cola em outra pasta.",
+    ),
+    (
+        "{} elementos cortados: Ctrl+V los pega en otra carpeta.",
+        "{} itens recortados: Ctrl+V os cola em outra pasta.",
+    ),
+    (
+        "{} elementos están en la Papelera.",
+        "{} itens estão na Lixeira.",
+    ),
+    ("{} elementos pegados.", "{} itens colados."),
+    (
+        "{} elementos se borran para siempre.",
+        "{} itens serão apagados para sempre.",
+    ),
+    ("{} elementos se borraron.", "{} itens foram apagados."),
     ("{} elementos · {}", "{} itens · {}"),
     ("{} libres", "{} livres"),
     ("{} min", "{} min"),
@@ -1644,11 +1695,16 @@ static PT_F: &[(&str, &str)] = &[
         "{} renglones más arriba · AvPág vuelve",
         "{} linhas acima · PgDn volta",
     ),
+    ("{} seleccionados de {} · {}", "{} selecionados de {} · {}"),
     ("{} · Navegador", "{} · Navegador"),
     ("{}{} · Editor", "{}{} · Editor"),
     (
         "¿Mover \"{}\" a la Papelera?",
         "Mover \"{}\" para a Lixeira?",
+    ),
+    (
+        "¿Mover {} elementos a la Papelera?",
+        "Mover {} itens para a Lixeira?",
     ),
 ];
 

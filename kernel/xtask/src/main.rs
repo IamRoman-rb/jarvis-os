@@ -793,12 +793,26 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     thread::sleep(Duration::from_millis(500));
     shot(&mut s, "jarvis-os-dialogo.png")?;
     s.monitor("sendkey esc")?;
+    // Varios archivos a la vez (Ctrl+E).
+    s.monitor("sendkey ctrl-e")?;
+    s.wait_for("ARCHIVOS_SELECCION_TODO", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    shot(&mut s, "jarvis-os-seleccion.png")?;
+    s.monitor("sendkey esc")?;
 
     // Monitor del sistema (Ctrl+Shift+Esc), con unos segundos de historia en los gráficos.
     s.monitor("sendkey ctrl-shift-esc")?;
     s.wait_for("VENTANA_ABIERTA Monitor", STEP)?;
     thread::sleep(Duration::from_secs(6));
     shot(&mut s, "jarvis-os-monitor.png")?;
+    // Distribuciones (Win+Z), con el Monitor enfocado: la segunda zona de los tercios.
+    s.monitor("sendkey meta_l-z")?;
+    s.wait_for("ESCRITORIO_MENU distribuciones", STEP)?;
+    s.monitor("sendkey down")?;
+    s.monitor("sendkey right")?;
+    thread::sleep(Duration::from_millis(500));
+    shot(&mut s, "jarvis-os-distribuciones.png")?;
+    s.monitor("sendkey esc")?;
 
     // Navegador con la página de prueba.
     s.monitor("sendkey meta_l-r")?;

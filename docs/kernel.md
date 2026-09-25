@@ -27,6 +27,11 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   anfitrión sin ventana y JARVIS-OS lo muestra en una ventana propia, con pestañas, barra de
   dirección, atrás/adelante, mouse, rueda y teclado. Se instala con `cargo xtask brave
   --instalar`. El navegador propio de K3–K5 queda como "Navegador simple".
+- **Selección como en Windows**: en Archivos, varios a la vez (Shift+flechas, Ctrl+clic,
+  Shift+clic, Ctrl+E) para mover a la Papelera, copiar o cortar; en el Editor, Shift+flechas,
+  arrastrar con el mouse, doble clic en una palabra y Ctrl+E, con un portapapeles del sistema.
+- **Distribuciones de ventanas**: Win+Z con seis plantillas, cuartos con Win+flechas, mosaico,
+  cascada, y acoplar arrastrando contra un borde o una esquina.
 - **Personalización en capas** (como Windows o KDE), en la Configuración:
   - **Apariencia**: tema HUD oscuro, claro o de alto contraste, y ocho colores de acento.
   - **Tipografía**: texto grande, títulos en negrita, y la letra de la terminal y del editor.
@@ -134,8 +139,11 @@ cargo test               # tests en el host: FAT32, red, escritorio, terminal y 
 | Win+D · Win+, | mostrar el escritorio (JARVIS); otra vez, volver |
 | Win+M · Win+Shift+M | minimizar todo · volver a mostrar lo minimizado |
 | Win+Inicio | minimizar todas menos la activa |
-| Win+↑ / Win+↓ | maximizar / restaurar o minimizar |
+| Win+↑ / Win+↓ | maximizar / restaurar o minimizar; con la ventana en una mitad, el cuarto de arriba / abajo |
 | Win+← / Win+→ · Win+Shift+↑ | acoplar a la mitad izquierda / derecha · estirar a lo alto |
+| Win+Z | distribuciones: mitades, tercios, 2/3 + 1/3, cuartos, grande + dos, columna central (las demás ventanas completan) |
+| Win+Shift+T · Win+Shift+C | mosaico con todas las ventanas · cascada |
+| arrastrar contra un borde / esquina | mitad / cuarto (arriba: maximizar) |
 | Win+Ctrl+D · Win+Ctrl+← / → · Win+Ctrl+F4 | escritorio virtual nuevo · cambiar · cerrarlo |
 | Alt+Espacio | menú de la ventana (restaurar, minimizar, maximizar, acoplar, cerrar) |
 | Alt+F4 · Ctrl+W | cerrar la ventana (Ctrl+W si la app no lo usa); sin ventanas, Alt+F4 ofrece apagar |
@@ -164,7 +172,9 @@ abre Archivos.
 | Retroceso / Alt+↑ | subir una carpeta · Alt+← atrás |
 | F7 o Ctrl+Shift+N / F6 | nueva carpeta / nuevo archivo de texto |
 | F2 | renombrar |
-| Ctrl+C / Ctrl+X / Ctrl+V | copiar / cortar / pegar (también carpetas enteras) |
+| Ctrl+E · Ctrl+A | seleccionar todo |
+| Shift+↑↓ (y Inicio/Fin/RePág/AvPág) · Ctrl+clic · Shift+clic | elegir varios |
+| Ctrl+C / Ctrl+X / Ctrl+V | copiar / cortar / pegar (también varios y carpetas enteras) |
 | Supr | a la Papelera (adentro de la Papelera: borrar definitivo, con confirmación) |
 | RESTAURAR (en la Papelera) | vuelve a la carpeta de donde vino |
 | Clic en NOMBRE / TAMAÑO / MODIFICADO | ordenar por esa columna |
@@ -337,6 +347,14 @@ firmware UEFI (OVMF en QEMU)
   que dura necesita una cola de salida con tope (si el otro lado no lee, es un error y no se come
   la memoria) y un cierre en dos pasos: en smoltcp, sacar el socket enseguida después de
   `close()` hacía que el FIN no saliera nunca.
+- **Selección = ancla + cursor**: lo seleccionado es lo que queda entre donde empezó (el ancla) y
+  donde está el cursor, en el orden que sea. Así Shift+flechas, arrastrar con el mouse y
+  Shift+clic son lo mismo: mover el cursor sin mover el ancla. En Archivos, además, un conjunto
+  de filas marcadas para Ctrl+clic, que puede tener huecos.
+- **Distribuciones como fracciones**: cada plantilla es una lista de zonas en milésimos de la
+  zona de trabajo, y los bordes se calculan con la misma cuenta desde los dos lados (`x0` de una
+  es el `x1` de la otra), así no quedan huecos de un píxel por redondeo. El test de mosaico suma
+  las áreas y verifica que no se superpongan.
 - **Colores que se cambian en vivo**: la paleta eran constantes (`theme::CYAN`) usadas en 450
   lugares. Pasaron a ser funciones que leen casilleros atómicos (`theme::cyan()`); un tema nuevo
   es escribir 17 números. La paleta por defecto es la de siempre y hay un test que lo verifica.

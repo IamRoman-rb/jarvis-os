@@ -61,6 +61,8 @@ pub struct Ctx<'a, D: BlockDevice> {
     pub stats: &'a SystemStats,
     pub tasks: &'a [TaskInfo],
     pub config: &'a crate::config::Config,
+    /// Portapapeles de texto del sistema.
+    pub clipboard: &'a mut String,
 }
 
 impl<D: BlockDevice> Ctx<'_, D> {
@@ -104,6 +106,9 @@ pub struct Click {
     pub y: i32,
     pub double: bool,
     pub right: bool,
+    /// Ctrl y Shift apretados (Ctrl+clic y Shift+clic eligen varios, como en el Explorador).
+    pub ctrl: bool,
+    pub shift: bool,
 }
 
 // Una sola por ventana: que el navegador sea más grande que las demás no importa.
@@ -291,12 +296,14 @@ impl App {
     /// ¿Quiere los movimientos del mouse y el "soltar"? (Brave: la página los necesita para
     /// los menús que se abren al pasar y para arrastrar.)
     pub fn wants_pointer(&self) -> bool {
-        matches!(self, App::Brave(_))
+        matches!(self, App::Brave(_) | App::Editor(_))
     }
 
     pub fn pointer<D: BlockDevice>(&mut self, p: Pointer, content: Rect, ctx: &mut Ctx<'_, D>) {
-        if let App::Brave(b) = self {
-            b.pointer(p, content, ctx);
+        match self {
+            App::Brave(b) => b.pointer(p, content, ctx),
+            App::Editor(e) => e.pointer(p, content),
+            _ => {}
         }
     }
 

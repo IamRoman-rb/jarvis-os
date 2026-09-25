@@ -133,8 +133,8 @@ impl FilesWindow {
             Hit::Shortcut(i) => app.navigate(fs, SHORTCUTS[i].1, now_ms, log),
             Hit::Sort(column) => app.sort_by(column),
             Hit::Row(i) => {
-                app.select(fs, i, log);
-                if click.double {
+                app.click_row(fs, i, click.ctrl, click.shift, log);
+                if click.double && !click.ctrl && !click.shift {
                     app.enter_selected(fs, now_ms, log);
                 }
             }
