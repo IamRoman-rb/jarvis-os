@@ -65,6 +65,7 @@ mark{background-color:yellow;color:black}
 a:link{color:#0000ee;text-decoration:underline}
 hr{border-width:1px 0 0 0;border-style:solid;border-color:#c0c0c0;margin:.5em 0}
 center{text-align:center}
+center>table{margin-left:auto;margin-right:auto;text-align:left}
 nobr{white-space:nowrap}
 img,svg,video,canvas,iframe,embed,object{display:inline-block}
 input,button,select,textarea{display:inline-block;font-size:13.333px;color:black}
@@ -2062,7 +2063,8 @@ mod tests {
     fn herencia_variables_y_cajas() {
         let (dom, s) = styles(
             "<body><div id=a class=caja><p id=b>x</p><span id=c>y</span></div></body>",
-            ":root{--acento:#1a73e8;--esp:12px} .caja{color:var(--acento);padding:var(--esp) 4px;\
+            // (Las variables distinguen mayúsculas, como en GitHub: `--fgColor-accent`.)
+            ":root{--acentoAzul:#1a73e8;--esp:12px} .caja{color:var(--acentoAzul);padding:var(--esp) 4px;\
              margin:0 auto;border:2px solid;font:italic bold 20px/1.5 Arial;--local:red}\
              p{background:var(--local)} span{display:flex;flex:1 0 200px;gap:4px 8px}",
         );

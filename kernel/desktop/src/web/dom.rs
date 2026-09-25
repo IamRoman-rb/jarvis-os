@@ -101,6 +101,19 @@ impl Node {
     }
 }
 
+/// ¿Es una variante de tema que no usamos (oscuro, alto contraste, para daltónicos)? Sitios
+/// como GitHub enlazan una hoja por cada tema antes de las que arman la página, y el navegador
+/// baja un máximo de hojas.
+fn theme_variant(href: &str) -> bool {
+    let path = href.split(['?', '#']).next().unwrap_or(href);
+    let file = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    // (`a11y-dark.css` de rust-lang.org es el color del código: esa sí.)
+    file.starts_with("dark")
+        || ["high_contrast", "high-contrast", "colorblind", "tritanopia"]
+            .iter()
+            .any(|v| file.contains(v))
+}
+
 fn find_ci(hay: &str, needle: &str, from: usize) -> Option<usize> {
     let h = hay.as_bytes();
     let n = needle.as_bytes();
@@ -200,13 +213,21 @@ impl Builder {
                 .iter()
                 .find(|(k, _)| k == "rel")
                 .map(|(_, v)| v.to_ascii_lowercase());
+            // Las páginas se muestran en modo claro: no hacen falta las hojas para imprimir, las
+            // del modo oscuro ni las alternativas.
             let media_ok = attrs
                 .iter()
                 .find(|(k, _)| k == "media")
-                .is_none_or(|(_, v)| !v.contains("print"));
-            if rel.is_some_and(|r| r.split_whitespace().any(|t| t == "stylesheet"))
+                .is_none_or(|(_, v)| !v.contains("print") && !v.contains("dark"));
+            let rel_ok = rel.is_some_and(|r| {
+                r.split_whitespace().any(|t| t == "stylesheet")
+                    && !r.split_whitespace().any(|t| t == "alternate")
+            });
+            if rel_ok
                 && media_ok
                 && let Some((_, href)) = attrs.iter().find(|(k, _)| k == "href")
+                && !theme_variant(href)
+                && !self.dom.stylesheet_links.contains(href)
             {
                 self.dom.stylesheet_links.push(href.clone());
             }
@@ -452,6 +473,20 @@ mod tests {
         assert_eq!(d.title, "Hola");
         assert_eq!(d.styles, ["p{color:red}"]);
         assert_eq!(d.stylesheet_links, ["/a.css"]);
+        // Repetidas, alternativas y variantes de tema no se bajan.
+        let d2 = parse(
+            "<link rel=stylesheet href=/a.css><link rel=stylesheet href=/a.css>\
+             <link rel='alternate stylesheet' href=/b.css>\
+             <link rel=stylesheet href=/assets/dark-79ad.css>\
+             <link rel=stylesheet href=/assets/light_high_contrast-48f.css>\
+             <link rel=stylesheet media='(prefers-color-scheme: dark)' href=/c.css>\
+             <link rel=stylesheet href=/assets/primer-1d2.css>\
+             <link rel=stylesheet href=/static/a11y-dark.css>",
+        );
+        assert_eq!(
+            d2.stylesheet_links,
+            ["/a.css", "/assets/primer-1d2.css", "/static/a11y-dark.css"]
+        );
         let mut s = String::new();
         outline(&d, 0, &mut s);
         assert!(s.contains("<p>sin js</p>"), "{s}");
