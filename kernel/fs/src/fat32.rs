@@ -190,6 +190,11 @@ fn u16_at(b: &[u8], i: usize) -> u16 {
     u16::from_le_bytes([b[i], b[i + 1]])
 }
 
+/// Sectores de FAT que se leen por pedido al contar el espacio libre.
+const FAT_READ_SECTORS: u32 = 64;
+/// Tope de clusters por escritura de datos (el driver igual los parte en bloques de 64 KiB).
+const MAX_RUN_CLUSTERS: usize = 4096;
+
 fn u32_at(b: &[u8], i: usize) -> u32 {
     u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
 }
@@ -327,21 +332,25 @@ impl<D: BlockDevice> FileSystem<D> {
 
     fn count_free(&mut self) -> Result<u32> {
         let mut free = 0;
-        let mut buf = [0u8; SECTOR_SIZE];
         let per_sector = (SECTOR_SIZE / 4) as u32;
-        for s in 0..self.fat_sectors {
-            let first = s * per_sector;
-            if first >= self.cluster_count + 2 {
-                break;
-            }
-            self.dev
-                .read((self.reserved_sectors + s) as u64, &mut buf)?;
-            for i in 0..per_sector {
-                let c = first + i;
-                if self.valid_cluster(c) && u32_at(&buf, i as usize * 4) & FAT_MASK == 0 {
+        // De a 64 sectores (32 KiB) por pedido: un disco de 256 MiB con clusters de 512 bytes
+        // tiene 4096 sectores de FAT, y leerlos de a uno demoraba el arranque.
+        let mut buf = vec![0u8; FAT_READ_SECTORS as usize * SECTOR_SIZE];
+        let used = (self.cluster_count + 2)
+            .div_ceil(per_sector)
+            .min(self.fat_sectors);
+        let mut s = 0;
+        while s < used {
+            let n = FAT_READ_SECTORS.min(used - s);
+            let chunk = &mut buf[..n as usize * SECTOR_SIZE];
+            self.dev.read((self.reserved_sectors + s) as u64, chunk)?;
+            for i in 0..n * per_sector {
+                let c = s * per_sector + i;
+                if self.valid_cluster(c) && u32_at(chunk, i as usize * 4) & FAT_MASK == 0 {
                     free += 1;
                 }
             }
+            s += n;
         }
         Ok(free)
     }
@@ -363,6 +372,37 @@ impl<D: BlockDevice> FileSystem<D> {
             return Err(FsError::Io);
         };
         Ok(u32_at(buf, offset) & FAT_MASK)
+    }
+
+    /// Cambia varias entradas de la FAT a la vez: cada sector que cambia se lee una vez y se
+    /// escribe una vez en cada copia. Guardar un archivo de 3 MB pasó de 12.000 escrituras de la
+    /// FAT a menos de 100.
+    fn fat_set_many(&mut self, entries: &[(u32, u32)]) -> Result<()> {
+        let mut sorted: Vec<(u32, u32)> = entries.to_vec();
+        sorted.sort_unstable_by_key(|e| e.0);
+        let per_sector = (SECTOR_SIZE / 4) as u32;
+        let mut i = 0;
+        while i < sorted.len() {
+            let sector = sorted[i].0 / per_sector;
+            self.load_fat_sector(sector)?;
+            let Some((_, buf)) = self.fat_cache.as_mut() else {
+                return Err(FsError::Io);
+            };
+            while i < sorted.len() && sorted[i].0 / per_sector == sector {
+                let (c, value) = sorted[i];
+                let offset = (c * 4) as usize % SECTOR_SIZE;
+                let old = u32_at(buf, offset);
+                let new = (old & !FAT_MASK) | (value & FAT_MASK);
+                buf[offset..offset + 4].copy_from_slice(&new.to_le_bytes());
+                i += 1;
+            }
+            let copy = *buf;
+            for fat in 0..self.fat_count {
+                let lba = self.reserved_sectors + fat * self.fat_sectors + sector;
+                self.dev.write(lba as u64, &copy)?;
+            }
+        }
+        Ok(())
     }
 
     /// Escribe una entrada de la FAT en **todas** las copias.
@@ -427,20 +467,22 @@ impl<D: BlockDevice> FileSystem<D> {
                 "el contador de espacio libre no coincide con la FAT",
             ));
         }
-        for (i, &cluster) in found.iter().enumerate() {
-            let next = found.get(i + 1).copied().unwrap_or(END_OF_CHAIN);
-            self.fat_set(cluster, next)?;
-        }
+        let links: Vec<(u32, u32)> = found
+            .iter()
+            .enumerate()
+            .map(|(i, &cluster)| (cluster, found.get(i + 1).copied().unwrap_or(END_OF_CHAIN)))
+            .collect();
+        self.fat_set_many(&links)?;
         self.free_clusters -= n;
         self.next_free = c;
         Ok(found)
     }
 
     fn free_chain(&mut self, first: u32) -> Result<()> {
-        for c in self.chain(first)? {
-            self.fat_set(c, 0)?;
-            self.free_clusters += 1;
-        }
+        let chain = self.chain(first)?;
+        let zeros: Vec<(u32, u32)> = chain.iter().map(|&c| (c, 0)).collect();
+        self.fat_set_many(&zeros)?;
+        self.free_clusters += chain.len() as u32;
         Ok(())
     }
 
@@ -471,12 +513,25 @@ impl<D: BlockDevice> FileSystem<D> {
         }
         let cs = self.cluster_size() as usize;
         let chain = self.alloc_clusters(self.clusters_for(data.len()))?;
-        let mut buf = vec![0u8; cs];
-        for (i, &c) in chain.iter().enumerate() {
-            let chunk = &data[i * cs..((i + 1) * cs).min(data.len())];
-            buf[..chunk.len()].copy_from_slice(chunk);
-            buf[chunk.len()..].fill(0);
-            self.write_cluster(c, &buf)?;
+        // Los clusters consecutivos (lo normal en un disco poco fragmentado) van en un solo
+        // pedido: el driver los parte en bloques de 64 KiB en vez de mandar uno por cluster.
+        let mut i = 0;
+        while i < chain.len() {
+            let mut j = i + 1;
+            while j < chain.len() && chain[j] == chain[j - 1] + 1 && j - i < MAX_RUN_CLUSTERS {
+                j += 1;
+            }
+            let (start, end) = (i * cs, (j * cs).min(data.len()));
+            let lba = self.cluster_lba(chain[i]);
+            if end - start == (j - i) * cs {
+                self.dev.write(lba, &data[start..end])?;
+            } else {
+                // El último cluster, incompleto: se completa con ceros.
+                let mut buf = vec![0u8; (j - i) * cs];
+                buf[..end - start].copy_from_slice(&data[start..end]);
+                self.dev.write(lba, &buf)?;
+            }
+            i = j;
         }
         Ok(chain[0])
     }
