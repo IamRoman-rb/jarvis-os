@@ -23,6 +23,18 @@ pub type WinId = u32;
 pub const TITLE_H: i32 = 34;
 /// Ancho de cada botón de la barra de título (como en Windows).
 pub const BUTTON_W: i32 = 46;
+
+/// Minimizar, maximizar y cerrar, relativos a la esquina de una ventana de ancho `w`. A la
+/// derecha como en Windows, o a la izquierda (cerrar, minimizar, maximizar) como en macOS.
+pub fn button_rects(w: i32) -> (Rect, Rect, Rect) {
+    let at = |x: i32| Rect::new(x, 1, BUTTON_W, TITLE_H - 1);
+    if crate::look::buttons_left() {
+        (at(1 + BUTTON_W), at(1 + 2 * BUTTON_W), at(1))
+    } else {
+        let close = w - BUTTON_W - 1;
+        (at(close - 2 * BUTTON_W), at(close - BUTTON_W), at(close))
+    }
+}
 /// Zona de los bordes que sirve para cambiar el tamaño.
 const GRIP: i32 = 8;
 pub const MIN_W: i32 = 380;
@@ -77,10 +89,9 @@ impl Window {
     /// Rectángulos de los botones: (minimizar, maximizar, cerrar).
     pub fn buttons(&self) -> (Rect, Rect, Rect) {
         let r = self.rect;
-        let close = Rect::new(r.x + r.w - BUTTON_W - 1, r.y + 1, BUTTON_W, TITLE_H - 1);
-        let max = Rect::new(close.x - BUTTON_W, close.y, BUTTON_W, close.h);
-        let min = Rect::new(max.x - BUTTON_W, close.y, BUTTON_W, close.h);
-        (min, max, close)
+        let at = |b: Rect| Rect::new(r.x + b.x, r.y + b.y, b.w, b.h);
+        let (min, max, close) = button_rects(r.w);
+        (at(min), at(max), at(close))
     }
 
     /// Zona del contenido, relativa a la esquina de la ventana.
@@ -360,6 +371,30 @@ impl WindowManager {
         }
         if self.focus == Some(id) {
             self.focus_top();
+        }
+    }
+
+    /// Hasta dónde llega una ventana maximizada: toda la pantalla menos la barra de arriba, o
+    /// (sin la barra de arriba) la zona de trabajo, debajo de la barra de íconos.
+    pub fn set_topbar(&mut self, topbar: bool) {
+        let full = if topbar {
+            Rect::new(
+                self.work.x,
+                TOPBAR_H,
+                self.work.w,
+                self.work.y + self.work.h - TOPBAR_H,
+            )
+        } else {
+            self.work
+        };
+        if full == self.full {
+            return;
+        }
+        self.full = full;
+        for w in &mut self.windows {
+            if w.maximized {
+                w.rect = full;
+            }
         }
     }
 

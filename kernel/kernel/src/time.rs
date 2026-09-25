@@ -32,6 +32,12 @@ pub fn init() -> u64 {
 }
 
 /// Milisegundos desde la calibración.
+/// Ciclos del TSC → microsegundos (para medir esperas cortas).
+pub fn tsc_to_us(cycles: u64) -> u64 {
+    let per_ms = TSC_PER_MS.load(Ordering::Relaxed).max(1);
+    cycles * 1000 / per_ms
+}
+
 pub fn millis() -> u64 {
     let per_ms = TSC_PER_MS.load(Ordering::Relaxed);
     if per_ms == 0 {

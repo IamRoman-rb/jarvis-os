@@ -608,3 +608,58 @@ fn con_cache_de_sectores_el_disco_queda_igual() {
         assert!(!fatfs_names(fs, "/").contains("nota 4.txt"));
     });
 }
+
+/// Cuenta los pedidos al disco (para que escribir un archivo grande no haga miles).
+struct Counting {
+    inner: MemDisk,
+    writes: usize,
+}
+
+impl jarvis_fs::BlockDevice for Counting {
+    fn sector_count(&self) -> u64 {
+        self.inner.sector_count()
+    }
+    fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), jarvis_fs::IoError> {
+        self.inner.read(lba, buf)
+    }
+    fn write(&mut self, lba: u64, buf: &[u8]) -> Result<(), jarvis_fs::IoError> {
+        self.writes += 1;
+        self.inner.write(lba, buf)
+    }
+}
+
+#[test]
+fn archivos_grandes_en_pocos_pedidos_y_con_fragmentos() {
+    let captura = pattern(1280 * 800 * 3 + 54, 9); // una captura de pantalla (BMP)
+    let dev = Counting {
+        inner: MemDisk::new(blank()),
+        writes: 0,
+    };
+    let mut fs = FileSystem::mount(dev).unwrap();
+    fs.write_file("/captura.bmp", &captura, NOW).unwrap();
+    // Antes: una escritura por cluster de datos y dos por cada entrada de la FAT (~18.000).
+    let writes = fs.into_device().writes;
+    assert!(writes < 150, "{writes} pedidos para 3 MB");
+
+    // Con el disco fragmentado: clusters sueltos entre archivos que quedan.
+    let (_, img) = with_ours(blank(), |fs| {
+        for i in 0..40 {
+            fs.write_file(&format!("/f{i}.bin"), &pattern(1500, i as u8), NOW)
+                .unwrap();
+        }
+        for i in (0..40).step_by(2) {
+            fs.remove(&format!("/f{i}.bin")).unwrap();
+        }
+        fs.write_file("/grande.bin", &captura[..200_000], NOW)
+            .unwrap();
+        // Reemplazar un archivo libera su cadena de una vez.
+        fs.write_file("/f1.bin", &pattern(9000, 1), NOW).unwrap();
+    });
+    let (_, img) = with_fatfs(img, |fs| {
+        assert_eq!(fatfs_read(fs, "/grande.bin"), &captura[..200_000]);
+        assert_eq!(fatfs_read(fs, "/f1.bin"), pattern(9000, 1));
+        assert_eq!(fatfs_read(fs, "/f39.bin"), pattern(1500, 39));
+    });
+    let free = with_ours(img.clone(), |fs| fs.free_bytes()).0;
+    check_consistency(&img, free);
+}

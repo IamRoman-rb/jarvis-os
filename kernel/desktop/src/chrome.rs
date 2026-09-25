@@ -3,10 +3,10 @@
 
 use jarvis_gfx::hud::{Icon, icon};
 use jarvis_gfx::shapes::{line, rect_outline};
-use jarvis_gfx::{Canvas, Color, Rect, theme};
+use jarvis_gfx::{Canvas, Color, theme};
 
-use crate::widgets::{draw_fit, s16};
-use crate::wm::{BUTTON_W, TITLE_H};
+use crate::widgets::{bold, draw_fit, s16};
+use crate::wm::{BUTTON_W, TITLE_H, button_rects};
 
 /// Qué botón tiene el mouse encima (se ilumina).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,8 +17,14 @@ pub enum Hover {
     Close,
 }
 
-const TITLE_FOCUSED: Color = Color::hex(0x0c2036);
-const TITLE_BLUR: Color = Color::hex(0x0a1422);
+/// Barra de título con foco: el fondo de la ventana teñido con el azul del tema.
+fn title_focused() -> Color {
+    theme::window().lerp(theme::vector_blue(), 30)
+}
+
+fn title_blur() -> Color {
+    theme::window().lerp(theme::panel(), 128)
+}
 
 /// Dibuja el marco en un buffer de `w` × `h` (la ventana entera, con la esquina en 0, 0).
 #[allow(clippy::too_many_arguments)]
@@ -32,47 +38,60 @@ pub fn draw(
     maximized: bool,
     hover: Hover,
 ) {
-    let bar = if focused { TITLE_FOCUSED } else { TITLE_BLUR };
+    let bar = if focused {
+        title_focused()
+    } else {
+        title_blur()
+    };
     c.fill_rect(0, 0, w, TITLE_H, bar);
     let text_col = if focused {
-        theme::TEXT
+        theme::text()
     } else {
-        theme::TEXT_DIM
+        theme::text_dim()
+    };
+    // Con los botones a la izquierda, el ícono y el título van después de ellos.
+    let left = if crate::look::buttons_left() {
+        3 * BUTTON_W + 4
+    } else {
+        0
     };
     icon(
         c,
         app_icon,
-        18,
+        left + 18,
         TITLE_H / 2,
         if focused {
-            theme::CYAN
+            theme::cyan()
         } else {
-            theme::TEXT_DIM
+            theme::text_dim()
         },
     );
+    let st = if crate::look::bold_titles() {
+        bold(text_col)
+    } else {
+        s16(text_col)
+    };
     draw_fit(
         c,
-        38,
-        (TITLE_H - 16) / 2,
+        left + 38,
+        (TITLE_H - st.line_height()) / 2,
         title,
-        &s16(text_col),
+        &st,
         w - 38 - 3 * BUTTON_W - 12,
     );
 
-    // Botones: (izquierda, qué es).
-    let close_x = w - BUTTON_W - 1;
+    let (min, max, close) = button_rects(w);
     let buttons = [
-        (close_x - 2 * BUTTON_W, Hover::Minimize),
-        (close_x - BUTTON_W, Hover::Maximize),
-        (close_x, Hover::Close),
+        (min, Hover::Minimize),
+        (max, Hover::Maximize),
+        (close, Hover::Close),
     ];
-    for (x, which) in buttons {
-        let r = Rect::new(x, 1, BUTTON_W, TITLE_H - 1);
+    for (r, which) in buttons {
         if hover == which {
             let bg = if which == Hover::Close {
-                theme::CRIMSON.scale(210)
+                theme::crimson().scale(210)
             } else {
-                theme::PANEL_RIM
+                theme::panel_rim()
             };
             c.fill_rect(r.x, r.y, r.w, r.h, bg);
         }
@@ -100,17 +119,17 @@ pub fn draw(
     }
     // Borde de toda la ventana: celeste si tiene el foco.
     let rim = if focused {
-        theme::CYAN.scale(150)
+        theme::cyan().scale(150)
     } else {
-        theme::PANEL_RIM
+        theme::panel_rim()
     };
     rect_outline(c, 0, 0, w, h, rim);
-    line(c, 1, TITLE_H - 1, w - 2, TITLE_H - 1, theme::PANEL_RIM);
+    line(c, 1, TITLE_H - 1, w - 2, TITLE_H - 1, theme::panel_rim());
     // Marca de la esquina para cambiar el tamaño.
     if !maximized {
         for i in 0..3 {
             let d = 4 + i * 4;
-            line(c, w - 3 - d, h - 3, w - 3, h - 3 - d, theme::PANEL_RIM);
+            line(c, w - 3 - d, h - 3, w - 3, h - 3 - d, theme::panel_rim());
         }
     }
 }

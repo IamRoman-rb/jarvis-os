@@ -32,7 +32,7 @@ use crate::web::layout::{self, Env, Page, Paint};
 use crate::web::sites;
 use crate::web::style::Display;
 use crate::web::url::{self, Scheme, Url};
-use crate::widgets::{FIELD_BG, WINDOW_BG, draw_fit, label, light, s16};
+use crate::widgets::{draw_fit, field_bg, label, light, s16, window_bg};
 
 const BAR_H: i32 = 48;
 const STATUS_H: i32 = 26;
@@ -1338,7 +1338,7 @@ impl Browser {
         let page = Self::page_rect(r);
         match &self.state {
             State::Loading { url, since, .. } => {
-                c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+                c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
                 let dots = ".".repeat(((now_ms - since) / 250 % 4) as usize);
                 let msg = trf("Cargando {}{}", &[url, &dots]);
                 draw_fit(
@@ -1346,7 +1346,7 @@ impl Browser {
                     page.x + MARGIN,
                     page.y + 30,
                     &msg,
-                    &s16(theme::CYAN),
+                    &s16(theme::cyan()),
                     page.w - 2 * MARGIN,
                 );
                 let secs = (now_ms - since) / 1000;
@@ -1357,20 +1357,20 @@ impl Browser {
                         page.x + MARGIN,
                         page.y + 56,
                         &wait,
-                        &light(theme::TEXT_DIM),
+                        &light(theme::text_dim()),
                     );
                 }
             }
             State::Error(msg) => {
-                c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+                c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
                 text::draw(
                     c,
                     page.x + MARGIN,
                     page.y + 30,
                     tr("NO SE PUDO CARGAR"),
-                    &label(theme::AMBER),
+                    &label(theme::amber()),
                 );
-                let st = s16(theme::TEXT);
+                let st = s16(theme::text());
                 let mut y = page.y + 60;
                 for chunk in wrap_plain(msg, &st, page.w - 2 * MARGIN) {
                     text::draw(c, page.x + MARGIN, y, &chunk, &st);
@@ -1387,7 +1387,7 @@ impl Browser {
         self.draw_bar(c, r, now_ms);
         // Barra de estado.
         let s = Rect::new(r.x, r.y + r.h - STATUS_H, r.w, STATUS_H);
-        c.fill_rect(s.x, s.y, s.w, s.h, theme::PANEL);
+        c.fill_rect(s.x, s.y, s.w, s.h, theme::panel());
         let loading_images = self
             .images
             .iter()
@@ -1411,13 +1411,13 @@ impl Browser {
             s.x + 12,
             s.y + 5,
             &msg,
-            &light(theme::TEXT_DIM),
+            &light(theme::text_dim()),
             s.w - 24,
         );
     }
 
     fn draw_bar(&self, c: &mut Canvas<'_>, r: Rect, now_ms: u64) {
-        c.fill_rect(r.x, r.y, r.w, BAR_H, WINDOW_BG);
+        c.fill_rect(r.x, r.y, r.w, BAR_H, window_bg());
         let [back, fwd, reload, home] = Self::buttons(r);
         for (b, enabled) in [
             (back, !self.back.is_empty()),
@@ -1426,12 +1426,12 @@ impl Browser {
             (home, true),
         ] {
             let col = if enabled {
-                theme::TEXT
+                theme::text()
             } else {
-                theme::TEXT_FAINT
+                theme::text_faint()
             };
-            rounded_rect(c, b.x, b.y, b.w, b.h, 4, theme::PANEL, 255);
-            rounded_outline(c, b.x, b.y, b.w, b.h, 4, theme::PANEL_RIM);
+            rounded_rect(c, b.x, b.y, b.w, b.h, 4, theme::panel(), 255);
+            rounded_outline(c, b.x, b.y, b.w, b.h, 4, theme::panel_rim());
             let (cx, cy) = (b.x + b.w / 2, b.y + b.h / 2);
             if b == back || b == fwd {
                 let d = if b == back { -1 } else { 1 };
@@ -1455,7 +1455,7 @@ impl Browser {
                     (-6, 0),
                     (-4, -4),
                 ][spin as usize];
-                c.fill_rect(cx + dx - 1, cy + dy - 1, 3, 3, theme::CYAN);
+                c.fill_rect(cx + dx - 1, cy + dy - 1, 3, 3, theme::cyan());
             } else {
                 // Casita.
                 line(c, cx - 7, cy, cx, cy - 7, col);
@@ -1464,24 +1464,30 @@ impl Browser {
             }
         }
         let a = Self::address_rect(r);
-        rounded_rect(c, a.x, a.y, a.w, a.h, 4, FIELD_BG, 255);
+        rounded_rect(c, a.x, a.y, a.w, a.h, 4, field_bg(), 255);
         let rim = if self.editing {
-            theme::CYAN
+            theme::cyan()
         } else {
-            theme::PANEL_RIM
+            theme::panel_rim()
         };
         rounded_outline(c, a.x, a.y, a.w, a.h, 4, rim);
         let secure = self.url.as_ref().is_some_and(|u| u.scheme == Scheme::Https);
         let mut x = a.x + 10;
         if !self.editing && secure {
             // Candado: la conexión del puente con el sitio es TLS.
-            jarvis_gfx::hud::icon(c, jarvis_gfx::hud::Icon::Lock, x + 6, a.y + 16, theme::CYAN);
+            jarvis_gfx::hud::icon(
+                c,
+                jarvis_gfx::hud::Icon::Lock,
+                x + 6,
+                a.y + 16,
+                theme::cyan(),
+            );
             x += 20;
         }
         let st = s16(if self.editing {
-            theme::TEXT
+            theme::text()
         } else {
-            theme::TEXT_DIM
+            theme::text_dim()
         });
         let shown = if self.address.text.is_empty() && !self.editing {
             tr("Buscá o escribí una dirección")
@@ -1490,7 +1496,7 @@ impl Browser {
         };
         let tw = draw_fit(c, x, a.y + 8, shown, &st, a.x + a.w - x - 14);
         if self.editing {
-            c.fill_rect(x + tw + 2, a.y + 7, 2, 18, theme::CYAN);
+            c.fill_rect(x + tw + 2, a.y + 7, 2, 18, theme::cyan());
         }
         line(
             c,
@@ -1498,7 +1504,7 @@ impl Browser {
             r.y + BAR_H - 1,
             r.x + r.w - 1,
             r.y + BAR_H - 1,
-            theme::PANEL_RIM,
+            theme::panel_rim(),
         );
     }
 
@@ -1717,7 +1723,7 @@ impl Browser {
                 Paint::Placeholder { r, label: l } if visible(r) => {
                     let rr = Rect::new(r.x + ox, r.y + oy, r.w, r.h);
                     let (fill, rim, fg) = if dark {
-                        (theme::PANEL, theme::PANEL_RIM, theme::TEXT_DIM)
+                        (theme::panel(), theme::panel_rim(), theme::text_dim())
                     } else {
                         (
                             Color::hex(0xf1f3f4),
@@ -1744,7 +1750,7 @@ impl Browser {
         if total > page.h {
             let track = Rect::new(page.x + page.w - 6, page.y + 4, 3, page.h - 8);
             let (tc, bc) = if dark {
-                (theme::PANEL_RIM, theme::CYAN.scale(180))
+                (theme::panel_rim(), theme::cyan().scale(180))
             } else {
                 (Color::hex(0xdadce0), Color::hex(0x9aa0a6))
             };

@@ -165,7 +165,7 @@ impl ParticleCloud {
 
             // Profundidad -ONE..ONE → 0..255: atrás tenue y azul, adelante celeste.
             let t = ((z2 + ONE) * 255 / (2 * ONE)).clamp(0, 255) as u8;
-            let color = theme::PARTICLE_DEEP.lerp(theme::PARTICLE_BRIGHT, t);
+            let color = theme::particle_deep().lerp(theme::particle_bright(), t);
             let strength = (70 + t as u32 / 2 + pulse.glow as u32 / 2).min(255) as u8;
             c.add(sx, sy, color.scale(strength));
             // Un halo mínimo en cruz para que cada partícula no sea un píxel duro.

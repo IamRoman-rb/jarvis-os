@@ -29,7 +29,7 @@ use crate::remote::{
 };
 use crate::system::StreamEvent;
 use crate::text_input::TextInput;
-use crate::widgets::{FIELD_BG, WINDOW_BG, draw_fit, label, light, s16};
+use crate::widgets::{draw_fit, field_bg, label, light, s16, window_bg};
 
 pub const TABS_H: i32 = 32;
 pub const BAR_H: i32 = 44;
@@ -517,7 +517,7 @@ impl Brave {
             page.w.clamp(200, 3840) as u16,
             page.h.clamp(150, 2160) as u16,
         );
-        c.fill_rect(page.x, page.y, page.w, page.h, WINDOW_BG);
+        c.fill_rect(page.x, page.y, page.w, page.h, window_bg());
         if self.fb_w > 0 && self.link != Link::Idle {
             let (w, h) = (self.fb_w, self.fb_h);
             if let Some(src) = Canvas::new(&mut self.fb, w, h, w, 3, PixelFormat::Rgb) {
@@ -530,16 +530,16 @@ impl Brave {
         match &self.link {
             Link::Failed(e) => {
                 let card = Rect::new(page.x + 40, page.y + 40, (page.w - 80).min(720), 150);
-                rounded_rect(c, card.x, card.y, card.w, card.h, 8, theme::PANEL, 245);
-                rounded_outline(c, card.x, card.y, card.w, card.h, 8, theme::AMBER);
+                rounded_rect(c, card.x, card.y, card.w, card.h, 8, theme::panel(), 245);
+                rounded_outline(c, card.x, card.y, card.w, card.h, 8, theme::amber());
                 text::draw(
                     c,
                     card.x + 20,
                     card.y + 18,
                     tr("BRAVE NO ESTÁ DISPONIBLE"),
-                    &label(theme::AMBER),
+                    &label(theme::amber()),
                 );
-                let st = s16(theme::TEXT);
+                let st = s16(theme::text());
                 let mut y = card.y + 50;
                 for chunk in wrap(e, card.w - 40, &st) {
                     text::draw(c, card.x + 20, y, &chunk, &st);
@@ -550,13 +550,13 @@ impl Brave {
                     card.x + 20,
                     card.y + card.h - 30,
                     tr("Clic para reintentar"),
-                    &light(theme::CYAN),
+                    &light(theme::cyan()),
                 );
             }
             Link::Idle | Link::Connecting => {
                 let dots = ".".repeat((now_ms / 300 % 4) as usize);
                 let msg = trf("Conectando con Brave{}", &[&dots]);
-                text::draw(c, page.x + 40, page.y + 40, &msg, &s16(theme::CYAN));
+                text::draw(c, page.x + 40, page.y + 40, &msg, &s16(theme::cyan()));
             }
             Link::Open if self.fb_w == 0 => {
                 text::draw(
@@ -564,7 +564,7 @@ impl Brave {
                     page.x + 40,
                     page.y + 40,
                     tr("Abriendo Brave..."),
-                    &s16(theme::CYAN),
+                    &s16(theme::cyan()),
                 );
             }
             Link::Open => {}
@@ -574,36 +574,40 @@ impl Brave {
     }
 
     fn draw_tabs(&self, c: &mut Canvas<'_>, r: Rect) {
-        c.fill_rect(r.x, r.y, r.w, TABS_H, theme::VOID);
+        c.fill_rect(r.x, r.y, r.w, TABS_H, theme::void());
         for (i, t) in self.tabs.tabs.iter().enumerate() {
             let tr_ = self.tab_rect(r, i);
             let active = i == self.tabs.active as usize;
-            let bg = if active { WINDOW_BG } else { theme::PANEL };
+            let bg = if active { window_bg() } else { theme::panel() };
             rounded_rect(c, tr_.x, tr_.y, tr_.w, tr_.h + 4, 6, bg, 255);
             if active {
-                c.fill_rect(tr_.x + 6, tr_.y, tr_.w - 12, 2, theme::CYAN);
+                c.fill_rect(tr_.x + 6, tr_.y, tr_.w - 12, 2, theme::cyan());
             }
             let title = if t.title.is_empty() {
                 tr("Nueva pestaña")
             } else {
                 t.title.as_str()
             };
-            let col = if active { theme::TEXT } else { theme::TEXT_DIM };
+            let col = if active {
+                theme::text()
+            } else {
+                theme::text_dim()
+            };
             draw_fit(c, tr_.x + 10, tr_.y + 6, title, &light(col), tr_.w - 36);
             // La cruz para cerrar.
             let (cx, cy) = (tr_.x + tr_.w - 13, tr_.y + tr_.h / 2);
-            line(c, cx - 4, cy - 4, cx + 4, cy + 4, theme::TEXT_DIM);
-            line(c, cx - 4, cy + 4, cx + 4, cy - 4, theme::TEXT_DIM);
+            line(c, cx - 4, cy - 4, cx + 4, cy + 4, theme::text_dim());
+            line(c, cx - 4, cy + 4, cx + 4, cy - 4, theme::text_dim());
         }
         let n = self.new_tab_rect(r);
         let (cx, cy) = (n.x + n.w / 2, n.y + n.h / 2);
-        line(c, cx - 6, cy, cx + 6, cy, theme::TEXT);
-        line(c, cx, cy - 6, cx, cy + 6, theme::TEXT);
+        line(c, cx - 6, cy, cx + 6, cy, theme::text());
+        line(c, cx, cy - 6, cx, cy + 6, theme::text());
     }
 
     fn draw_bar(&self, c: &mut Canvas<'_>, r: Rect, now_ms: u64) {
         let y0 = r.y + TABS_H;
-        c.fill_rect(r.x, y0, r.w, BAR_H, WINDOW_BG);
+        c.fill_rect(r.x, y0, r.w, BAR_H, window_bg());
         let [back, fwd, reload] = Self::buttons(r);
         for (b, enabled) in [
             (back, self.tabs.can_back),
@@ -611,9 +615,9 @@ impl Brave {
             (reload, self.link == Link::Open),
         ] {
             let col = if enabled {
-                theme::TEXT
+                theme::text()
             } else {
-                theme::TEXT_FAINT
+                theme::text_faint()
             };
             let (cx, cy) = (b.x + b.w / 2, b.y + b.h / 2);
             if b == reload {
@@ -631,10 +635,10 @@ impl Brave {
                         (-4, -4),
                     ][spin];
                     jarvis_gfx::shapes::circle(c, cx, cy, 6, col, false);
-                    c.fill_rect(cx + dx - 1, cy + dy - 1, 3, 3, theme::CYAN);
+                    c.fill_rect(cx + dx - 1, cy + dy - 1, 3, 3, theme::cyan());
                 } else {
                     jarvis_gfx::shapes::circle(c, cx, cy, 6, col, false);
-                    c.fill_rect(cx + 4, cy - 7, 4, 4, WINDOW_BG);
+                    c.fill_rect(cx + 4, cy - 7, 4, 4, window_bg());
                     line(c, cx + 6, cy - 7, cx + 6, cy - 3, col);
                     line(c, cx + 2, cy - 3, cx + 6, cy - 3, col);
                 }
@@ -646,16 +650,22 @@ impl Brave {
             }
         }
         let a = Self::address_rect(r);
-        rounded_rect(c, a.x, a.y, a.w, a.h, 16, FIELD_BG, 255);
+        rounded_rect(c, a.x, a.y, a.w, a.h, 16, field_bg(), 255);
         let rim = if self.editing {
-            theme::CYAN
+            theme::cyan()
         } else {
-            theme::PANEL_RIM
+            theme::panel_rim()
         };
         rounded_outline(c, a.x, a.y, a.w, a.h, 16, rim);
         let mut x = a.x + 14;
         if !self.editing && self.current_url().starts_with("https://") {
-            jarvis_gfx::hud::icon(c, jarvis_gfx::hud::Icon::Lock, x + 6, a.y + 16, theme::CYAN);
+            jarvis_gfx::hud::icon(
+                c,
+                jarvis_gfx::hud::Icon::Lock,
+                x + 6,
+                a.y + 16,
+                theme::cyan(),
+            );
             x += 20;
         }
         let shown = if self.address.text.is_empty() && !self.editing {
@@ -664,13 +674,13 @@ impl Brave {
             self.address.text.as_str()
         };
         let col = if self.editing {
-            theme::TEXT
+            theme::text()
         } else {
-            theme::TEXT_DIM
+            theme::text_dim()
         };
         let tw = draw_fit(c, x, a.y + 8, shown, &s16(col), a.x + a.w - x - 14);
         if self.editing {
-            c.fill_rect(x + tw + 2, a.y + 7, 2, 18, theme::CYAN);
+            c.fill_rect(x + tw + 2, a.y + 7, 2, 18, theme::cyan());
         }
         line(
             c,
@@ -678,7 +688,7 @@ impl Brave {
             y0 + BAR_H - 1,
             r.x + r.w - 1,
             y0 + BAR_H - 1,
-            theme::PANEL_RIM,
+            theme::panel_rim(),
         );
     }
 }

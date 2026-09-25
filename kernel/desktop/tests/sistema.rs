@@ -34,6 +34,11 @@ fn configuracion_cambia_el_fondo_y_queda_guardada() {
     t.key(Key::Right);
     t.frame();
     assert!(t.logs().iter().any(|l| l == "CONFIG_GUARDADA"));
+    // Después vienen las capas de personalización y Hora e idioma.
+    t.key(Key::PageDown);
+    assert_eq!(settings_section(&t), "Apariencia");
+    t.keys(&[Key::PageDown, Key::PageDown, Key::PageDown]);
+    assert_eq!(settings_section(&t), "Barra y cursor");
     // Reloj de 12 horas (Hora e idioma, tercera fila).
     t.key(Key::PageDown);
     assert_eq!(settings_section(&t), "Hora e idioma");
@@ -300,7 +305,7 @@ fn el_navegador_guarda_descargas_en_descargas() {
 #[test]
 fn firewall_desde_la_configuracion_bloquea_una_app() {
     let mut t = Driver::new();
-    t.d.open(Launch::Settings(10), t.now, CLOCK);
+    t.d.open(Launch::Settings(14), t.now, CLOCK);
     assert_eq!(settings_section(&t), "Firewall");
     // Fila 5: "Permitir: Navegador web" (se apaga = regla que bloquea al navegador).
     t.keys(&[Key::Down; 5]);

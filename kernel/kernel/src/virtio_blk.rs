@@ -54,6 +54,10 @@ const REQUEST_OUT: u32 = 1; // escribir al disco
 /// Bytes leídos y escritos desde el arranque (para el monitor).
 pub static READ_BYTES: AtomicU64 = AtomicU64::new(0);
 pub static WRITTEN_BYTES: AtomicU64 = AtomicU64::new(0);
+/// Pedidos hechos y ciclos del TSC esperando al disco (para el log de frames lentos).
+pub static REQUESTS: AtomicU64 = AtomicU64::new(0);
+pub static WRITE_REQUESTS: AtomicU64 = AtomicU64::new(0);
+pub static WAIT_TSC: AtomicU64 = AtomicU64::new(0);
 
 /// Tamaño del buffer intermedio: los pedidos más grandes se parten.
 const BOUNCE_SECTORS: usize = 128; // 64 KiB
@@ -260,6 +264,11 @@ impl VirtioBlk {
             self.out16(REG_QUEUE_NOTIFY, 0);
 
             // Esperar a que el dispositivo avance el índice del anillo usado.
+            REQUESTS.fetch_add(1, Ordering::Relaxed);
+            if kind == REQUEST_OUT {
+                WRITE_REQUESTS.fetch_add(1, Ordering::Relaxed);
+            }
+            let waiting = crate::time::rdtsc();
             let used_idx = self.queue.add(self.used_offset + 2) as *const u16;
             let mut spins = 0u64;
             while read_volatile(used_idx) == self.last_used {
@@ -270,6 +279,7 @@ impl VirtioBlk {
                 }
                 core::hint::spin_loop();
             }
+            WAIT_TSC.fetch_add(crate::time::rdtsc() - waiting, Ordering::Relaxed);
             self.last_used = self.last_used.wrapping_add(1);
             fence(Ordering::SeqCst);
             let status = read_volatile(core::ptr::addr_of!((*self.header).status));

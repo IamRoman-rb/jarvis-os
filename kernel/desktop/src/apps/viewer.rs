@@ -11,7 +11,7 @@ use super::Ctx;
 use crate::bmp::{self, Image};
 use crate::i18n::tr;
 use crate::input::Key;
-use crate::widgets::{WINDOW_BG, light, s16};
+use crate::widgets::{light, s16, window_bg};
 
 pub struct Viewer {
     pub dirty: bool,
@@ -53,11 +53,11 @@ impl Viewer {
     }
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect) {
-        c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+        c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
         let img = match &self.image {
             Ok(img) => img,
             Err(msg) => {
-                text::draw(c, r.x + 20, r.y + 20, msg, &s16(theme::AMBER));
+                text::draw(c, r.x + 20, r.y + 20, msg, &s16(theme::amber()));
                 return;
             }
         };
@@ -79,6 +79,12 @@ impl Viewer {
             }
         }
         let info = format!("{} · {} %", self.path, scale * 100 / 1024);
-        text::draw(c, r.x + 12, r.y + r.h - 26, &info, &light(theme::TEXT_DIM));
+        text::draw(
+            c,
+            r.x + 12,
+            r.y + r.h - 26,
+            &info,
+            &light(theme::text_dim()),
+        );
     }
 }

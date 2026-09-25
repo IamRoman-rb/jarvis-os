@@ -30,13 +30,20 @@ const ARROW: [&str; 17] = [
 const OUTLINE: Color = Color::hex(0x050b14);
 const FILL: Color = Color::hex(0xeafcff);
 
+/// 1 = normal, 2 = grande (Configuración → Barra de tareas y cursor).
+fn scale() -> i32 {
+    if crate::look::cursor_big() { 2 } else { 1 }
+}
+
 /// Rectángulo que ocupa el cursor con la punta en (x, y).
 pub fn rect(x: i32, y: i32) -> Rect {
-    Rect::new(x, y, 11, ARROW.len() as i32)
+    let k = scale();
+    Rect::new(x, y, 11 * k, ARROW.len() as i32 * k)
 }
 
 /// Dibuja el cursor con la punta en (x, y). Devuelve la zona que ocupó.
 pub fn draw(c: &mut Canvas<'_>, x: i32, y: i32) -> Rect {
+    let k = scale();
     for (dy, row) in ARROW.iter().enumerate() {
         for (dx, ch) in row.bytes().enumerate() {
             let color = match ch {
@@ -44,7 +51,12 @@ pub fn draw(c: &mut Canvas<'_>, x: i32, y: i32) -> Rect {
                 b'.' => FILL,
                 _ => continue,
             };
-            c.put(x + dx as i32, y + dy as i32, color);
+            let (px, py) = (x + dx as i32 * k, y + dy as i32 * k);
+            if k == 1 {
+                c.put(px, py, color);
+            } else {
+                c.fill_rect(px, py, k, k, color);
+            }
         }
     }
     rect(x, y)

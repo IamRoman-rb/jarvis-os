@@ -71,9 +71,12 @@ fn style(sgr: Sgr) -> (Style, Option<Color>) {
     };
     let bg = sgr.bg.map(|i| Color::hex(PALETTE[(i as usize).min(15)]));
     if sgr.reverse {
-        (Style::new(weight, Size::Size16, bg.unwrap_or(BG)), Some(fg))
+        (
+            Style::new(weight, crate::look::term_size(), bg.unwrap_or(BG)),
+            Some(fg),
+        )
     } else {
-        (Style::new(weight, Size::Size16, fg), bg)
+        (Style::new(weight, crate::look::term_size(), fg), bg)
     }
 }
 
@@ -533,9 +536,9 @@ impl Terminal {
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect) {
         c.fill_rect(r.x, r.y, r.w, r.h, BG);
-        let base = Style::new(Weight::Regular, Size::Size16, FG);
+        let base = Style::new(Weight::Regular, crate::look::term_size(), FG);
         let cw = text::width("M", &base).max(1);
-        let lh = 19;
+        let lh = base.line_height() + 3;
         let cols = ((r.w - 2 * PAD) / cw).max(10) as usize;
         let visible = ((r.h - 2 * PAD) / lh).max(1) as usize;
         self.shell.cols = cols;

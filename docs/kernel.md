@@ -16,8 +16,10 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
 | ![Wikipedia](img/k5-wikipedia.png) | ![YouTube](img/k5-youtube.png) |
 | **snap y ufw en la terminal** | **Firewall en la Configuración** |
 | ![snap y ufw](img/k5-snap-ufw.png) | ![Firewall](img/k5-firewall.png) |
-| **Cerrar sesión** | **Monitor con temperatura** |
-| ![Sesión](img/k6-sesion.png) | ![Monitor](img/k6-monitor.png) |
+| **Tema claro** | **Monitor con temperatura** |
+| ![Tema claro](img/k6-claro.png) | ![Monitor](img/k6-monitor.png) |
+| **Cerrar sesión** | |
+| ![Sesión](img/k6-sesion.png) | |
 | **Escritorio** | **Terminal y `apt`** |
 | ![JARVIS](img/k4-escritorio.png) | ![Terminal](img/k4-terminal.png) |
 
@@ -25,6 +27,14 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   anfitrión sin ventana y JARVIS-OS lo muestra en una ventana propia, con pestañas, barra de
   dirección, atrás/adelante, mouse, rueda y teclado. Se instala con `cargo xtask brave
   --instalar`. El navegador propio de K3–K5 queda como "Navegador simple".
+- **Personalización en capas** (como Windows o KDE), en la Configuración:
+  - **Apariencia**: tema HUD oscuro, claro o de alto contraste, y ocho colores de acento.
+  - **Tipografía**: texto grande, títulos en negrita, y la letra de la terminal y del editor.
+  - **Ventanas**: animación (ninguna, desvanecer, zoom, deslizar) y su velocidad, botones del
+    título a la izquierda o a la derecha, qué hace el doble clic, acoplar al arrastrar contra un
+    borde, arrastrar solo el contorno, y que el foco siga al mouse.
+  - **Barra y cursor**: barra de arriba sí/no, qué gráficos muestra, segundos en el reloj y
+    cursor grande.
 - **Energía**: apagar, reiniciar, **suspender** (pantalla negra, nada se dibuja; una tecla o el
   mouse despiertan, con PIN si hay) y **cerrar sesión** (cierra las apps; si el Editor tiene
   cambios sin guardar, no sigue). Desde el menú Inicio, Win+X, Alt+F4 en el escritorio o el botón
@@ -49,7 +59,7 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
 - **Programas de Windows y Linux**: se descargan (navegador, `wget`, `winget`, `snap download`) y
   se inspeccionan (`file`, `strings`, `xxd`); todavía no se pueden ejecutar (hace falta espacio de
   usuario: K11).
-- **Configuración** (Win+I): fondo de pantalla, idioma, zona horaria, reloj, red, navegador,
+- **Configuración** (Win+I): fondo de pantalla, apariencia, tipografía, ventanas, idioma, zona horaria, reloj, red, navegador,
   sonido, mouse, teclado, programas, almacenamiento, PIN de bloqueo y firewall. Se guarda en
   `/Sistema/config.ini`.
 - **Navegador con motor de maquetación propio**: cajas con márgenes y bordes, flotantes, flex,
@@ -327,6 +337,22 @@ firmware UEFI (OVMF en QEMU)
   que dura necesita una cola de salida con tope (si el otro lado no lee, es un error y no se come
   la memoria) y un cierre en dos pasos: en smoltcp, sacar el socket enseguida después de
   `close()` hacía que el FIN no saliera nunca.
+- **Colores que se cambian en vivo**: la paleta eran constantes (`theme::CYAN`) usadas en 450
+  lugares. Pasaron a ser funciones que leen casilleros atómicos (`theme::cyan()`); un tema nuevo
+  es escribir 17 números. La paleta por defecto es la de siempre y hay un test que lo verifica.
+  El aspecto que no es color (tamaños de letra, lado de los botones) está en `look.rs`, con la
+  misma idea. Como es global, los tests que lo cambian van todos en un solo test
+  (`tests/personalizacion.rs`): si fueran varios, correrían en paralelo y se pisarían.
+- **Por qué tardaba la captura de pantalla**: no era la RAM ni los núcleos de la máquina virtual.
+  Guardar 3 MB hacía **4.505 pedidos al disco**: un cluster de datos por pedido, y cada cluster
+  además escribía su sector de la FAT en las dos copias. Con WHPX, cada pedido cuesta ~0,6 ms
+  (va y vuelve del anfitrión), así que eran ~3 s de espera. Ahora los clusters seguidos van en un
+  solo pedido y la FAT se actualiza por sector: **98 pedidos y 145 ms** (antes, 2.946 ms). Al
+  arrancar, la FAT se lee en bloques de 32 KiB en vez de sector por sector. El log
+  `FRAME_LENTO` del puerto serie anota cualquier frame de más de 300 ms, con cuánto fue disco.
+- **Una trampa al medir**: `Copy-Item` de Windows conserva la fecha del archivo, y cargo decide
+  qué recompilar por fecha. Al restaurar una versión de `fat32.rs` para comparar, el kernel
+  siguió con la vieja y la primera medición salió igual. La fecha manda.
 - **Leer un sensor sin romper nada**: la temperatura está en un registro específico del modelo
   (MSR). Leer uno que no existe es una excepción (#GP) que, sin manejador, cuelga el kernel. Por
   eso se pregunta antes con `cpuid`: fabricante, sensor presente y, sobre todo, si hay un

@@ -228,6 +228,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     )
 }
 
+/// Un frame que tarda más que esto se anota en el log.
+const SLOW_FRAME_MS: u64 = 300;
+
 /// Bucle principal: dormir hasta el próximo tick, atender la red, pasarle la entrada al
 /// escritorio, dibujar y hacer lo que el escritorio pidió.
 fn run(
@@ -292,11 +295,30 @@ fn run(
         }
 
         let start = time::millis();
+        let written = virtio_blk::WRITTEN_BYTES.load(Ordering::Relaxed);
+        let requests = virtio_blk::REQUESTS.load(Ordering::Relaxed);
+        let write_requests = virtio_blk::WRITE_REQUESTS.load(Ordering::Relaxed);
+        let waited = virtio_blk::WAIT_TSC.load(Ordering::Relaxed);
         let dirty = desktop.render(frame, bg, now, clock);
+        let drawn = time::millis();
         if let Some(screen) = SCREEN.lock().as_mut() {
             desktop.present(screen, frame, &dirty);
         }
-        render_ms += time::millis() - start;
+        let took = time::millis() - start;
+        render_ms += took;
+        if took > SLOW_FRAME_MS {
+            // Para encontrar lo que traba la interfaz (por ejemplo, guardar una captura).
+            serial_println!(
+                "FRAME_LENTO {} ms (dibujar {} ms, pantalla {} ms; disco: +{} KiB, {} pedidos ({} de escritura), {} ms esperando)",
+                took,
+                drawn - start,
+                time::millis() - drawn,
+                (virtio_blk::WRITTEN_BYTES.load(Ordering::Relaxed) - written) / 1024,
+                virtio_blk::REQUESTS.load(Ordering::Relaxed) - requests,
+                virtio_blk::WRITE_REQUESTS.load(Ordering::Relaxed) - write_requests,
+                time::tsc_to_us(virtio_blk::WAIT_TSC.load(Ordering::Relaxed) - waited) / 1000
+            );
+        }
         frames += 1;
 
         let requests = desktop.take_requests();

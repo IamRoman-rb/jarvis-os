@@ -18,7 +18,7 @@ use crate::i18n::tr;
 use crate::input::{Key, Mods};
 use crate::system::{AppKind, Launch, Power};
 use crate::text_input::TextInput;
-use crate::widgets::{FIELD_BG, WINDOW_BG, draw_fit, ip, label, light, s16};
+use crate::widgets::{draw_fit, field_bg, ip, label, light, s16, window_bg};
 
 const LINE_H: i32 = 20;
 const MAX_LINES: usize = 400;
@@ -90,7 +90,7 @@ impl Console {
     }
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect) {
-        c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+        c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
         let field = Rect::new(r.x + 12, r.y + r.h - 46, r.w - 24, 34);
         let area_h = field.y - r.y - 16;
         let visible = (area_h / LINE_H).max(1) as usize;
@@ -99,14 +99,14 @@ impl Console {
         for (i, (who, line)) in self.lines[start..end].iter().enumerate() {
             let y = r.y + 10 + i as i32 * LINE_H;
             let (prefix, st) = match who {
-                Who::User => ("> ", s16(theme::CYAN)),
-                Who::Jarvis => ("", s16(theme::TEXT)),
-                Who::Error => ("", s16(theme::AMBER)),
+                Who::User => ("> ", s16(theme::cyan())),
+                Who::Jarvis => ("", s16(theme::text())),
+                Who::Error => ("", s16(theme::amber())),
             };
             let shown = format!("{prefix}{line}");
             draw_fit(c, r.x + 16, y, &shown, &st, r.w - 32);
         }
-        jarvis_gfx::shapes::rounded_rect(c, field.x, field.y, field.w, field.h, 4, FIELD_BG, 255);
+        jarvis_gfx::shapes::rounded_rect(c, field.x, field.y, field.w, field.h, 4, field_bg(), 255);
         jarvis_gfx::shapes::rounded_outline(
             c,
             field.x,
@@ -114,21 +114,27 @@ impl Console {
             field.w,
             field.h,
             4,
-            theme::CYAN.scale(150),
+            theme::cyan().scale(150),
         );
-        text::draw(c, field.x + 10, field.y + 9, "JARVIS>", &label(theme::CYAN));
-        let st = s16(theme::TEXT);
+        text::draw(
+            c,
+            field.x + 10,
+            field.y + 9,
+            "JARVIS>",
+            &label(theme::cyan()),
+        );
+        let st = s16(theme::text());
         let x0 = field.x + 96;
         let shown = tail_fit(&self.input.text, &st, field.w - 110);
         let tw = text::draw(c, x0, field.y + 9, &shown, &st);
-        c.fill_rect(x0 + tw + 2, field.y + 8, 2, 18, theme::CYAN);
+        c.fill_rect(x0 + tw + 2, field.y + 8, 2, 18, theme::cyan());
         if self.scroll > 0 {
             text::draw_right(
                 c,
                 r.x + r.w - 16,
                 field.y - 22,
                 tr("(RePág/AvPág para moverse)"),
-                &light(theme::TEXT_DIM),
+                &light(theme::text_dim()),
             );
         }
     }

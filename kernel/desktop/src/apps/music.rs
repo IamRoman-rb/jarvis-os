@@ -17,7 +17,7 @@ use jarvis_gfx::{Canvas, Rect, theme};
 use super::{Click, Ctx};
 use crate::i18n::{tr, trf};
 use crate::input::Key;
-use crate::widgets::{SELECTED_BG, WINDOW_BG, bar, button, label, light, s16};
+use crate::widgets::{bar, button, label, light, s16, selected_bg, window_bg};
 
 pub struct Song {
     pub title: &'static str,
@@ -261,29 +261,33 @@ impl Music {
     }
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect, now_ms: u64) {
-        c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+        c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
         text::draw(
             c,
             r.x + 16,
             r.y + 16,
             tr("CANCIONES · PARLANTE DE LA PC"),
-            &label(theme::CYAN),
+            &label(theme::cyan()),
         );
         for (i, song) in SONGS.iter().enumerate() {
             let row = row_rect(r, i);
             let playing = self.playing.as_ref().is_some_and(|p| p.0 == i);
             if i == self.selected {
-                c.fill_rect(row.x, row.y, row.w, row.h, SELECTED_BG);
-                c.fill_rect(row.x, row.y, 3, row.h, theme::CYAN);
+                c.fill_rect(row.x, row.y, row.w, row.h, selected_bg());
+                c.fill_rect(row.x, row.y, 3, row.h, theme::cyan());
             }
-            let col = if playing { theme::CYAN } else { theme::TEXT };
+            let col = if playing {
+                theme::cyan()
+            } else {
+                theme::text()
+            };
             text::draw(c, row.x + 16, row.y + 4, song.title, &s16(col));
             text::draw(
                 c,
                 row.x + 16,
                 row.y + 21,
                 song.author,
-                &light(theme::TEXT_DIM),
+                &light(theme::text_dim()),
             );
             if playing {
                 text::draw_right(
@@ -291,7 +295,7 @@ impl Music {
                     row.x + row.w - 12,
                     row.y + 12,
                     tr("SONANDO"),
-                    &label(theme::CYAN),
+                    &label(theme::cyan()),
                 );
             }
         }
@@ -326,21 +330,21 @@ impl Music {
                 ((base * (viz.h - 6) / 255) as i64 * (ONE + wobble / 4) as i64 / ONE as i64) as i32;
             let h = h.clamp(2, viz.h);
             let x = viz.x + b * bw;
-            let color = theme::VECTOR_BLUE.lerp(theme::CYAN, (h * 255 / viz.h.max(1)) as u8);
+            let color = theme::vector_blue().lerp(theme::cyan(), (h * 255 / viz.h.max(1)) as u8);
             c.fill_rect(x + 1, viz.y + viz.h - h, bw - 3, h, color);
         }
         bar(
             c,
             Rect::new(viz.x, viz.y + viz.h + 4, viz.w - 3, 4),
             progress,
-            theme::CYAN,
+            theme::cyan(),
         );
         let label_text = if self.playing.is_some() {
             tr("DETENER")
         } else {
             tr("REPRODUCIR")
         };
-        button(c, play_button(r), label_text, theme::CYAN, 40);
+        button(c, play_button(r), label_text, theme::cyan(), 40);
     }
 }
 

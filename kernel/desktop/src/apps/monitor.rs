@@ -15,7 +15,7 @@ use crate::files::format_size;
 use crate::i18n::{tr, trf};
 use crate::input::Key;
 use crate::widgets::{
-    WINDOW_BG, bar, big, button, card, draw_fit, duration, graph, ip, label, light, rate, s16,
+    bar, big, button, card, draw_fit, duration, graph, ip, label, light, rate, s16, window_bg,
 };
 
 const ROW_H: i32 = 34;
@@ -87,7 +87,7 @@ impl Monitor {
     }
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect, sys: &SysView<'_>) {
-        c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+        c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
         let st = sys.stats;
         let h = sys.history;
         let l = Layout::new(r);
@@ -97,7 +97,7 @@ impl Monitor {
             r.x + 16,
             r.y + 16,
             tr("RENDIMIENTO"),
-            &label(theme::CYAN),
+            &label(theme::cyan()),
         );
         let summary = trf(
             "ENCENDIDO HACE {} · {} FPS · {} MS POR FRAME",
@@ -112,7 +112,7 @@ impl Monitor {
             r.x + r.w - 16,
             r.y + 16,
             &summary,
-            &label(theme::TEXT_DIM),
+            &label(theme::text_dim()),
         );
 
         // CPU
@@ -122,7 +122,7 @@ impl Monitor {
             inner.x,
             inner.y,
             &format!("{} %", st.cpu_pct),
-            &big(theme::CYAN),
+            &big(theme::cyan()),
         );
         let name = if st.cpu_name.is_empty() {
             "x86_64"
@@ -134,22 +134,22 @@ impl Monitor {
             inner.x + 110,
             inner.y + 8,
             name,
-            &light(theme::TEXT_DIM),
+            &light(theme::text_dim()),
             inner.w - 110,
         );
         let g = Rect::new(inner.x, inner.y + 42, inner.w, inner.h - 42);
-        graph(c, g, &h.cpu, 100, theme::CYAN);
+        graph(c, g, &h.cpu, 100, theme::cyan());
 
         // Temperatura
         let inner = card(c, l.cards[4], tr("TEMPERATURA"));
         match st.temp_c {
             Some(t) => {
                 let color = if t >= 85 {
-                    theme::CRIMSON
+                    theme::crimson()
                 } else if t >= 70 {
-                    theme::AMBER
+                    theme::amber()
                 } else {
-                    theme::CYAN
+                    theme::cyan()
                 };
                 text::draw(
                     c,
@@ -159,11 +159,11 @@ impl Monitor {
                     &big(color),
                 );
                 let g = Rect::new(inner.x, inner.y + 42, inner.w, inner.h - 42);
-                graph(c, g, &h.temp, 100, theme::CRIMSON);
+                graph(c, g, &h.temp, 100, theme::crimson());
             }
             None => {
-                text::draw(c, inner.x, inner.y, "--", &big(theme::TEXT_DIM));
-                let st = light(theme::TEXT_DIM);
+                text::draw(c, inner.x, inner.y, "--", &big(theme::text_dim()));
+                let st = light(theme::text_dim());
                 let mut y = inner.y + 44;
                 for l in [
                     tr("Sin sensor térmico."),
@@ -184,7 +184,7 @@ impl Monitor {
             inner.x,
             inner.y,
             &format!("{pct} %"),
-            &big(theme::PARTICLE_BRIGHT),
+            &big(theme::particle_bright()),
         );
         let detail = format!(
             "{} de {} · RAM {}",
@@ -197,11 +197,11 @@ impl Monitor {
             inner.x + 110,
             inner.y + 8,
             &detail,
-            &light(theme::TEXT_DIM),
+            &light(theme::text_dim()),
             inner.w - 110,
         );
         let g = Rect::new(inner.x, inner.y + 42, inner.w, inner.h - 42);
-        graph(c, g, &h.mem, 100, theme::PARTICLE_BRIGHT);
+        graph(c, g, &h.mem, 100, theme::particle_bright());
 
         // Disco
         let inner = card(c, l.cards[2], tr("DISCO"));
@@ -209,7 +209,13 @@ impl Monitor {
             Some((name, free, total)) => {
                 let used = total.saturating_sub(free);
                 let pct = (used * 100).checked_div(total).unwrap_or(0) as u32;
-                text::draw(c, inner.x, inner.y, &format!("{pct} %"), &big(theme::AMBER));
+                text::draw(
+                    c,
+                    inner.x,
+                    inner.y,
+                    &format!("{pct} %"),
+                    &big(theme::amber()),
+                );
                 let detail = format!(
                     "{name} · {} libres de {} · E/S {}",
                     format_size(free),
@@ -221,14 +227,14 @@ impl Monitor {
                     inner.x + 110,
                     inner.y + 8,
                     &detail,
-                    &light(theme::TEXT_DIM),
+                    &light(theme::text_dim()),
                     inner.w - 110,
                 );
                 bar(
                     c,
                     Rect::new(inner.x, inner.y + 40, inner.w, 5),
                     pct,
-                    theme::AMBER,
+                    theme::amber(),
                 );
             }
             None => {
@@ -237,23 +243,23 @@ impl Monitor {
                     inner.x,
                     inner.y + 8,
                     tr("Sin disco"),
-                    &s16(theme::TEXT_DIM),
+                    &s16(theme::text_dim()),
                 );
             }
         }
         let g = Rect::new(inner.x, inner.y + 52, inner.w, inner.h - 52);
-        graph(c, g, &h.disk, 0, theme::AMBER);
+        graph(c, g, &h.disk, 0, theme::amber());
 
         // Red
         let inner = card(c, l.cards[3], tr("RED"));
         let net = &st.net;
         let (headline, color) = match (net.present, net.ip) {
-            (false, _) => (String::from(tr("Sin placa de red")), theme::TEXT_DIM),
+            (false, _) => (String::from(tr("Sin placa de red")), theme::text_dim()),
             (true, None) => (
                 String::from(tr("Pidiendo dirección (DHCP)...")),
-                theme::AMBER,
+                theme::amber(),
             ),
-            (true, Some(a)) => (ip(a), theme::CYAN),
+            (true, Some(a)) => (ip(a), theme::cyan()),
         };
         text::draw(c, inner.x, inner.y + 2, &headline, &s16(color));
         let traffic = format!(
@@ -266,7 +272,7 @@ impl Monitor {
             inner.x + inner.w,
             inner.y + 2,
             &traffic,
-            &light(theme::TEXT_DIM),
+            &light(theme::text_dim()),
         );
         if net.present {
             let m = net.mac;
@@ -287,13 +293,13 @@ impl Monitor {
                 inner.x,
                 inner.y + 22,
                 &mac,
-                &light(theme::TEXT_DIM),
+                &light(theme::text_dim()),
                 inner.w,
             );
         }
         let g = Rect::new(inner.x, inner.y + 44, inner.w, inner.h - 44);
         let max = h.rx.max().max(h.tx.max()).max(1024);
-        graph(c, g, &h.rx, max, theme::CYAN);
+        graph(c, g, &h.rx, max, theme::cyan());
         // La transmisión encima, en ámbar (sin relleno para que se vean las dos).
         overlay_line(c, g, h.tx.iter().collect(), h.tx.capacity(), max);
 
@@ -306,21 +312,21 @@ impl Monitor {
                 l.list.x + 16,
                 l.list.y + 40,
                 tr("No hay apps abiertas."),
-                &s16(theme::TEXT_DIM),
+                &s16(theme::text_dim()),
             );
         }
         self.selected = self.selected.min(sys.tasks.len().saturating_sub(1));
         for (i, t) in sys.tasks.iter().take(l.visible_rows()).enumerate() {
             let row = l.row(i);
             if i == self.selected {
-                c.fill_rect(row.x, row.y, row.w, row.h, crate::widgets::SELECTED_BG);
+                c.fill_rect(row.x, row.y, row.w, row.h, crate::widgets::selected_bg());
             }
             icon(
                 c,
                 icon_of(t.kind),
                 row.x + 18,
                 row.y + row.h / 2,
-                theme::CYAN,
+                theme::cyan(),
             );
             let state = if t.minimized {
                 tr("minimizada")
@@ -332,7 +338,7 @@ impl Monitor {
                 row.x + 40,
                 row.y + 8,
                 &t.title,
-                &s16(theme::TEXT),
+                &s16(theme::text()),
                 row.w - 360,
             );
             text::draw_right(
@@ -340,9 +346,9 @@ impl Monitor {
                 row.x + row.w - 150,
                 row.y + 8,
                 state,
-                &light(theme::TEXT_DIM),
+                &light(theme::text_dim()),
             );
-            button(c, l.end_button(i), tr("FINALIZAR"), theme::CRIMSON, 25);
+            button(c, l.end_button(i), tr("FINALIZAR"), theme::crimson(), 25);
         }
     }
 
@@ -396,7 +402,7 @@ fn overlay_line(c: &mut Canvas<'_>, r: Rect, values: Vec<u32>, capacity: usize, 
         let hh = (v.min(max) as i64 * (r.h - 2) as i64 / max.max(1) as i64) as i32;
         let y = r.y + r.h - 1 - hh;
         if let Some((px, py)) = prev {
-            jarvis_gfx::shapes::line(c, px, py, x, y, theme::AMBER);
+            jarvis_gfx::shapes::line(c, px, py, x, y, theme::amber());
         }
         prev = Some((x, y));
     }

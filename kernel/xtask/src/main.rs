@@ -295,7 +295,7 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         None => "q35",
     };
     cmd.args([
-        "-machine", machine, "-m", "1G", "-rtc", "base=utc", "-serial", "stdio",
+        "-machine", machine, "-m", "2G", "-rtc", "base=utc", "-serial", "stdio",
     ]);
     if headless {
         // En los tests, un reinicio es un error (triple fault): mejor que QEMU termine.
@@ -621,8 +621,13 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
         false
     };
 
+    let t0 = Instant::now();
     s.monitor("sendkey print")?;
     s.wait_for("CAPTURA /Imágenes/", STEP)?;
+    println!(
+        "[tiempo] captura de pantalla: {} ms",
+        t0.elapsed().as_millis()
+    );
 
     // Energía: suspender (el mouse despierta) y cerrar sesión (una tecla vuelve a entrar).
     s.monitor("sendkey meta_l-d")?;
@@ -938,6 +943,17 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey pgup")?;
     thread::sleep(Duration::from_millis(600));
     shot(&mut s, "jarvis-os-firewall.png")?;
+    // Apariencia (Firewall → AvPág da la vuelta: Sistema, Personalización, Apariencia): el
+    // tema claro, y después se vuelve al HUD para las capturas que siguen.
+    for _ in 0..3 {
+        s.monitor("sendkey pgdn")?;
+    }
+    s.monitor("sendkey right")?;
+    s.wait_for("CONFIG_GUARDADA", STEP)?;
+    thread::sleep(Duration::from_millis(800));
+    shot(&mut s, "jarvis-os-claro.png")?;
+    s.monitor("sendkey left")?;
+    s.wait_for("CONFIG_GUARDADA", STEP)?;
 
     // Paneles: Win+X, Win+A, Win+N (sobre el escritorio con el fondo nuevo).
     s.monitor("sendkey meta_l-d")?;

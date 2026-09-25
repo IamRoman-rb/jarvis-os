@@ -17,7 +17,7 @@ use crate::apps::{icon_of, name_of};
 use crate::i18n::{tr, trf};
 use crate::system::{AppKind, HISTORY, History, Series, SystemStats};
 use crate::text_input::TextInput;
-use crate::widgets::{FIELD_BG, SELECTED_BG, bar, button, draw_fit, graph, ip, label, light, s16};
+use crate::widgets::{bar, button, draw_fit, field_bg, graph, ip, label, light, s16, selected_bg};
 
 // --- barra de íconos --------------------------------------------------------------------------
 
@@ -109,42 +109,42 @@ pub fn toolbar_hit(n: usize, x: i32, y: i32) -> Option<usize> {
 
 pub fn draw_toolbar(c: &mut Canvas<'_>, items: &[ToolbarItem], hover: Option<usize>) {
     let Rect { x, y, w, h } = toolbar_rect(items.len());
-    rounded_rect(c, x, y, w, h, 12, theme::PANEL, 225);
-    rounded_outline(c, x, y, w, h, 12, theme::PANEL_RIM);
+    rounded_rect(c, x, y, w, h, 12, theme::panel(), 225);
+    rounded_outline(c, x, y, w, h, 12, theme::panel_rim());
     for (i, it) in items.iter().enumerate() {
         let (ix, iy) = (slot_x(i) + SLOT / 2, y + h / 2 - 2);
         if it.active || hover == Some(i) {
             let alpha = if it.active { 90 } else { 45 };
-            rounded_rect(c, ix - 13, iy - 12, 26, 24, 6, theme::VECTOR_BLUE, alpha);
+            rounded_rect(c, ix - 13, iy - 12, 26, 24, 6, theme::vector_blue(), alpha);
         }
         let color = if it.active || hover == Some(i) {
-            theme::PARTICLE_BRIGHT
+            theme::particle_bright()
         } else {
-            theme::TEXT_DIM
+            theme::text_dim()
         };
         icon(c, it.icon, ix, iy, color);
         if it.running {
             let wdt = if it.active { 10 } else { 4 };
-            rounded_rect(c, ix - wdt / 2, y + h - 5, wdt, 2, 1, theme::CYAN, 255);
+            rounded_rect(c, ix - wdt / 2, y + h - 5, wdt, 2, 1, theme::cyan(), 255);
         }
     }
     // Separador antes del chat de JARVIS y de las ventanas extra.
     let sx = slot_x(LAUNCHERS.len() - 1) - 1;
-    line(c, sx, y + 9, sx, y + h - 10, theme::PANEL_RIM);
+    line(c, sx, y + 9, sx, y + h - 10, theme::panel_rim());
     if items.len() > LAUNCHERS.len() {
         let sx = slot_x(LAUNCHERS.len()) - 5;
-        line(c, sx, y + 9, sx, y + h - 10, theme::PANEL_RIM);
+        line(c, sx, y + 9, sx, y + h - 10, theme::panel_rim());
     }
     // Nombre del ícono que tiene el mouse encima.
     if let Some(i) = hover
         && let Some(it) = items.get(i)
     {
-        let st = s16(theme::TEXT);
+        let st = s16(theme::text());
         let tw = text::width(&it.name, &st) + 20;
         let tx = (slot_x(i) + SLOT / 2 - tw / 2).max(x);
         let ty = y + h + 6;
-        rounded_rect(c, tx, ty, tw, 26, 6, Color::hex(0x0a1930), 240);
-        rounded_outline(c, tx, ty, tw, 26, 6, theme::CYAN.scale(120));
+        rounded_rect(c, tx, ty, tw, 26, 6, theme::menu(), 240);
+        rounded_outline(c, tx, ty, tw, 26, 6, theme::cyan().scale(120));
         text::draw(c, tx + 10, ty + 5, &it.name, &st);
     }
 }
@@ -194,8 +194,10 @@ fn top_stat_w(w: usize) -> i32 {
     if w >= 1200 { 112 } else { 76 }
 }
 
-/// Cuántos gráficos de estado hay en la barra de arriba.
-const TOP_STATS: i32 = 5;
+/// Cuántos gráficos de estado hay en la barra de arriba (se eligen en la Configuración).
+fn top_stats_n() -> i32 {
+    crate::look::top_stats().count_ones() as i32
+}
 
 /// "45°C", o "--" sin sensor.
 pub fn temp_text(t: Option<u8>) -> String {
@@ -226,7 +228,7 @@ fn top_ip_rect(w: usize) -> Rect {
 }
 
 fn top_stats_rect(w: usize) -> Rect {
-    let sw = top_stat_w(w) * TOP_STATS;
+    let sw = top_stat_w(w) * top_stats_n();
     Rect::new(top_ip_rect(w).x - sw, 0, sw, TOPBAR_H)
 }
 
@@ -291,8 +293,8 @@ pub struct TopBar<'a> {
 
 pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
     let r = topbar_rect(w);
-    c.fill_rect(r.x, r.y, r.w, r.h, theme::PANEL);
-    line(c, 0, r.h - 1, r.w, r.h - 1, theme::PANEL_RIM);
+    c.fill_rect(r.x, r.y, r.w, r.h, theme::panel());
+    line(c, 0, r.h - 1, r.w, r.h - 1, theme::panel_rim());
     let cy = r.h / 2;
 
     // Íconos fijos.
@@ -301,20 +303,20 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
         let hover = bar_.hover == Some(TopHit::Launcher(i));
         if it.active || hover {
             let alpha = if it.active { 90 } else { 45 };
-            rounded_rect(c, ix - 12, 3, 24, r.h - 6, 5, theme::VECTOR_BLUE, alpha);
+            rounded_rect(c, ix - 12, 3, 24, r.h - 6, 5, theme::vector_blue(), alpha);
         }
         let color = if it.active || hover {
-            theme::PARTICLE_BRIGHT
+            theme::particle_bright()
         } else {
-            theme::TEXT_DIM
+            theme::text_dim()
         };
         icon(c, it.icon, ix, cy - 1, color);
         if it.running {
-            rounded_rect(c, ix - 3, r.h - 4, 6, 2, 1, theme::CYAN, 255);
+            rounded_rect(c, ix - 3, r.h - 4, 6, 2, 1, theme::cyan(), 255);
         }
     }
     let sx = top_launcher_x(LAUNCHERS.len()) + 3;
-    line(c, sx, 6, sx, r.h - 7, theme::PANEL_RIM);
+    line(c, sx, 6, sx, r.h - 7, theme::panel_rim());
 
     // Ventanas abiertas.
     let n = bar_.windows.len();
@@ -325,26 +327,26 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
         }
         let hover = bar_.hover == Some(TopHit::Window(i));
         let (bg, alpha) = if win.active {
-            (theme::VECTOR_BLUE, 90)
+            (theme::vector_blue(), 90)
         } else if hover {
-            (theme::VECTOR_BLUE, 45)
+            (theme::vector_blue(), 45)
         } else {
-            (theme::PANEL_RIM, 110)
+            (theme::panel_rim(), 110)
         };
         rounded_rect(c, chip.x, chip.y, chip.w, chip.h, 5, bg, alpha);
         let color = if win.minimized {
-            theme::TEXT_FAINT
+            theme::text_faint()
         } else if win.active {
-            theme::PARTICLE_BRIGHT
+            theme::particle_bright()
         } else {
-            theme::TEXT_DIM
+            theme::text_dim()
         };
         icon(c, win.icon, chip.x + 14, cy - 1, color);
         if chip.w > 44 {
             let st = s16(if win.minimized {
-                theme::TEXT_FAINT
+                theme::text_faint()
             } else {
-                theme::TEXT
+                theme::text()
             });
             draw_fit(c, chip.x + 28, cy - 8, &win.title, &st, chip.w - 34);
         }
@@ -356,7 +358,7 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
                 chip.w - 16,
                 2,
                 1,
-                theme::CYAN,
+                theme::cyan(),
                 255,
             );
         }
@@ -366,8 +368,8 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
     let sr = top_stats_rect(w);
     let sw = top_stat_w(w);
     let wide = sw > 100;
-    let key = light(theme::TEXT_DIM);
-    let value = s16(theme::TEXT);
+    let key = light(theme::text_dim());
+    let value = s16(theme::text());
     let mem_pct = (bar_.stats.heap_used * 100)
         .checked_div(bar_.stats.heap_total)
         .unwrap_or(0) as u32;
@@ -383,40 +385,46 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
     let disk_max = h.disk.max().max(64 * 1024);
     let net_max = h.rx.max().max(h.tx.max()).max(1024);
     let rx = h.rx.last().unwrap_or(0) + h.tx.last().unwrap_or(0);
-    let stats: [(&str, &Series<HISTORY>, u32, Color, String); TOP_STATS as usize] = [
+    let all: [(&str, &Series<HISTORY>, u32, Color, String); 5] = [
         (
             "CPU",
             &h.cpu,
             100,
-            theme::CYAN,
+            theme::cyan(),
             format!("{}%", bar_.stats.cpu_pct),
         ),
         (
             tr("MEM"),
             &h.mem,
             100,
-            theme::PARTICLE_BRIGHT,
+            theme::particle_bright(),
             format!("{mem_pct}%"),
         ),
         (
             tr("DISCO"),
             &h.disk,
             disk_max,
-            theme::AMBER,
+            theme::amber(),
             format!("{disk_pct}%"),
         ),
-        (tr("RED"), &h.rx, net_max, theme::CYAN, short_rate(rx)),
+        (tr("RED"), &h.rx, net_max, theme::cyan(), short_rate(rx)),
         (
             "TEMP",
             &h.temp,
             100,
-            theme::CRIMSON,
+            theme::crimson(),
             temp_text(bar_.stats.temp_c),
         ),
     ];
-    for (i, (name, series, max, color, val)) in stats.iter().enumerate() {
+    let mask = crate::look::top_stats();
+    let stats = all
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| mask & (1 << i) != 0)
+        .map(|(_, s)| s);
+    for (i, (name, series, max, color, val)) in stats.enumerate() {
         let x = sr.x + i as i32 * sw;
-        line(c, x, 6, x, r.h - 7, theme::PANEL_RIM);
+        line(c, x, 6, x, r.h - 7, theme::panel_rim());
         text::draw(c, x + 8, cy - 8, name, &key);
         let gx = x + 8 + text::width(name, &key) + 6;
         let gw = if wide { 30 } else { (x + sw - 6 - gx).max(12) };
@@ -428,11 +436,11 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
 
     // IP.
     let ipr = top_ip_rect(w);
-    line(c, ipr.x, 6, ipr.x, r.h - 7, theme::PANEL_RIM);
+    line(c, ipr.x, 6, ipr.x, r.h - 7, theme::panel_rim());
     let (net, net_color) = match (bar_.stats.net.present, bar_.stats.net.ip) {
-        (false, _) => (String::from(tr("sin placa")), theme::TEXT_FAINT),
-        (true, None) => (String::from("DHCP..."), theme::AMBER),
-        (true, Some(a)) => (ip(a), theme::TEXT),
+        (false, _) => (String::from(tr("sin placa")), theme::text_faint()),
+        (true, None) => (String::from("DHCP..."), theme::amber()),
+        (true, Some(a)) => (ip(a), theme::text()),
     };
     let st = s16(net_color);
     let tw = text::width(&net, &st);
@@ -440,11 +448,11 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
 
     // Hora.
     let cr = top_clock_rect(w);
-    line(c, cr.x, 6, cr.x, r.h - 7, theme::PANEL_RIM);
+    line(c, cr.x, 6, cr.x, r.h - 7, theme::panel_rim());
     let color = if bar_.hover == Some(TopHit::Clock) {
-        theme::PARTICLE_BRIGHT
+        theme::particle_bright()
     } else {
-        theme::CYAN
+        theme::cyan()
     };
     let st = crate::widgets::bold(color);
     let tw = text::width(bar_.clock, &st);
@@ -452,27 +460,34 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
 
     // Energía: suspender, cerrar sesión, reiniciar, apagar.
     let pr = top_power_rect(w);
-    line(c, pr.x, 6, pr.x, r.h - 7, theme::PANEL_RIM);
+    line(c, pr.x, 6, pr.x, r.h - 7, theme::panel_rim());
     let color = if bar_.hover == Some(TopHit::Power) {
-        theme::CRIMSON
+        theme::crimson()
     } else {
-        theme::TEXT_DIM
+        theme::text_dim()
     };
     icon(c, Icon::Power, pr.x + pr.w / 2, cy - 1, color);
 }
 
-/// "23:05", o "11:05 PM" con el reloj de 12 horas.
-pub fn clock_text(clock: Option<DateTime>, h24: bool) -> String {
+/// "23:05", o "11:05 PM" con el reloj de 12 horas; con `secs`, "23:05:09".
+pub fn clock_text(clock: Option<DateTime>, h24: bool, secs: bool) -> String {
+    let s = |t: &DateTime| {
+        if secs {
+            format!(":{:02}", t.second)
+        } else {
+            String::new()
+        }
+    };
     match clock {
         None => String::from("--:--"),
-        Some(t) if h24 => format!("{:02}:{:02}", t.hour, t.minute),
+        Some(t) if h24 => format!("{:02}:{:02}{}", t.hour, t.minute, s(&t)),
         Some(t) => {
             let h = match t.hour % 12 {
                 0 => 12,
                 h => h,
             };
             let ampm = if t.hour < 12 { "AM" } else { "PM" };
-            format!("{h}:{:02} {ampm}", t.minute)
+            format!("{h}:{:02}{} {ampm}", t.minute, s(&t))
         }
     }
 }
@@ -532,7 +547,7 @@ fn sparkline<const N: usize>(
         let x = r.x + r.w - (values.len() - start - i) as i32 * 3;
         c.fill_rect(x, r.y + r.h - hh, 2, hh, col);
     }
-    line(c, r.x, r.y + r.h, r.x + r.w, r.y + r.h, theme::PANEL_RIM);
+    line(c, r.x, r.y + r.h, r.x + r.w, r.y + r.h, theme::panel_rim());
 }
 
 pub fn draw_status(
@@ -544,10 +559,16 @@ pub fn draw_status(
     disk: Option<(u64, u64)>,
 ) {
     let p = status_panel_rect(w, h);
-    rounded_rect(c, p.x, p.y, p.w, p.h, 8, theme::PANEL, 215);
-    rounded_outline(c, p.x, p.y, p.w, p.h, 8, theme::PANEL_RIM);
-    text::draw(c, p.x + 12, p.y + 10, tr("ESTADO"), &label(theme::TEXT_DIM));
-    let hint = label(theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 120));
+    rounded_rect(c, p.x, p.y, p.w, p.h, 8, theme::panel(), 215);
+    rounded_outline(c, p.x, p.y, p.w, p.h, 8, theme::panel_rim());
+    text::draw(
+        c,
+        p.x + 12,
+        p.y + 10,
+        tr("ESTADO"),
+        &label(theme::text_dim()),
+    );
+    let hint = label(theme::text_faint().lerp(theme::text_dim(), 120));
     text::draw_right(c, p.x + p.w - 12, p.y + 10, tr("CLIC: MONITOR"), &hint);
     line(
         c,
@@ -555,11 +576,11 @@ pub fn draw_status(
         p.y + 34,
         p.x + p.w - 2,
         p.y + 34,
-        theme::PANEL_RIM,
+        theme::panel_rim(),
     );
 
-    let key = light(theme::TEXT_DIM);
-    let value = s16(theme::TEXT);
+    let key = light(theme::text_dim());
+    let value = s16(theme::text());
     let row = |i: i32| p.y + 44 + i * STATUS_ROW;
     let gx = p.x + 112;
     let gw = 70;
@@ -572,7 +593,7 @@ pub fn draw_status(
         Rect::new(gx, row(0), gw, 16),
         &hist.cpu,
         100,
-        theme::CYAN,
+        theme::cyan(),
     );
     text::draw_right(c, right, row(0), &format!("{} %", st.cpu_pct), &value);
 
@@ -583,7 +604,7 @@ pub fn draw_status(
         c,
         Rect::new(gx, row(1) + 6, gw, 5),
         mem_pct,
-        theme::PARTICLE_BRIGHT,
+        theme::particle_bright(),
     );
     let mem = format!("{} MiB", st.heap_used / (1024 * 1024));
     text::draw_right(c, right, row(1), &mem, &value);
@@ -594,7 +615,7 @@ pub fn draw_status(
         Some((free, total)) => {
             let used = total.saturating_sub(free);
             let pct = (used * 100).checked_div(total).unwrap_or(0) as u32;
-            bar(c, Rect::new(gx, row(2) + 6, gw, 5), pct, theme::AMBER);
+            bar(c, Rect::new(gx, row(2) + 6, gw, 5), pct, theme::amber());
             let free = trf("{} MiB libres", &[&(free / (1024 * 1024)).to_string()]);
             text::draw_right(c, right, row(2), &free, &value);
         }
@@ -611,7 +632,7 @@ pub fn draw_status(
         Rect::new(gx, row(3), gw, 16),
         &hist.rx,
         net_max,
-        theme::CYAN,
+        theme::cyan(),
     );
     let net = match (st.net.present, st.net.ip) {
         (false, _) => String::from(tr("sin placa")),
@@ -628,7 +649,7 @@ pub fn draw_status(
                 Rect::new(gx, row(4), gw, 16),
                 &hist.temp,
                 100,
-                theme::CRIMSON,
+                theme::crimson(),
             );
             text::draw_right(c, right, row(4), &temp_text(Some(t)), &value);
         }
@@ -642,19 +663,19 @@ pub fn draw_status(
     text::draw_right(c, right, row(5), &perf, &value);
 
     text::draw(c, p.x + 12, row(6), tr("CEREBRO"), &key);
-    text::draw_right(c, right, row(6), tr("sin conectar"), &light(theme::AMBER));
+    text::draw_right(c, right, row(6), tr("sin conectar"), &light(theme::amber()));
 
     // Píldora "Control de misión" (abre la vista de tareas, como Win+Tab).
     let pill = pill_rect(w, h);
-    rounded_rect(c, pill.x, pill.y, pill.w, pill.h, 15, theme::PANEL, 215);
-    rounded_outline(c, pill.x, pill.y, pill.w, pill.h, 15, theme::PANEL_RIM);
-    circle(c, pill.x + 16, pill.y + pill.h / 2, 3, theme::CYAN, true);
+    rounded_rect(c, pill.x, pill.y, pill.w, pill.h, 15, theme::panel(), 215);
+    rounded_outline(c, pill.x, pill.y, pill.w, pill.h, 15, theme::panel_rim());
+    circle(c, pill.x + 16, pill.y + pill.h / 2, 3, theme::cyan(), true);
     text::draw(
         c,
         pill.x + 28,
         pill.y + 7,
         tr("CONTROL DE MISIÓN"),
-        &label(theme::TEXT_DIM),
+        &label(theme::text_dim()),
     );
 }
 
@@ -771,24 +792,24 @@ impl StartMenu {
 
     pub fn draw(&self, c: &mut Canvas<'_>, w: usize, h: usize) {
         let m = Self::rect(w, h);
-        rounded_rect(c, m.x, m.y, m.w, m.h, 12, Color::hex(0x081527), 248);
-        rounded_outline(c, m.x, m.y, m.w, m.h, 12, theme::CYAN.scale(120));
+        rounded_rect(c, m.x, m.y, m.w, m.h, 12, theme::menu(), 248);
+        rounded_outline(c, m.x, m.y, m.w, m.h, 12, theme::cyan().scale(120));
         let f = Rect::new(m.x + 12, m.y + 14, m.w - 24, 36);
-        rounded_rect(c, f.x, f.y, f.w, f.h, 6, FIELD_BG, 255);
-        rounded_outline(c, f.x, f.y, f.w, f.h, 6, theme::PANEL_RIM);
-        let st = s16(theme::TEXT);
+        rounded_rect(c, f.x, f.y, f.w, f.h, 6, field_bg(), 255);
+        rounded_outline(c, f.x, f.y, f.w, f.h, 6, theme::panel_rim());
+        let st = s16(theme::text());
         if self.query.text.is_empty() {
             text::draw(
                 c,
                 f.x + 18,
                 f.y + 10,
                 tr("Escribí para buscar apps o la web"),
-                &light(theme::TEXT_DIM),
+                &light(theme::text_dim()),
             );
-            c.fill_rect(f.x + 11, f.y + 9, 2, 18, theme::CYAN);
+            c.fill_rect(f.x + 11, f.y + 9, 2, 18, theme::cyan());
         } else {
             let tw = draw_fit(c, f.x + 12, f.y + 10, &self.query.text, &st, f.w - 30);
-            c.fill_rect(f.x + 14 + tw, f.y + 9, 2, 18, theme::CYAN);
+            c.fill_rect(f.x + 14 + tw, f.y + 9, 2, 18, theme::cyan());
         }
         for (i, (_, name, ic)) in self.items().iter().enumerate() {
             let r = Self::row(m, i);
@@ -796,17 +817,17 @@ impl StartMenu {
                 break;
             }
             if i == self.selected {
-                rounded_rect(c, r.x, r.y, r.w, r.h, 6, SELECTED_BG, 255);
-                c.fill_rect(r.x, r.y + 6, 3, r.h - 12, theme::CYAN);
+                rounded_rect(c, r.x, r.y, r.w, r.h, 6, selected_bg(), 255);
+                c.fill_rect(r.x, r.y + 6, 3, r.h - 12, theme::cyan());
             }
-            icon(c, *ic, r.x + 22, r.y + r.h / 2, theme::CYAN);
+            icon(c, *ic, r.x + 22, r.y + r.h / 2, theme::cyan());
             draw_fit(c, r.x + 46, r.y + 10, name, &st, r.w - 56);
         }
         for (item, text_label, r) in Self::power_buttons(m) {
             let col = if item == StartItem::Shutdown {
-                theme::CRIMSON
+                theme::crimson()
             } else {
-                theme::TEXT_DIM
+                theme::text_dim()
             };
             button(c, r, text_label, col, 25);
         }
@@ -852,13 +873,13 @@ fn draw_card(c: &mut Canvas<'_>, r: Rect, t: &Thumb<'_>, selected: bool) {
             r.w + 8,
             r.h + 8,
             8,
-            theme::VECTOR_BLUE,
+            theme::vector_blue(),
             80,
         );
-        rounded_outline(c, r.x - 4, r.y - 4, r.w + 8, r.h + 8, 8, theme::CYAN);
+        rounded_outline(c, r.x - 4, r.y - 4, r.w + 8, r.h + 8, 8, theme::cyan());
     }
     let img = Rect::new(r.x, r.y, r.w, r.h - 30);
-    c.fill_rect(img.x, img.y, img.w, img.h, theme::VOID);
+    c.fill_rect(img.x, img.y, img.w, img.h, theme::void());
     if let Some(src) = &t.image {
         // Miniatura sin deformar.
         let (sw, sh) = (src.width() as i32, src.height() as i32);
@@ -869,27 +890,27 @@ fn draw_card(c: &mut Canvas<'_>, r: Rect, t: &Thumb<'_>, selected: bool) {
             Rect::new(img.x + (img.w - tw) / 2, img.y + (img.h - th) / 2, tw, th),
         );
     }
-    icon(c, t.icon, r.x + 12, r.y + r.h - 14, theme::CYAN);
+    icon(c, t.icon, r.x + 12, r.y + r.h - 14, theme::cyan());
     draw_fit(
         c,
         r.x + 26,
         r.y + r.h - 22,
         &t.title,
-        &s16(theme::TEXT),
+        &s16(theme::text()),
         r.w - 30,
     );
 }
 
 pub fn draw_switcher(c: &mut Canvas<'_>, w: usize, h: usize, thumbs: &[Thumb<'_>], sel: usize) {
     let p = switcher_rect(w, h, thumbs.len());
-    rounded_rect(c, p.x, p.y, p.w, p.h, 14, Color::hex(0x071222), 240);
-    rounded_outline(c, p.x, p.y, p.w, p.h, 14, theme::PANEL_RIM);
+    rounded_rect(c, p.x, p.y, p.w, p.h, 14, theme::menu(), 240);
+    rounded_outline(c, p.x, p.y, p.w, p.h, 14, theme::panel_rim());
     text::draw(
         c,
         p.x + 20,
         p.y + 14,
         tr("CAMBIAR DE VENTANA"),
-        &label(theme::TEXT_DIM),
+        &label(theme::text_dim()),
     );
     for (i, t) in thumbs.iter().enumerate() {
         draw_card(c, card_rect(p, i), t, i == sel);
@@ -904,23 +925,29 @@ pub fn switcher_hit(w: usize, h: usize, n: usize, x: i32, y: i32) -> Option<usiz
 /// Vista de tareas (Win+Tab, "Control de misión"): toda la pantalla oscurecida y las ventanas
 /// abiertas como tarjetas grandes.
 pub fn draw_task_view(c: &mut Canvas<'_>, w: usize, h: usize, thumbs: &[Thumb<'_>], sel: usize) {
-    c.fill_rect(0, 0, w as i32, h as i32, Color::hex(0x040a14));
+    c.fill_rect(
+        0,
+        0,
+        w as i32,
+        h as i32,
+        theme::void().lerp(Color::BLACK, 50),
+    );
     text::draw(
         c,
         MARGIN + 8,
         MARGIN + 60,
         tr("CONTROL DE MISIÓN"),
-        &label(theme::CYAN),
+        &label(theme::cyan()),
     );
     text::draw(
         c,
         MARGIN + 8,
         MARGIN + 84,
         tr("Clic o Enter: ir a la ventana · Supr: cerrarla · Esc: volver"),
-        &light(theme::TEXT_DIM),
+        &light(theme::text_dim()),
     );
     if thumbs.is_empty() {
-        let st = s16(theme::TEXT_DIM);
+        let st = s16(theme::text_dim());
         let msg = tr("No hay ventanas abiertas.");
         text::draw(
             c,
@@ -969,8 +996,8 @@ pub fn draw_lock(
 ) {
     use core::fmt::Write;
     let (w, h) = (w as i32, h as i32);
-    c.fill_rect(0, 0, w, h, theme::VOID);
-    jarvis_gfx::shapes::glow(c, w / 2, h / 2, h / 2, Color::hex(0x0a2a66), 70);
+    c.fill_rect(0, 0, w, h, theme::void());
+    jarvis_gfx::shapes::glow(c, w / 2, h / 2, h / 2, theme::vector_blue().scale(100), 70);
     let mut time = StrBuf::<8>::new();
     let mut date = StrBuf::<48>::new();
     if let Some(t) = now {
@@ -984,7 +1011,7 @@ pub fn draw_lock(
     }
     let tw = big.width(time.as_str());
     big.draw(c, (w - tw) / 2, h / 2 - 150, time.as_str(), Color::WHITE);
-    let st = label(theme::CYAN.scale(200));
+    let st = label(theme::cyan().scale(200));
     let dw = text::width(date.as_str(), &st);
     text::draw(c, (w - dw) / 2, h / 2 + 10, date.as_str(), &st);
     let hint = match (pin, user) {
@@ -996,35 +1023,35 @@ pub fn draw_lock(
     // El usuario, con un círculo con su inicial (como en la pantalla de inicio de Windows).
     let pin_y = if let Some(name) = user {
         let (cx, cy) = (w / 2, h / 2 + 70);
-        circle(c, cx, cy, 26, theme::VECTOR_BLUE, true);
-        circle(c, cx, cy, 26, theme::CYAN, false);
+        circle(c, cx, cy, 26, theme::vector_blue(), true);
+        circle(c, cx, cy, 26, theme::cyan(), false);
         let initial: String = name.chars().take(1).flat_map(char::to_uppercase).collect();
         let st = crate::widgets::bold(Color::WHITE);
         let iw = text::width(&initial, &st);
         text::draw(c, cx - iw / 2, cy - 9, &initial, &st);
-        let st = s16(theme::TEXT);
+        let st = s16(theme::text());
         text::draw(c, cx - text::width(name, &st) / 2, cy + 36, name, &st);
         h / 2 + 140
     } else {
         h / 2 + 60
     };
-    let st = label(theme::TEXT_DIM);
+    let st = label(theme::text_dim());
     text::draw(c, (w - text::width(hint, &st)) / 2, h - 90, hint, &st);
     if let Some((n, wrong)) = pin {
         let f = Rect::new((w - 260) / 2, pin_y, 260, 44);
-        rounded_rect(c, f.x, f.y, f.w, f.h, 8, FIELD_BG, 255);
-        let rim = if wrong { theme::AMBER } else { theme::CYAN };
+        rounded_rect(c, f.x, f.y, f.w, f.h, 8, field_bg(), 255);
+        let rim = if wrong { theme::amber() } else { theme::cyan() };
         rounded_outline(c, f.x, f.y, f.w, f.h, 8, rim);
         for i in 0..n as i32 {
-            circle(c, f.x + 24 + i * 30, f.y + f.h / 2, 6, theme::TEXT, true);
+            circle(c, f.x + 24 + i * 30, f.y + f.h / 2, 6, theme::text(), true);
         }
         if n == 0 {
-            let st = light(theme::TEXT_DIM);
+            let st = light(theme::text_dim());
             text::draw(c, f.x + 16, f.y + 13, "PIN", &st);
         }
         if wrong {
             let msg = tr("PIN INCORRECTO. PROBÁ OTRA VEZ.");
-            let st = label(theme::AMBER);
+            let st = label(theme::amber());
             text::draw(c, (w - text::width(msg, &st)) / 2, f.y + f.h + 16, msg, &st);
         }
     }
@@ -1054,24 +1081,30 @@ pub fn power_buttons(w: usize, h: usize) -> [Rect; POWER_CHOICES] {
 }
 
 pub fn draw_power(c: &mut Canvas<'_>, w: usize, h: usize, sel: usize) {
-    c.fill_rect(0, 0, w as i32, h as i32, Color::hex(0x03070e));
+    c.fill_rect(
+        0,
+        0,
+        w as i32,
+        h as i32,
+        theme::void().lerp(Color::BLACK, 90),
+    );
     let d = power_rect(w, h);
-    rounded_rect(c, d.x, d.y, d.w, d.h, 12, Color::hex(0x0a1930), 255);
-    rounded_outline(c, d.x, d.y, d.w, d.h, 12, theme::CRIMSON.scale(180));
-    icon(c, Icon::Power, d.x + 34, d.y + 36, theme::CRIMSON);
+    rounded_rect(c, d.x, d.y, d.w, d.h, 12, theme::menu(), 255);
+    rounded_outline(c, d.x, d.y, d.w, d.h, 12, theme::crimson().scale(180));
+    icon(c, Icon::Power, d.x + 34, d.y + 36, theme::crimson());
     text::draw(
         c,
         d.x + 58,
         d.y + 28,
         tr("APAGAR JARVIS-OS"),
-        &label(theme::CRIMSON),
+        &label(theme::crimson()),
     );
     text::draw(
         c,
         d.x + 24,
         d.y + 72,
         tr("¿Qué querés que haga la computadora?"),
-        &s16(theme::TEXT),
+        &s16(theme::text()),
     );
     let labels = [
         tr("APAGAR"),
@@ -1082,10 +1115,10 @@ pub fn draw_power(c: &mut Canvas<'_>, w: usize, h: usize, sel: usize) {
     ];
     for (i, r) in power_buttons(w, h).into_iter().enumerate() {
         let col = match i {
-            0 => theme::CRIMSON,
-            1 => theme::AMBER,
-            2 | 3 => theme::CYAN,
-            _ => theme::TEXT_DIM,
+            0 => theme::crimson(),
+            1 => theme::amber(),
+            2 | 3 => theme::cyan(),
+            _ => theme::text_dim(),
         };
         button(c, r, labels[i], col, if i == sel { 90 } else { 20 });
         if i == sel {
@@ -1115,11 +1148,15 @@ pub fn draw_toasts(c: &mut Canvas<'_>, w: usize, h: usize, toasts: &[(String, bo
     for (i, (msg, error)) in toasts.iter().rev().take(3).enumerate() {
         let y = area.y + area.h - (i as i32 + 1) * (TOAST_H + 8);
         let r = Rect::new(area.x + 4, y, area.w - 4, TOAST_H);
-        let col = if *error { theme::AMBER } else { theme::CYAN };
-        rounded_rect(c, r.x, r.y, r.w, r.h, 8, Color::hex(0x0a1930), 245);
+        let col = if *error {
+            theme::amber()
+        } else {
+            theme::cyan()
+        };
+        rounded_rect(c, r.x, r.y, r.w, r.h, 8, theme::menu(), 245);
         rounded_outline(c, r.x, r.y, r.w, r.h, 8, col.scale(170));
         c.fill_rect(r.x + 1, r.y + 8, 3, r.h - 16, col);
-        draw_fit(c, r.x + 16, r.y + 13, msg, &s16(theme::TEXT), r.w - 28);
+        draw_fit(c, r.x + 16, r.y + 13, msg, &s16(theme::text()), r.w - 28);
     }
 }
 
