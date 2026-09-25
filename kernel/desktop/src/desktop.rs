@@ -137,6 +137,11 @@ enum Overlay {
     Lock,
     /// Suspendido: pantalla negra, nada se redibuja; una tecla o el mouse despiertan.
     Sleep,
+    /// Win+Z: elegir una distribución y la zona para la ventana (índice en
+    /// `shell::layout_zones`).
+    Layouts {
+        sel: usize,
+    },
     /// Win+X y Alt+Espacio.
     Menu(Menu),
     /// Win+A: configuración rápida.
@@ -296,6 +301,8 @@ pub struct Desktop<D: BlockDevice> {
     right_down: bool,
     /// Arrastrando "con contorno": dónde está el contorno.
     outline: Option<Rect>,
+    /// Portapapeles de texto del sistema (Ctrl+C / Ctrl+V entre apps).
+    clipboard: String,
     /// "Cerrar sesión": la pantalla de bloqueo pasa a ser la de iniciar sesión.
     session_closed: bool,
     /// Ventana que recibe los movimientos del mouse hasta que se suelte el botón (se apretó
@@ -362,6 +369,7 @@ macro_rules! ctx {
             stats: &$s.stats,
             tasks: $tasks,
             config: &$s.config,
+            clipboard: &mut $s.clipboard,
         }
     };
 }
@@ -423,6 +431,7 @@ impl<D: BlockDevice> Desktop<D> {
             left_down: false,
             right_down: false,
             outline: None,
+            clipboard: String::new(),
             session_closed: false,
             pointer_capture: None,
             drag: None,
@@ -574,6 +583,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Lock if self.session_closed => "sesion",
             Overlay::Lock => "bloqueo",
             Overlay::Sleep => "suspendido",
+            Overlay::Layouts { .. } => "distribuciones",
             Overlay::Menu(m) if m.title.starts_with("VENTANA") => "ventana",
             Overlay::Menu(_) => "enlaces",
             Overlay::Quick { .. } => "rapida",
@@ -1198,15 +1208,31 @@ impl<D: BlockDevice> Desktop<D> {
                         self.wm.stretch_vertical(id);
                     }
                 }
+                Key::Char('z' | 'Z') => {
+                    if focused.is_some() {
+                        self.set_overlay(Overlay::Layouts { sel: 0 });
+                    }
+                }
+                Key::Char('t' | 'T') if m.shift => {
+                    let n = self.wm.tile();
+                    self.logs.push(format!("VENTANAS_MOSAICO {n}"));
+                }
+                Key::Char('c' | 'C') if m.shift => {
+                    let n = self.wm.cascade();
+                    self.logs.push(format!("VENTANAS_CASCADA {n}"));
+                }
                 Key::Up => {
                     if let Some(id) = focused
+                        && !self.wm.snap_vertical(id, true)
                         && !self.wm.get(id).is_some_and(|w| w.maximized)
                     {
                         self.wm.toggle_maximize(id);
                     }
                 }
                 Key::Down => {
-                    if let Some(id) = focused {
+                    if let Some(id) = focused
+                        && !self.wm.snap_vertical(id, false)
+                    {
                         self.wm.restore_or_minimize(id);
                     }
                 }
@@ -1437,6 +1463,34 @@ impl<D: BlockDevice> Desktop<D> {
     fn overlay_key(&mut self, key: Key, now_ms: u64, clock: Option<DateTime>) -> bool {
         match &mut self.overlay {
             Overlay::None | Overlay::Lock | Overlay::Sleep => false,
+            Overlay::Layouts { sel } => {
+                let zones = shell::layout_zones(self.width, self.height);
+                let n = zones.len();
+                let (t, _, _) = zones[(*sel).min(n - 1)];
+                match key {
+                    Key::Escape => self.set_overlay(Overlay::None),
+                    Key::Left => *sel = (*sel + n - 1) % n,
+                    Key::Right | Key::Tab => *sel = (*sel + 1) % n,
+                    // Arriba/abajo: la plantilla anterior o la siguiente.
+                    Key::Up | Key::Down => {
+                        let count = crate::wm::LAYOUTS.len();
+                        let next = if key == Key::Up {
+                            (t + count - 1) % count
+                        } else {
+                            (t + 1) % count
+                        };
+                        *sel = zones.iter().position(|z| z.0 == next).unwrap_or(0);
+                    }
+                    Key::Enter => {
+                        let chosen = *sel;
+                        self.apply_layout(chosen);
+                        return true;
+                    }
+                    _ => {}
+                }
+                self.overlay_dirty = true;
+                true
+            }
             Overlay::Menu(menu) => {
                 let n = menu.items.len();
                 match key {
@@ -2020,6 +2074,42 @@ impl<D: BlockDevice> Desktop<D> {
         }
     }
 
+    /// Acomoda la ventana con el foco en la zona elegida de Win+Z, y completa las otras zonas
+    /// con las demás ventanas a la vista (las usadas hace menos, primero).
+    fn apply_layout(&mut self, flat: usize) {
+        self.set_overlay(Overlay::None);
+        let Some(&(t, z, _)) = shell::layout_zones(self.width, self.height).get(flat) else {
+            return;
+        };
+        let Some(focused) = self.wm.focused() else {
+            return;
+        };
+        let zones = crate::wm::LAYOUTS[t].zones(self.wm.work_area());
+        let others: Vec<WinId> = self
+            .wm
+            .mru_here()
+            .into_iter()
+            .filter(|&id| id != focused && self.wm.get(id).is_some_and(|w| w.visible()))
+            .collect();
+        let mut others = others.into_iter();
+        for (i, zone) in zones.iter().enumerate() {
+            if i == z {
+                continue;
+            }
+            match others.next() {
+                Some(id) => self.wm.snap_to(id, *zone),
+                None => break,
+            }
+        }
+        // La elegida al final: queda adelante y con el foco.
+        self.wm.snap_to(focused, zones[z]);
+        self.logs.push(format!(
+            "VENTANAS_DISTRIBUCION {:?} zona {}",
+            crate::wm::LAYOUTS[t],
+            z + 1
+        ));
+    }
+
     /// Se soltó el mouse después de arrastrar: el contorno pasa a ser la ventana, y contra un
     /// borde la ventana se acopla (arriba se maximiza), como en Windows.
     fn end_drag(&mut self, drag: Drag, x: i32, y: i32) {
@@ -2033,8 +2123,20 @@ impl<D: BlockDevice> Desktop<D> {
         if !self.config.snap_edges {
             return;
         }
-        let (w, _) = (self.width as i32, self.height as i32);
-        if x <= 1 {
+        let (w, h) = (self.width as i32, self.height as i32);
+        // Esquinas: un cuarto (con un margen generoso: acertarle al píxel es difícil).
+        const CORNER: i32 = 24;
+        let quarters = crate::wm::Layout::Quarters.zones(self.wm.work_area());
+        let corner = match (x <= 1, x >= w - 2, y <= CORNER, y >= h - CORNER) {
+            (true, _, true, _) => Some(quarters[0]),
+            (_, true, true, _) => Some(quarters[1]),
+            (true, _, _, true) => Some(quarters[2]),
+            (_, true, _, true) => Some(quarters[3]),
+            _ => None,
+        };
+        if let Some(q) = corner {
+            self.wm.snap_to(id, q);
+        } else if x <= 1 {
             self.wm.snap(id, Side::Left);
         } else if x >= w - 2 {
             self.wm.snap(id, Side::Right);
@@ -2047,6 +2149,13 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     fn update_hover(&mut self, x: i32, y: i32) {
+        if let Overlay::Layouts { sel } = &mut self.overlay
+            && let Some(i) = shell::layouts_hit(self.width, self.height, x, y)
+            && *sel != i
+        {
+            *sel = i;
+            self.overlay_dirty = true;
+        }
         if self.topbar_mode() {
             self.toolbar_hover = None;
             self.top_hover = shell::topbar_hit(self.width, self.slots.len(), x, y);
@@ -2096,6 +2205,16 @@ impl<D: BlockDevice> Desktop<D> {
         match &self.overlay {
             // (Dormido no llega acá: el mouse despierta en on_mouse.)
             Overlay::Sleep => return,
+            Overlay::Layouts { .. } => {
+                match shell::layouts_hit(self.width, self.height, x, y) {
+                    Some(i) => self.apply_layout(i),
+                    None if !shell::layouts_rect(self.width, self.height).contains(x, y) => {
+                        self.set_overlay(Overlay::None)
+                    }
+                    None => {}
+                }
+                return;
+            }
             Overlay::Lock => {
                 if self.config.pin.is_empty() {
                     self.unlock();
@@ -2263,6 +2382,8 @@ impl<D: BlockDevice> Desktop<D> {
                             y: cy,
                             double,
                             right,
+                            ctrl: self.mods.ctrl,
+                            shift: self.mods.shift,
                         },
                         content,
                         &mut ctx,
@@ -2626,6 +2747,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Menu(m) => m.rect(w, h).inset(-4),
             Overlay::Quick { .. } => panels::quick_rect(w, h).inset(-4),
             Overlay::Notices => panels::notices_rect(w, h).inset(-4),
+            Overlay::Layouts { .. } => shell::layouts_rect(w, h).inset(-4),
             _ => Rect::new(0, 0, w as i32, h as i32),
         }
     }
@@ -2744,6 +2866,7 @@ impl<D: BlockDevice> Desktop<D> {
                 shell::draw_power(frame, w, h, *sel);
                 return;
             }
+            Overlay::Layouts { .. } => {}
             Overlay::TaskView { order, sel } => {
                 let (order, sel) = (order.clone(), *sel);
                 let thumbs = self.thumbs(&order, format, bpp);
@@ -2883,6 +3006,7 @@ impl<D: BlockDevice> Desktop<D> {
                 panels::draw_quick(frame, w, h, &self.config, *sel, &net);
             }
             Overlay::Notices => panels::draw_notices(frame, w, h, &self.notices, clock),
+            Overlay::Layouts { sel } => shell::draw_layouts(frame, w, h, *sel),
             _ => {}
         }
     }

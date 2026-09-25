@@ -3,6 +3,7 @@
 //! Regla de seguridad (la misma que el cerebro de JARVIS): **borrar = mover a la Papelera**. El
 //! borrado definitivo solo existe dentro de la Papelera y siempre pide confirmación.
 
+use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -94,9 +95,13 @@ pub enum Column {
 pub enum Dialog {
     NewFolder(TextInput),
     NewFile(TextInput),
-    Rename { original: String, input: TextInput },
-    ConfirmTrash(String),
-    ConfirmDelete(String),
+    Rename {
+        original: String,
+        input: TextInput,
+    },
+    /// Los nombres (uno o varios) a mover a la Papelera.
+    ConfirmTrash(Vec<String>),
+    ConfirmDelete(Vec<String>),
     ConfirmEmptyTrash,
 }
 
@@ -138,8 +143,20 @@ impl Dialog {
             Dialog::NewFolder(_) | Dialog::NewFile(_) | Dialog::Rename { .. } => {
                 tr("Nombre:").into()
             }
-            Dialog::ConfirmTrash(n) => trf("¿Mover \"{}\" a la Papelera?", &[n]),
-            Dialog::ConfirmDelete(n) => trf("\"{}\" se borra para siempre.", &[n]),
+            Dialog::ConfirmTrash(n) if n.len() == 1 => {
+                trf("¿Mover \"{}\" a la Papelera?", &[&n[0]])
+            }
+            Dialog::ConfirmTrash(n) => trf(
+                "¿Mover {} elementos a la Papelera?",
+                &[&n.len().to_string()],
+            ),
+            Dialog::ConfirmDelete(n) if n.len() == 1 => {
+                trf("\"{}\" se borra para siempre.", &[&n[0]])
+            }
+            Dialog::ConfirmDelete(n) => trf(
+                "{} elementos se borran para siempre.",
+                &[&n.len().to_string()],
+            ),
             Dialog::ConfirmEmptyTrash => {
                 tr("Todo lo que está en la Papelera se borra para siempre.").into()
             }
@@ -162,7 +179,13 @@ pub enum Preview {
 pub struct FilesApp {
     pub cwd: String,
     pub entries: Vec<DirEntry>,
+    /// La fila con el cursor.
     pub selected: usize,
+    /// Las filas elegidas cuando hay más de una (Shift+flechas, Ctrl+clic, Ctrl+E). Vacío =
+    /// solo cuenta `selected`.
+    pub marked: BTreeSet<usize>,
+    /// Desde dónde se extiende la selección con Shift.
+    anchor: Option<usize>,
     pub scroll: usize,
     history: Vec<String>,
     pub dialog: Option<Dialog>,
@@ -176,8 +199,8 @@ pub struct FilesApp {
     pub opened: bool,
     /// Archivo que se pidió abrir (Enter o doble clic): la ventana decide con qué app.
     pub open_request: Option<String>,
-    /// Lo copiado o cortado (Ctrl+C / Ctrl+X): (ruta, es_cortar).
-    pub clipboard: Option<(String, bool)>,
+    /// Lo copiado o cortado (Ctrl+C / Ctrl+X): (rutas, es_cortar).
+    pub clipboard: Option<(Vec<String>, bool)>,
     pub sort: (Column, bool),
     /// Búsqueda por tipeo: las letras escritas hace poco (como en el Explorador de Windows).
     typed: String,
@@ -245,6 +268,8 @@ impl FilesApp {
             cwd: "/".into(),
             entries: Vec::new(),
             selected: 0,
+            marked: BTreeSet::new(),
+            anchor: None,
             scroll: 0,
             history: Vec::new(),
             dialog: None,
@@ -269,6 +294,78 @@ impl FilesApp {
 
     pub fn selected_path(&self) -> Option<String> {
         self.selected_entry().map(|e| join(&self.cwd, &e.name))
+    }
+
+    /// Los nombres sobre los que actúa una operación: los marcados o, si no hay, el de la
+    /// fila con el cursor.
+    pub fn targets(&self) -> Vec<String> {
+        if self.marked.is_empty() {
+            return self
+                .selected_entry()
+                .map(|e| e.name.clone())
+                .into_iter()
+                .collect();
+        }
+        self.marked
+            .iter()
+            .filter_map(|&i| self.entries.get(i))
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    pub fn is_marked(&self, i: usize) -> bool {
+        self.marked.contains(&i)
+    }
+
+    pub fn clear_marks(&mut self) {
+        if !self.marked.is_empty() {
+            self.marked.clear();
+            self.dirty = true;
+        }
+        self.anchor = None;
+    }
+
+    /// Ctrl+E (o Ctrl+A): todo.
+    pub fn mark_all(&mut self, log: &mut Vec<String>) {
+        self.marked = (0..self.entries.len()).collect();
+        self.anchor = Some(0);
+        self.dirty = true;
+        log.push(format!("ARCHIVOS_SELECCION_TODO {}", self.marked.len()));
+    }
+
+    /// Un clic en una fila: solo, con Ctrl (suma o saca) o con Shift (un rango).
+    pub fn click_row<D: BlockDevice>(
+        &mut self,
+        fs: &mut FileSystem<D>,
+        i: usize,
+        ctrl: bool,
+        shift: bool,
+        log: &mut Vec<String>,
+    ) {
+        if i >= self.entries.len() {
+            return;
+        }
+        if ctrl {
+            if self.marked.is_empty() {
+                self.marked.insert(self.selected);
+            }
+            if !self.marked.remove(&i) {
+                self.marked.insert(i);
+            }
+            self.anchor = Some(i);
+        } else if shift {
+            let a = self.anchor.unwrap_or(self.selected);
+            self.anchor = Some(a);
+            self.marked = (a.min(i)..=a.max(i)).collect();
+        } else {
+            self.marked.clear();
+            self.anchor = Some(i);
+        }
+        self.dirty = true;
+        self.select(fs, i, log);
+        if self.marked.len() > 1 {
+            log.push(format!("ARCHIVOS_MARCADOS {}", self.marked.len()));
+        }
     }
 
     pub fn in_trash(&self) -> bool {
@@ -343,6 +440,8 @@ impl FilesApp {
 
     /// Vuelve a leer la carpeta actual, conservando la selección por nombre si sigue existiendo.
     pub fn reload<D: BlockDevice>(&mut self, fs: &mut FileSystem<D>, select: Option<&str>) {
+        self.marked.clear();
+        self.anchor = None;
         let keep = select
             .map(String::from)
             .or_else(|| self.selected_entry().map(|e| e.name.clone()));
@@ -506,11 +605,11 @@ impl FilesApp {
 
     /// Supr: a la Papelera, o borrado definitivo si ya está en la Papelera.
     pub fn start_delete(&mut self, now_ms: u64, log: &mut Vec<String>) {
-        let Some(e) = self.selected_entry() else {
+        let names = self.targets();
+        if names.is_empty() {
             return;
-        };
-        let name = e.name.clone();
-        if self.cwd == "/" && name.eq_ignore_ascii_case(tr("Papelera")) {
+        }
+        if self.cwd == "/" && names.iter().any(|n| n.eq_ignore_ascii_case(tr("Papelera"))) {
             self.notify(
                 tr("La Papelera no se puede mover a la Papelera."),
                 true,
@@ -520,9 +619,9 @@ impl FilesApp {
             return;
         }
         self.dialog = Some(if self.in_trash() {
-            Dialog::ConfirmDelete(name)
+            Dialog::ConfirmDelete(names)
         } else {
-            Dialog::ConfirmTrash(name)
+            Dialog::ConfirmTrash(names)
         });
         self.dirty = true;
     }
@@ -590,21 +689,54 @@ impl FilesApp {
                     )
                 })
             }
-            Dialog::ConfirmTrash(name) => {
-                let path = join(&self.cwd, name);
-                Self::move_to_trash(fs, &path, now).map(|dest| {
-                    log.push(format!("ARCHIVOS_PAPELERA {path} -> {dest}"));
-                    (format!("\"{name}\" está en la Papelera."), None)
+            Dialog::ConfirmTrash(names) => {
+                let mut result = Ok(());
+                for name in names {
+                    let path = join(&self.cwd, name);
+                    match Self::move_to_trash(fs, &path, now) {
+                        Ok(dest) => log.push(format!("ARCHIVOS_PAPELERA {path} -> {dest}")),
+                        Err(e) => {
+                            result = Err(e);
+                            break;
+                        }
+                    }
+                }
+                result.map(|()| {
+                    let msg = if names.len() == 1 {
+                        format!("\"{}\" está en la Papelera.", names[0])
+                    } else {
+                        trf(
+                            "{} elementos están en la Papelera.",
+                            &[&names.len().to_string()],
+                        )
+                    };
+                    (msg, None)
                 })
             }
-            Dialog::ConfirmDelete(name) => {
-                let path = join(&self.cwd, name);
-                fs.remove(&path).map(|()| {
-                    if self.cwd == TRASH {
-                        Self::index_remove(fs, Some(name), now);
+            Dialog::ConfirmDelete(names) => {
+                let mut result = Ok(());
+                for name in names {
+                    let path = join(&self.cwd, name);
+                    match fs.remove(&path) {
+                        Ok(()) => {
+                            if self.cwd == TRASH {
+                                Self::index_remove(fs, Some(name), now);
+                            }
+                            log.push(format!("ARCHIVOS_BORRADO {path}"));
+                        }
+                        Err(e) => {
+                            result = Err(e);
+                            break;
+                        }
                     }
-                    log.push(format!("ARCHIVOS_BORRADO {path}"));
-                    (format!("\"{name}\" se borró."), None)
+                }
+                result.map(|()| {
+                    let msg = if names.len() == 1 {
+                        format!("\"{}\" se borró.", names[0])
+                    } else {
+                        trf("{} elementos se borraron.", &[&names.len().to_string()])
+                    };
+                    (msg, None)
                 })
             }
             Dialog::ConfirmEmptyTrash => {
@@ -744,22 +876,31 @@ impl FilesApp {
     // --- copiar, cortar y pegar ----------------------------------------------------------------
 
     pub fn copy_selected(&mut self, cut: bool, now_ms: u64, log: &mut Vec<String>) {
-        let Some(path) = self.selected_path() else {
+        let names = self.targets();
+        if names.is_empty() {
             return;
+        }
+        let paths: Vec<String> = names.iter().map(|n| join(&self.cwd, n)).collect();
+        for path in &paths {
+            log.push(format!(
+                "ARCHIVOS_{} {path}",
+                if cut { "CORTADO" } else { "COPIADO" }
+            ));
+        }
+        let msg = match (names.len(), cut) {
+            (1, false) => format!("\"{}\" copiado: Ctrl+V lo pega en otra carpeta.", names[0]),
+            (1, true) => format!("\"{}\" cortado: Ctrl+V lo pega en otra carpeta.", names[0]),
+            (n, false) => trf(
+                "{} elementos copiados: Ctrl+V los pega en otra carpeta.",
+                &[&n.to_string()],
+            ),
+            (n, true) => trf(
+                "{} elementos cortados: Ctrl+V los pega en otra carpeta.",
+                &[&n.to_string()],
+            ),
         };
-        let name = basename(&path).to_string();
-        log.push(format!(
-            "ARCHIVOS_{} {path}",
-            if cut { "CORTADO" } else { "COPIADO" }
-        ));
-        self.clipboard = Some((path, cut));
-        let verb = if cut { "cortado" } else { "copiado" };
-        self.notify(
-            format!("\"{name}\" {verb}: Ctrl+V lo pega en otra carpeta."),
-            false,
-            now_ms,
-            log,
-        );
+        self.clipboard = Some((paths, cut));
+        self.notify(msg, false, now_ms, log);
     }
 
     pub fn paste<D: BlockDevice>(
@@ -769,31 +910,50 @@ impl FilesApp {
         now_ms: u64,
         log: &mut Vec<String>,
     ) {
-        let Some((src, cut)) = self.clipboard.clone() else {
+        let Some((sources, cut)) = self.clipboard.clone() else {
             self.notify(tr("No hay nada copiado."), false, now_ms, log);
             return;
         };
-        let name = basename(&src).to_string();
-        let same_dir = parent(&src).eq_ignore_ascii_case(&self.cwd);
-        let result = if cut && same_dir {
-            Ok(name.clone())
-        } else if cut {
-            move_unique(fs, &src, &self.cwd)
-        } else {
-            let target = unique_name(fs, &self.cwd, &name);
-            fs.copy(&src, &join(&self.cwd, &target), now)
-                .map(|()| target)
-        };
-        match result {
-            Ok(target) => {
-                if cut {
-                    self.clipboard = None;
+        let mut pasted: Vec<String> = Vec::new();
+        let mut failed = None;
+        for src in &sources {
+            let name = basename(src).to_string();
+            let same_dir = parent(src).eq_ignore_ascii_case(&self.cwd);
+            let result = if cut && same_dir {
+                Ok(name.clone())
+            } else if cut {
+                move_unique(fs, src, &self.cwd)
+            } else {
+                let target = unique_name(fs, &self.cwd, &name);
+                fs.copy(src, &join(&self.cwd, &target), now)
+                    .map(|()| target)
+            };
+            match result {
+                Ok(target) => {
+                    log.push(format!("ARCHIVOS_PEGADO {}", join(&self.cwd, &target)));
+                    pasted.push(target);
                 }
-                log.push(format!("ARCHIVOS_PEGADO {}", join(&self.cwd, &target)));
-                self.reload(fs, Some(&target));
-                self.notify(format!("\"{target}\" pegado."), false, now_ms, log);
+                Err(e) => {
+                    failed = Some(e);
+                    break;
+                }
             }
-            Err(e) => self.notify(error_message(e), true, now_ms, log),
+        }
+        if cut {
+            self.clipboard = None;
+        }
+        self.reload(fs, pasted.last().map(String::as_str));
+        match failed {
+            Some(e) => self.notify(error_message(e), true, now_ms, log),
+            None if pasted.len() == 1 => {
+                self.notify(format!("\"{}\" pegado.", pasted[0]), false, now_ms, log)
+            }
+            None => self.notify(
+                trf("{} elementos pegados.", &[&pasted.len().to_string()]),
+                false,
+                now_ms,
+                log,
+            ),
         }
     }
 
@@ -877,6 +1037,7 @@ impl FilesApp {
         // Atajos del Explorador de Windows.
         if mods.ctrl {
             match key {
+                Key::Char('e' | 'E' | 'a' | 'A') => self.mark_all(log),
                 Key::Char('c' | 'C') => self.copy_selected(false, now_ms, log),
                 Key::Char('x' | 'X') => self.copy_selected(true, now_ms, log),
                 Key::Char('v' | 'V') => self.paste(fs, now, now_ms, log),
@@ -903,6 +1064,34 @@ impl FilesApp {
                 return true;
             }
             _ => {}
+        }
+        let moves = matches!(
+            key,
+            Key::Up | Key::Down | Key::PageUp | Key::PageDown | Key::Home | Key::End
+        );
+        if moves && mods.shift {
+            // Shift + mover: la selección va desde el ancla hasta el cursor.
+            let a = self.anchor.unwrap_or(self.selected);
+            self.anchor = Some(a);
+            let delta = match key {
+                Key::Up => -1,
+                Key::Down => 1,
+                Key::PageUp => -10,
+                Key::PageDown => 10,
+                Key::Home => isize::MIN / 2,
+                _ => isize::MAX / 2,
+            };
+            self.move_selection(fs, delta, log);
+            self.marked = (a.min(self.selected)..=a.max(self.selected)).collect();
+            self.dirty = true;
+            return true;
+        }
+        if moves {
+            self.clear_marks();
+        }
+        if key == Key::Escape && !self.marked.is_empty() {
+            self.clear_marks();
+            return true;
         }
         match key {
             Key::Up => self.move_selection(fs, -1, log),

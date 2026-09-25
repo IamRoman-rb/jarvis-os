@@ -2,6 +2,11 @@
 //!
 //! El texto se guarda como una lista de líneas y el cursor es (línea, columna) contando
 //! caracteres, no bytes: así las tildes y la ñ ocupan una sola posición.
+//!
+//! **Selección**: un *ancla* (donde empezó) y el cursor (donde está ahora); lo seleccionado es lo
+//! que queda entre los dos, en el orden que sea. Shift + cualquier movimiento deja el ancla
+//! quieta y mueve el cursor, igual que arrastrar con el mouse. Ctrl+E (o Ctrl+A) selecciona todo;
+//! Ctrl+C, Ctrl+X y Ctrl+V usan el portapapeles del sistema.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -54,7 +59,13 @@ pub struct Editor {
     /// "Guardar como": se está escribiendo la ruta.
     save_as: Option<TextInput>,
     status: Option<(String, bool, u64)>,
+    /// Donde empezó la selección (línea, columna). `None` = no hay selección.
+    anchor: Option<(usize, usize)>,
+    /// Se está arrastrando con el mouse para seleccionar.
+    dragging: bool,
 }
+
+type Pos = (usize, usize);
 
 fn char_len(s: &str) -> usize {
     s.chars().count()
@@ -78,6 +89,8 @@ impl Editor {
             close_warned: false,
             save_as: None,
             status: None,
+            anchor: None,
+            dragging: false,
         }
     }
 
@@ -168,6 +181,111 @@ impl Editor {
 
     fn line_len(&self) -> usize {
         char_len(&self.lines[self.row])
+    }
+
+    /// Lo seleccionado, del principio al final (vacío = `None`).
+    pub fn selection(&self) -> Option<(Pos, Pos)> {
+        let a = self.anchor?;
+        let b = (self.row, self.col);
+        match a.cmp(&b) {
+            core::cmp::Ordering::Equal => None,
+            core::cmp::Ordering::Less => Some((a, b)),
+            core::cmp::Ordering::Greater => Some((b, a)),
+        }
+    }
+
+    pub fn selected_text(&self) -> String {
+        let Some(((r1, c1), (r2, c2))) = self.selection() else {
+            return String::new();
+        };
+        if r1 == r2 {
+            let l = &self.lines[r1];
+            return l[byte_at(l, c1)..byte_at(l, c2)].into();
+        }
+        let mut out = String::from(&self.lines[r1][byte_at(&self.lines[r1], c1)..]);
+        for l in &self.lines[r1 + 1..r2] {
+            out.push('\n');
+            out.push_str(l);
+        }
+        out.push('\n');
+        out.push_str(&self.lines[r2][..byte_at(&self.lines[r2], c2)]);
+        out
+    }
+
+    /// Borra lo seleccionado (el cursor queda donde empezaba). `false` si no había nada.
+    fn delete_selection(&mut self) -> bool {
+        let Some(((r1, c1), (r2, c2))) = self.selection() else {
+            self.anchor = None;
+            return false;
+        };
+        let tail = self.lines[r2][byte_at(&self.lines[r2], c2)..].to_string();
+        let head_end = byte_at(&self.lines[r1], c1);
+        self.lines[r1].truncate(head_end);
+        self.lines[r1].push_str(&tail);
+        self.lines.drain(r1 + 1..=r2);
+        (self.row, self.col) = (r1, c1);
+        self.anchor = None;
+        self.edit();
+        true
+    }
+
+    /// Inserta texto que puede tener varias líneas (pegar).
+    fn insert_text(&mut self, s: &str) {
+        let mut parts = s.split('\n');
+        if let Some(first) = parts.next() {
+            self.insert(first.trim_end_matches('\r'));
+        }
+        for part in parts {
+            let at = byte_at(&self.lines[self.row], self.col);
+            let rest = self.lines[self.row].split_off(at);
+            self.row += 1;
+            self.lines.insert(self.row, rest);
+            self.col = 0;
+            self.insert(part.trim_end_matches('\r'));
+        }
+        self.edit();
+    }
+
+    pub fn select_all(&mut self) {
+        self.anchor = Some((0, 0));
+        self.row = self.lines.len() - 1;
+        self.col = self.line_len();
+    }
+
+    /// Mueve el cursor una palabra (Ctrl+← / Ctrl+→).
+    fn word_move(&mut self, forward: bool) {
+        let chars: Vec<char> = self.lines[self.row].chars().collect();
+        let mut c = self.col;
+        if forward {
+            if c >= chars.len() {
+                if self.row + 1 < self.lines.len() {
+                    self.row += 1;
+                    self.col = 0;
+                }
+                return;
+            }
+            while c < chars.len() && chars[c].is_alphanumeric() {
+                c += 1;
+            }
+            while c < chars.len() && !chars[c].is_alphanumeric() {
+                c += 1;
+            }
+        } else {
+            if c == 0 {
+                if self.row > 0 {
+                    self.row -= 1;
+                    self.col = self.line_len();
+                }
+                return;
+            }
+            while c > 0 && !chars[c - 1].is_alphanumeric() {
+                c -= 1;
+            }
+            while c > 0 && chars[c - 1].is_alphanumeric() {
+                c -= 1;
+            }
+        }
+        self.col = c;
     }
 
     fn edit(&mut self) {
@@ -280,9 +398,47 @@ impl Editor {
             }
             return true;
         }
+        let moves = matches!(
+            key,
+            Key::Left
+                | Key::Right
+                | Key::Up
+                | Key::Down
+                | Key::Home
+                | Key::End
+                | Key::PageUp
+                | Key::PageDown
+        );
+        if moves {
+            // Con Shift, el ancla queda donde estaba el cursor antes de moverse.
+            if mods.shift {
+                if self.anchor.is_none() {
+                    self.anchor = Some((self.row, self.col));
+                }
+            } else {
+                self.anchor = None;
+            }
+        }
         if mods.ctrl {
             match key {
                 Key::Char('s' | 'S') => self.save(ctx),
+                Key::Char('e' | 'E' | 'a' | 'A') => self.select_all(),
+                Key::Char('c' | 'C') => {
+                    if self.selection().is_some() {
+                        *ctx.clipboard = self.selected_text();
+                    }
+                }
+                Key::Char('x' | 'X') => {
+                    if self.selection().is_some() {
+                        *ctx.clipboard = self.selected_text();
+                        self.delete_selection();
+                    }
+                }
+                Key::Char('v' | 'V') => {
+                    self.delete_selection();
+                    let text = ctx.clipboard.clone();
+                    self.insert_text(&text);
+                }
                 Key::Home => {
                     self.row = 0;
                     self.col = 0;
@@ -291,6 +447,8 @@ impl Editor {
                     self.row = self.lines.len() - 1;
                     self.col = self.line_len();
                 }
+                Key::Left => self.word_move(false),
+                Key::Right => self.word_move(true),
                 _ => return false,
             }
             self.keep_cursor_visible(content);
@@ -299,13 +457,29 @@ impl Editor {
         let page = Self::visible_rows(content);
         match key {
             Key::Char(c) if !c.is_control() => {
+                self.delete_selection();
                 let mut buf = [0u8; 4];
                 self.insert(c.encode_utf8(&mut buf));
             }
-            Key::Tab => self.insert("    "),
-            Key::Enter => self.newline(),
-            Key::Backspace => self.backspace(),
-            Key::Delete => self.delete(),
+            Key::Tab => {
+                self.delete_selection();
+                self.insert("    ");
+            }
+            Key::Enter => {
+                self.delete_selection();
+                self.newline();
+            }
+            Key::Backspace => {
+                if !self.delete_selection() {
+                    self.backspace();
+                }
+            }
+            Key::Delete => {
+                if !self.delete_selection() {
+                    self.delete();
+                }
+            }
+            Key::Escape if self.anchor.is_some() => self.anchor = None,
             Key::Left => {
                 if self.col > 0 {
                     self.col -= 1;
@@ -336,13 +510,63 @@ impl Editor {
         true
     }
 
+    /// (línea, columna) bajo un punto de la ventana.
+    fn pos_at(&self, x: i32, y: i32, content: Rect) -> Pos {
+        let row = (self.top as i32 + (y - content.y - 6).div_euclid(line_h()))
+            .clamp(0, self.lines.len() as i32 - 1) as usize;
+        let col = ((x - content.x - GUTTER + char_w() / 2) / char_w()).max(0) as usize;
+        (row, col.min(char_len(&self.lines[row])))
+    }
+
     pub fn click(&mut self, click: Click, content: Rect) {
-        let row = self.top as i32 + (click.y - content.y - 6) / line_h();
-        let col = (click.x - content.x - GUTTER + char_w() / 2) / char_w();
-        if row >= 0 && (row as usize) < self.lines.len() {
-            self.row = row as usize;
-            self.col = (col.max(0) as usize).min(self.line_len());
-            self.dirty = true;
+        if click.y > content.y + content.h - STATUS_H {
+            return;
+        }
+        let (row, col) = self.pos_at(click.x, click.y, content);
+        (self.row, self.col) = (row, col);
+        self.dirty = true;
+        if click.double {
+            // Doble clic: la palabra entera.
+            self.word_move(false);
+            let start = (self.row, self.col);
+            (self.row, self.col) = (row, col);
+            self.word_move(true);
+            // (`word_move` saltea también los espacios de después: se vuelven a sacar.)
+            let chars: Vec<char> = self.lines[self.row].chars().collect();
+            while self.col > start.1
+                && self.row == start.0
+                && !chars[self.col - 1].is_alphanumeric()
+            {
+                self.col -= 1;
+            }
+            self.anchor = Some(start);
+            self.dragging = false;
+            return;
+        }
+        self.anchor = Some((row, col));
+        self.dragging = !click.right;
+    }
+
+    /// Arrastrar con el botón apretado selecciona.
+    pub fn pointer(&mut self, p: super::Pointer, content: Rect) {
+        if !self.dragging {
+            return;
+        }
+        match p.kind {
+            super::PointerKind::Move => {
+                let (row, col) = self.pos_at(p.x, p.y, content);
+                if (row, col) != (self.row, self.col) {
+                    (self.row, self.col) = (row, col);
+                    self.keep_cursor_visible(content);
+                    self.dirty = true;
+                }
+            }
+            super::PointerKind::Up => {
+                self.dragging = false;
+                if self.selection().is_none() {
+                    self.anchor = None;
+                }
+            }
         }
     }
 
@@ -384,6 +608,23 @@ impl Editor {
                 theme::text_faint().lerp(theme::text_dim(), 140)
             });
             text::draw_right(c, r.x + GUTTER - 16, y, &format!("{}", n + 1), &num_st);
+            if let Some(((r1, c1), (r2, c2))) = self.selection()
+                && (r1..=r2).contains(&n)
+            {
+                let from = if n == r1 { c1 } else { 0 };
+                // Hasta el final del renglón (y un poquito más, para que se vea el salto).
+                let to = if n == r2 { c2 } else { char_len(line) + 1 };
+                let (a, b) = (from.saturating_sub(left), to.saturating_sub(left).min(cols));
+                if b > a {
+                    c.fill_rect(
+                        r.x + GUTTER + a as i32 * char_w(),
+                        y - 2,
+                        (b - a) as i32 * char_w(),
+                        line_h(),
+                        theme::selected().lerp(theme::cyan(), 50),
+                    );
+                }
+            }
             let visible: String = line.chars().skip(left).take(cols).collect();
             text::draw(c, r.x + GUTTER, y, &visible, &text_st);
             if n == self.row && self.save_as.is_none() {
@@ -474,6 +715,28 @@ mod tests {
         e.delete(); // une con la línea siguiente
         assert_eq!(e.text(), "ola ñandmundo");
         assert!(e.is_modified());
+    }
+
+    #[test]
+    fn seleccionar_copiar_y_reemplazar() {
+        let mut e = Editor::new();
+        e.load("uno dos\ntres cuatro\ncinco".as_bytes());
+        (e.row, e.col) = (0, 4);
+        e.anchor = Some((0, 4));
+        (e.row, e.col) = (1, 4);
+        assert_eq!(e.selected_text(), "dos\ntres");
+        e.delete_selection();
+        assert_eq!(e.text(), "uno  cuatro\ncinco");
+        assert_eq!((e.row, e.col), (0, 4));
+        e.insert_text("A\nB");
+        assert_eq!(e.text(), "uno A\nB cuatro\ncinco");
+        assert_eq!((e.row, e.col), (1, 1));
+        e.select_all();
+        assert_eq!(e.selected_text(), e.text());
+        // Al revés (el ancla después del cursor) es lo mismo.
+        e.anchor = Some((2, 3));
+        (e.row, e.col) = (2, 1);
+        assert_eq!(e.selected_text(), "in");
     }
 
     #[test]

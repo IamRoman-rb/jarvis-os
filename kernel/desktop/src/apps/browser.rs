@@ -94,7 +94,13 @@ const HELP_HTML: &str = "<title>Atajos de teclado</title>\
 <li><b>Win+I</b>: Configuración · <b>Win+E</b>: Archivos · <b>Win+R</b>: consola de JARVIS · <b>Ctrl+Shift+Esc</b>: monitor</li>\
 <li><b>Ctrl+Alt+T</b> / <b>Win+Enter</b>: terminal (como Ubuntu)</li>\
 <li><b>Win+L</b>: bloquear · <b>Impr Pant</b> / <b>Win+Shift+S</b>: captura · <b>Alt+Impr Pant</b>: captura de la ventana</li>\
+<li><b>Win+Z</b>: distribuciones (mitades, tercios, cuartos...) · <b>Win+Izq.</b> y después <b>Win+Arriba/Abajo</b>: un cuarto · <b>Win+Shift+T</b>: mosaico · <b>Win+Shift+C</b>: cascada</li>\
+<li>Arrastrar una ventana contra un borde la acopla a una mitad; contra una esquina, a un cuarto; arriba, la maximiza</li>\
 <li><b>Win+1</b> ... <b>Win+0</b>: los íconos de la barra · <b>Win+Ctrl+Shift+B</b>: redibujar la pantalla · <b>F1</b>: esta ayuda</li></ul>\
+<h2>Archivos y editor</h2><ul>\
+<li><b>Ctrl+E</b> / <b>Ctrl+A</b>: seleccionar todo · <b>Shift+flechas</b>: seleccionar mientras te movés · <b>Ctrl+clic</b> / <b>Shift+clic</b>: varios archivos</li>\
+<li><b>Ctrl+C</b> / <b>Ctrl+X</b> / <b>Ctrl+V</b>: copiar, cortar y pegar (archivos o texto) · <b>Supr</b>: a la Papelera · <b>F2</b>: renombrar</li>\
+<li>En el editor: arrastrar con el mouse selecciona, doble clic elige la palabra, <b>Ctrl+Izq./Der.</b> salta de a palabras</li></ul>\
 <h2>Navegador</h2><ul>\
 <li><b>Ctrl+L</b> / <b>Alt+D</b> / <b>F6</b>: escribir una dirección · <b>Alt+Izq./Der.</b>: atrás/adelante · <b>F5</b>: recargar</li>\
 <li><b>Tab</b>: siguiente enlace o campo · <b>Enter</b>: abrirlo · <b>F9</b>: modo lectura · <b>Ctrl+H</b>: inicio</li></ul>\

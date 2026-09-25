@@ -547,8 +547,16 @@ impl SnapJob {
                 if ok.is_some() {
                     out.err(&format!(
                         "error: \"{name}\" es un snap de Linux (de la tienda de Snapcraft): JARVIS-OS \
-                         todavía no puede ejecutarlo.\nSe puede bajar para inspeccionarlo: snap download {name}"
+                         todavía no puede ejecutarlo.\nPara eso falta el espacio de usuario de Linux \
+                         (hito K11: syscalls, cargador ELF, bibliotecas y un servidor gráfico).\n\
+                         Mientras tanto se puede bajar para inspeccionarlo: snap download {name}"
                     ));
+                    if matches!(name.as_str(), "code" | "code-insiders" | "vscode") {
+                        out.info(
+                            "VS Code tiene versión web: abrí Brave y entrá a vscode.dev \
+                             (sirve para repositorios de GitHub; no ve los archivos de JARVIS-OS).",
+                        );
+                    }
                 } else {
                     out.err(&format!("error: snap \"{name}\" no encontrado"));
                 }

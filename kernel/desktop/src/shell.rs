@@ -1169,3 +1169,75 @@ pub fn big_graph<const N: usize>(
 ) {
     graph(c, r, s, 0, col);
 }
+
+// --- distribuciones de ventanas (Win+Z) --------------------------------------------------------
+
+const THUMB_W: i32 = 120;
+const THUMB_H: i32 = 76;
+const THUMB_GAP: i32 = 14;
+
+pub fn layouts_rect(w: usize, _h: usize) -> Rect {
+    let n = crate::wm::LAYOUTS.len() as i32;
+    let pw = n * THUMB_W + (n - 1) * THUMB_GAP + 32;
+    Rect::new((w as i32 - pw) / 2, 70, pw, 44 + THUMB_H + 40)
+}
+
+/// Todas las zonas de todas las plantillas, en orden: (plantilla, zona, dónde se dibuja).
+pub fn layout_zones(w: usize, h: usize) -> Vec<(usize, usize, Rect)> {
+    let r = layouts_rect(w, h);
+    let mut out = Vec::new();
+    for (t, layout) in crate::wm::LAYOUTS.iter().enumerate() {
+        let thumb = Rect::new(
+            r.x + 16 + t as i32 * (THUMB_W + THUMB_GAP),
+            r.y + 44,
+            THUMB_W,
+            THUMB_H,
+        );
+        for (z, zone) in layout.zones(thumb.inset(3)).into_iter().enumerate() {
+            out.push((t, z, zone.inset(2)));
+        }
+    }
+    out
+}
+
+/// La zona bajo el mouse (índice en [`layout_zones`]).
+pub fn layouts_hit(w: usize, h: usize, x: i32, y: i32) -> Option<usize> {
+    layout_zones(w, h)
+        .iter()
+        .position(|(_, _, r)| r.contains(x, y))
+}
+
+pub fn draw_layouts(c: &mut Canvas<'_>, w: usize, h: usize, sel: usize) {
+    let r = layouts_rect(w, h);
+    rounded_rect(c, r.x, r.y, r.w, r.h, 12, theme::menu(), 250);
+    rounded_outline(c, r.x, r.y, r.w, r.h, 12, theme::cyan().scale(120));
+    text::draw(
+        c,
+        r.x + 16,
+        r.y + 14,
+        tr("DISTRIBUCIONES (WIN+Z)"),
+        &label(theme::text_dim()),
+    );
+    let zones = layout_zones(w, h);
+    let chosen = zones.get(sel).map(|z| z.0);
+    for (i, (t, _, z)) in zones.iter().enumerate() {
+        let (bg, alpha) = if i == sel {
+            (theme::cyan(), 200)
+        } else if Some(*t) == chosen {
+            (theme::vector_blue(), 110)
+        } else {
+            (theme::panel_rim(), 160)
+        };
+        rounded_rect(c, z.x, z.y, z.w, z.h, 3, bg, alpha);
+    }
+    let hint =
+        tr("Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan");
+    draw_fit(
+        c,
+        r.x + 16,
+        r.y + r.h - 28,
+        hint,
+        &light(theme::text_dim()),
+        r.w - 32,
+    );
+}

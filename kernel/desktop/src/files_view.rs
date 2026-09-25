@@ -528,10 +528,21 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
             break;
         };
         let row = l.row_rect(v);
-        let selected = index == app.selected;
+        let selected = index == app.selected || app.is_marked(index);
         if selected {
             c.fill_rect(row.x + 1, row.y + 1, row.w - 2, row.h - 2, selected_bg());
             c.fill_rect(row.x + 1, row.y + 1, 3, row.h - 2, theme::cyan());
+        }
+        if app.is_marked(index) && index == app.selected && app.marked.len() > 1 {
+            // El cursor, dentro de una selección de varios: un borde.
+            jarvis_gfx::shapes::rect_outline(
+                c,
+                row.x + 1,
+                row.y + 1,
+                row.w - 2,
+                row.h - 2,
+                theme::cyan(),
+            );
         }
         let path = join(&app.cwd, &entry.name);
         let kind = Kind::of(entry, &path);
@@ -747,10 +758,28 @@ fn draw_status(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         .filter(|e| !e.is_dir)
         .map(|e| e.size as u64)
         .sum();
-    let left = trf(
-        "{} elementos · {}",
-        &[&app.entries.len().to_string(), &format_size(files)],
-    );
+    let left = if app.marked.len() > 1 {
+        let size: u64 = app
+            .marked
+            .iter()
+            .filter_map(|&i| app.entries.get(i))
+            .filter(|e| !e.is_dir)
+            .map(|e| e.size as u64)
+            .sum();
+        trf(
+            "{} seleccionados de {} · {}",
+            &[
+                &app.marked.len().to_string(),
+                &app.entries.len().to_string(),
+                &format_size(size),
+            ],
+        )
+    } else {
+        trf(
+            "{} elementos · {}",
+            &[&app.entries.len().to_string(), &format_size(files)],
+        )
+    };
     text::draw(c, s.x + 16, ty, &left, &s16(theme::text()));
     let mid = trf("libre: {}", &[&format_size(app.free_bytes)]);
     text::draw(c, s.x + s.w / 3, ty, &mid, &s16(theme::text_dim()));
