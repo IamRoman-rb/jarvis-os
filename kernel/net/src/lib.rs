@@ -27,7 +27,7 @@ use alloc::vec::Vec;
 use jarvis_desktop::web::http::{
     Connect, Fetch, PROXY_HOST, PROXY_PORT, Step, Target, max_body, request_kind,
 };
-use jarvis_desktop::{HttpResponse, NetInfo, NetRequest};
+use jarvis_desktop::{HttpResponse, NetInfo, NetRequest, StreamEvent, StreamOp};
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::Device;
 use smoltcp::socket::dns::{self, GetQueryResultError};
@@ -74,6 +74,35 @@ struct Job {
     via_proxy_fallback: bool,
 }
 
+/// Buffers de las conexiones largas: Brave manda cuadros de a cientos de KiB.
+const STREAM_RX: usize = 1024 * 1024;
+const STREAM_TX: usize = 64 * 1024;
+/// Tope de lo que se acumula para mandar si el otro lado no lee (4 MiB): más es un error.
+const STREAM_PENDING_MAX: usize = 4 * 1024 * 1024;
+
+enum StreamStage {
+    Resolve {
+        query: Option<dns::QueryHandle>,
+    },
+    Open {
+        socket: SocketHandle,
+        connected: bool,
+    },
+}
+
+/// Una conexión TCP larga ([`Net::connect`]).
+struct Stream {
+    id: u32,
+    host: String,
+    port: u16,
+    stage: StreamStage,
+    /// Lo que la app mandó y todavía no entró en el buffer del socket.
+    pending: Vec<u8>,
+    /// Cerrar cuando se termine de mandar `pending`.
+    closing: bool,
+    since: u64,
+}
+
 pub struct Net<D: Device> {
     dev: D,
     iface: Interface,
@@ -82,6 +111,10 @@ pub struct Net<D: Device> {
     dns: SocketHandle,
     info: NetInfo,
     jobs: Vec<Job>,
+    streams: Vec<Stream>,
+    events: Vec<(u32, StreamEvent)>,
+    /// Sockets cerrados que todavía tienen que mandar su FIN (se sacan a los 2 s).
+    draining: Vec<(SocketHandle, u64)>,
     next_port: u16,
     proxy: IpEndpoint,
 }
@@ -115,6 +148,9 @@ impl<D: Device> Net<D> {
                 ..Default::default()
             },
             jobs: Vec::new(),
+            streams: Vec::new(),
+            events: Vec::new(),
+            draining: Vec::new(),
             next_port: 49152,
             proxy: IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::from(PROXY_HOST)), PROXY_PORT),
         }
@@ -159,6 +195,64 @@ impl<D: Device> Net<D> {
     /// Hay descargas en curso.
     pub fn busy(&self) -> bool {
         !self.jobs.is_empty()
+    }
+
+    /// Hace lo que pidió el escritorio sobre las conexiones largas.
+    pub fn stream(&mut self, op: StreamOp, now_ms: u64) {
+        match op {
+            StreamOp::Connect(r) => {
+                let stage = match parse_ipv4(&r.host) {
+                    Some(ip) => {
+                        let ep = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::from(ip)), r.port);
+                        match self.open_socket(ep, STREAM_RX, STREAM_TX) {
+                            Ok(socket) => StreamStage::Open {
+                                socket,
+                                connected: false,
+                            },
+                            Err(e) => {
+                                self.events.push((r.id, StreamEvent::Closed(Some(e))));
+                                return;
+                            }
+                        }
+                    }
+                    None => StreamStage::Resolve { query: None },
+                };
+                self.streams.push(Stream {
+                    id: r.id,
+                    host: r.host,
+                    port: r.port,
+                    stage,
+                    pending: Vec::new(),
+                    closing: false,
+                    since: now_ms,
+                });
+            }
+            StreamOp::Send(id, data) => {
+                if let Some(s) = self.streams.iter_mut().find(|s| s.id == id) {
+                    s.pending.extend_from_slice(&data);
+                } else {
+                    self.events.push((
+                        id,
+                        StreamEvent::Closed(Some("la conexión ya estaba cerrada".into())),
+                    ));
+                }
+            }
+            StreamOp::Close(id) => {
+                if let Some(s) = self.streams.iter_mut().find(|s| s.id == id) {
+                    s.closing = true;
+                }
+            }
+        }
+    }
+
+    /// Lo que pasó con las conexiones largas desde la última llamada.
+    pub fn take_stream_events(&mut self) -> Vec<(u32, StreamEvent)> {
+        core::mem::take(&mut self.events)
+    }
+
+    /// Conexiones largas abiertas (o abriéndose).
+    pub fn open_streams(&self) -> usize {
+        self.streams.len()
     }
 
     /// Empieza a descargar `req.url`. La respuesta sale de [`poll`](Self::poll) con el mismo
@@ -224,9 +318,23 @@ impl<D: Device> Net<D> {
     }
 
     fn connect(&mut self, to: IpEndpoint) -> Result<Stage, String> {
+        let handle = self.open_socket(to, TCP_RX, TCP_TX)?;
+        Ok(Stage::Transfer {
+            socket: handle,
+            sent: 0,
+            established: false,
+        })
+    }
+
+    fn open_socket(
+        &mut self,
+        to: IpEndpoint,
+        rx: usize,
+        tx: usize,
+    ) -> Result<SocketHandle, String> {
         let mut socket = tcp::Socket::new(
-            tcp::SocketBuffer::new(vec![0; TCP_RX]),
-            tcp::SocketBuffer::new(vec![0; TCP_TX]),
+            tcp::SocketBuffer::new(vec![0; rx]),
+            tcp::SocketBuffer::new(vec![0; tx]),
         );
         let port = self.next_port;
         self.next_port = if self.next_port >= 65000 {
@@ -237,12 +345,135 @@ impl<D: Device> Net<D> {
         socket
             .connect(self.iface.context(), to, port)
             .map_err(|e| format!("no se pudo abrir la conexión: {e:?}"))?;
-        let handle = self.sockets.add(socket);
-        Ok(Stage::Transfer {
-            socket: handle,
-            sent: 0,
-            established: false,
-        })
+        Ok(self.sockets.add(socket))
+    }
+
+    /// Avanza las conexiones largas: resolver, conectar, mandar lo pendiente y juntar lo que
+    /// llegó. Las que terminan salen de la lista con su evento `Closed`.
+    fn poll_streams(&mut self, now_ms: u64) {
+        let mut streams = core::mem::take(&mut self.streams);
+        streams.retain_mut(|s| match self.advance_stream(s, now_ms) {
+            Ok(true) => true,
+            Ok(false) => {
+                self.events.push((s.id, StreamEvent::Closed(None)));
+                false
+            }
+            Err(e) => {
+                if let StreamStage::Open { socket, .. } = s.stage {
+                    self.sockets.get_mut::<tcp::Socket>(socket).abort();
+                    self.sockets.remove(socket);
+                }
+                self.events.push((s.id, StreamEvent::Closed(Some(e))));
+                false
+            }
+        });
+        streams.append(&mut self.streams);
+        self.streams = streams;
+    }
+
+    /// `Ok(true)` = sigue abierta; `Ok(false)` = se cerró bien (el socket ya se sacó).
+    fn advance_stream(&mut self, st: &mut Stream, now_ms: u64) -> Result<bool, String> {
+        match &mut st.stage {
+            StreamStage::Resolve { query } => {
+                if now_ms.saturating_sub(st.since) > STAGE_TIMEOUT_MS {
+                    return Err(format!("{}: el DNS no respondió a tiempo", st.host));
+                }
+                if self.info.dns.is_none() && self.dhcp.is_some() {
+                    return Ok(true);
+                }
+                let dns_socket = self.sockets.get_mut::<dns::Socket>(self.dns);
+                let q = match query {
+                    Some(q) => *q,
+                    None => {
+                        let q = dns_socket
+                            .start_query(self.iface.context(), &st.host, DnsQueryType::A)
+                            .map_err(|e| format!("{}: nombre inválido ({e:?})", st.host))?;
+                        *query = Some(q);
+                        q
+                    }
+                };
+                match dns_socket.get_query_result(q) {
+                    Ok(addrs) => {
+                        let ip = addrs
+                            .iter()
+                            .find_map(|a| match a {
+                                IpAddress::Ipv4(v) => Some(*v),
+                                #[allow(unreachable_patterns)]
+                                _ => None,
+                            })
+                            .ok_or_else(|| format!("{} no tiene dirección IPv4", st.host))?;
+                        let ep = IpEndpoint::new(IpAddress::Ipv4(ip), st.port);
+                        let socket = self.open_socket(ep, STREAM_RX, STREAM_TX)?;
+                        st.stage = StreamStage::Open {
+                            socket,
+                            connected: false,
+                        };
+                        st.since = now_ms;
+                        Ok(true)
+                    }
+                    Err(GetQueryResultError::Pending) => Ok(true),
+                    Err(GetQueryResultError::Failed) => {
+                        Err(format!("no se encontró {} (DNS)", st.host))
+                    }
+                }
+            }
+            StreamStage::Open { socket, connected } => {
+                let handle = *socket;
+                let s = self.sockets.get_mut::<tcp::Socket>(handle);
+                if !*connected {
+                    if s.state() == tcp::State::Established {
+                        *connected = true;
+                        self.events.push((st.id, StreamEvent::Connected));
+                    } else if s.state() == tcp::State::Closed {
+                        return Err(format!("{}:{} rechazó la conexión", st.host, st.port));
+                    } else if now_ms.saturating_sub(st.since) > STAGE_TIMEOUT_MS {
+                        return Err(format!("{}:{} no respondió a tiempo", st.host, st.port));
+                    } else {
+                        return Ok(true);
+                    }
+                }
+                if st.pending.len() > STREAM_PENDING_MAX {
+                    return Err("el otro lado no está leyendo lo que se le manda".into());
+                }
+                if s.can_send() && !st.pending.is_empty() {
+                    let n = s
+                        .send_slice(&st.pending)
+                        .map_err(|e| format!("error al mandar: {e:?}"))?;
+                    st.pending.drain(..n);
+                }
+                let mut got = Vec::new();
+                while s.can_recv() {
+                    let mut buf = [0u8; 8192];
+                    let n = s.recv_slice(&mut buf).map_err(|e| format!("{e:?}"))?;
+                    if n == 0 {
+                        break;
+                    }
+                    got.extend_from_slice(&buf[..n]);
+                }
+                if !got.is_empty() {
+                    self.events.push((st.id, StreamEvent::Data(got)));
+                }
+                if s.state() == tcp::State::Closed && !st.closing {
+                    // Llegó un RST: el otro lado cortó de golpe.
+                    return Err("se cortó la conexión".into());
+                }
+                let peer_done = !s.may_recv() && !s.can_recv();
+                if (st.closing && st.pending.is_empty()) || peer_done {
+                    // Cerrar de nuestro lado; smoltcp termina el saludo de cierre aunque el
+                    // socket ya no esté en la lista (se descarta el que queda en TIME-WAIT).
+                    s.close();
+                    if matches!(
+                        s.state(),
+                        tcp::State::Closed | tcp::State::TimeWait | tcp::State::LastAck
+                    ) || peer_done
+                    {
+                        self.draining.push((handle, now_ms));
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+        }
     }
 
     /// Una vuelta de la pila de red: procesa los paquetes que llegaron, manda los pendientes y
@@ -251,6 +482,17 @@ impl<D: Device> Net<D> {
         let now = instant(now_ms);
         self.iface.poll(now, &mut self.dev, &mut self.sockets);
         self.poll_dhcp();
+        self.poll_streams(now_ms);
+        let sockets = &mut self.sockets;
+        self.draining.retain(|&(h, since)| {
+            let st = sockets.get::<tcp::Socket>(h).state();
+            let done = matches!(st, tcp::State::Closed | tcp::State::TimeWait)
+                || now_ms.saturating_sub(since) > 2000;
+            if done {
+                sockets.remove(h);
+            }
+            !done
+        });
 
         let mut done = Vec::new();
         let mut jobs = core::mem::take(&mut self.jobs);

@@ -247,6 +247,9 @@ fn run(
             for (id, result) in n.poll(now) {
                 desktop.net_response(id, result);
             }
+            for (id, event) in n.take_stream_events() {
+                desktop.stream_event(id, event);
+            }
             if n.info().ip != last_ip {
                 last_ip = n.info().ip;
                 match last_ip {
@@ -292,6 +295,19 @@ fn run(
                     }
                 }
                 None => desktop.net_response(req.id, Err("no hay placa de red".into())),
+            }
+        }
+        for op in requests.streams {
+            match net.as_mut() {
+                Some(n) => n.stream(op, now),
+                None => {
+                    if let jarvis_desktop::StreamOp::Connect(r) = op {
+                        desktop.stream_event(
+                            r.id,
+                            jarvis_desktop::StreamEvent::Closed(Some("no hay placa de red".into())),
+                        );
+                    }
+                }
             }
         }
         if let Some(hz) = requests.tone {

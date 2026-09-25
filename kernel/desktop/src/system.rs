@@ -214,8 +214,39 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
+/// Una conexión TCP que queda abierta (Brave, la sincronización): a diferencia de un GET, los
+/// datos van y vienen mientras dure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StreamRequest {
+    pub id: u32,
+    /// Nombre o dirección IP.
+    pub host: String,
+    pub port: u16,
+    /// Quién la abre (para el firewall).
+    pub app: String,
+}
+
+/// Lo que el escritorio le pide a la red sobre una conexión.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StreamOp {
+    Connect(StreamRequest),
+    Send(u32, Vec<u8>),
+    Close(u32),
+}
+
+/// Lo que pasa con una conexión (llega con su número).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StreamEvent {
+    Connected,
+    Data(Vec<u8>),
+    /// Se cerró: `None` si fue normal, o el motivo del error.
+    Closed(Option<String>),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Outbox {
+    /// Conexiones TCP largas: abrir, mandar, cerrar.
+    pub streams: Vec<StreamOp>,
     pub launch: Vec<Launch>,
     /// (texto, es_error)
     pub notify: Vec<(String, bool)>,
@@ -272,6 +303,36 @@ impl Outbox {
             app: app.into(),
         });
         self.next_net
+    }
+
+    /// Abre una conexión TCP a nombre de la app actual. Devuelve su número: los eventos
+    /// ([`StreamEvent`]) llegan con él. Comparte la numeración con [`fetch`](Self::fetch).
+    pub fn connect(&mut self, host: &str, port: u16) -> u32 {
+        let app = if self.app.is_empty() {
+            "sistema"
+        } else {
+            self.app
+        };
+        self.connect_as(host, port, app)
+    }
+
+    pub fn connect_as(&mut self, host: &str, port: u16, app: &str) -> u32 {
+        self.next_net += 1;
+        self.streams.push(StreamOp::Connect(StreamRequest {
+            id: self.next_net,
+            host: host.into(),
+            port,
+            app: app.into(),
+        }));
+        self.next_net
+    }
+
+    pub fn send(&mut self, id: u32, data: Vec<u8>) {
+        self.streams.push(StreamOp::Send(id, data));
+    }
+
+    pub fn close_stream(&mut self, id: u32) {
+        self.streams.push(StreamOp::Close(id));
     }
 
     pub fn notify(&mut self, text: impl Into<String>, error: bool) {
