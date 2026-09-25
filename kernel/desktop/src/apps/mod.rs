@@ -250,6 +250,16 @@ impl App {
         }
     }
 
+    /// Algo pasó con una conexión larga (cada app mira solo las que abrió).
+    pub fn stream_event<D: BlockDevice>(
+        &mut self,
+        id: u32,
+        event: &crate::system::StreamEvent,
+        ctx: &mut Ctx<'_, D>,
+    ) {
+        let _ = (id, event, ctx);
+    }
+
     /// Se va a cerrar la ventana. `false` = todavía no (por ejemplo, cambios sin guardar).
     pub fn on_close<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) -> bool {
         match self {

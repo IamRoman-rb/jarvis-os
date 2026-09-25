@@ -48,7 +48,8 @@ use crate::shell::{
     TopHit, TopWindow,
 };
 use crate::system::{
-    AppKind, History, HttpResponse, Launch, NetRequest, Outbox, Power, SystemStats,
+    AppKind, History, HttpResponse, Launch, NetRequest, Outbox, Power, StreamEvent, StreamOp,
+    SystemStats,
 };
 use crate::wm::{Part, Side, WinId, WindowManager};
 
@@ -247,6 +248,8 @@ enum Drag {
 #[derive(Debug, Default)]
 pub struct Requests {
     pub net: Vec<NetRequest>,
+    /// Conexiones largas (ya pasaron por el firewall).
+    pub streams: Vec<StreamOp>,
     /// Frecuencia del parlante (0 = silencio), si cambió.
     pub tone: Option<u32>,
     pub power: Option<Power>,
@@ -322,6 +325,8 @@ pub struct Desktop<D: BlockDevice> {
     sphere_settle: u32,
     /// Pedidos que bloqueó el firewall: se les contesta con un error en `take_requests`.
     fw_blocked: Vec<(u32, String)>,
+    /// Conexiones largas que bloqueó el firewall.
+    fw_blocked_streams: Vec<(u32, String)>,
 }
 
 /// Arma un `Ctx` con campos separados de `self` (así se puede usar junto con `self.slots`).
@@ -423,6 +428,7 @@ impl<D: BlockDevice> Desktop<D> {
             window_screenshot: false,
             sphere_settle: 0,
             fw_blocked: Vec::new(),
+            fw_blocked_streams: Vec::new(),
             last_clock: None,
             last_now: 0,
         }
@@ -558,6 +564,9 @@ impl<D: BlockDevice> Desktop<D> {
         for (id, msg) in core::mem::take(&mut self.fw_blocked) {
             self.net_response(id, Err(msg));
         }
+        for (id, msg) in core::mem::take(&mut self.fw_blocked_streams) {
+            self.stream_event(id, StreamEvent::Closed(Some(msg)));
+        }
         core::mem::take(&mut self.requests)
     }
 
@@ -585,8 +594,33 @@ impl<D: BlockDevice> Desktop<D> {
         let host = crate::web::url::Url::parse(&req.url)
             .map(|u| u.host)
             .unwrap_or_default();
+        let msg = self.firewall_record(
+            &req.app,
+            &host,
+            &req.url,
+            &why,
+            req.kind != crate::system::FetchKind::Image,
+            now_ms,
+            clock,
+        );
+        self.fw_blocked.push((req.id, msg));
+    }
+
+    /// Anota un bloqueo del firewall (log del puerto serie, `/Sistema/firewall.log` y aviso) y
+    /// devuelve el error para la app.
+    #[allow(clippy::too_many_arguments)]
+    fn firewall_record(
+        &mut self,
+        app: &str,
+        host: &str,
+        target: &str,
+        why: &str,
+        notify: bool,
+        now_ms: u64,
+        clock: Option<DateTime>,
+    ) -> String {
         self.logs
-            .push(format!("FIREWALL_BLOQUEO {} {} ({why})", req.app, host));
+            .push(format!("FIREWALL_BLOQUEO {app} {host} ({why})"));
         if self.config.firewall.log
             && let Some(fs) = self.fs.as_mut()
         {
@@ -600,10 +634,7 @@ impl<D: BlockDevice> Desktop<D> {
                 .read_file(crate::firewall::LOG_PATH)
                 .map(|b| String::from_utf8_lossy(&b).into_owned())
                 .unwrap_or_default();
-            log.push_str(&format!(
-                "{when}BLOQUEADO {} -> {} ({why})\n",
-                req.app, req.url
-            ));
+            log.push_str(&format!("{when}BLOQUEADO {app} -> {target} ({why})\n"));
             // Solo las últimas 200 líneas.
             let lines: Vec<&str> = log.lines().collect();
             let keep = lines[lines.len().saturating_sub(200)..].join("\n") + "\n";
@@ -611,15 +642,36 @@ impl<D: BlockDevice> Desktop<D> {
             let _ = crate::term::apt::ensure_dirs(fs, "/Sistema", stamp)
                 .and_then(|()| fs.write_file(crate::firewall::LOG_PATH, keep.as_bytes(), stamp));
         }
-        if req.kind != crate::system::FetchKind::Image {
-            self.notify(
-                trf("Firewall: bloqueó {} ({})", &[&host, &req.app]),
-                true,
-                now_ms,
-            );
+        if notify {
+            self.notify(trf("Firewall: bloqueó {} ({})", &[host, app]), true, now_ms);
         }
-        self.fw_blocked
-            .push((req.id, format!("bloqueado por el firewall: {why}")));
+        format!("bloqueado por el firewall: {why}")
+    }
+
+    /// Una conexión larga cambió (el kernel la atiende): se le avisa a quien la abrió.
+    pub fn stream_event(&mut self, id: u32, event: StreamEvent) {
+        match &event {
+            StreamEvent::Connected => self.logs.push(format!("CONEXION_ABIERTA {id}")),
+            StreamEvent::Closed(None) => self.logs.push(format!("CONEXION_CERRADA {id}")),
+            StreamEvent::Closed(Some(e)) => self.logs.push(format!("CONEXION_ERROR {id} {e}")),
+            StreamEvent::Data(_) => {}
+        }
+        let tasks = self.tasks();
+        let now_ms = self.last_now;
+        {
+            let mut ctx = ctx!(self, now_ms, self.last_clock, &tasks);
+            for s in &mut self.slots {
+                ctx.out.app = app_tag(s.app.kind());
+                s.app.stream_event(id, &event, &mut ctx);
+                if s.app.take_dirty() {
+                    s.content_dirty = true;
+                }
+            }
+        }
+        let clock = self.last_clock;
+        let before = self.geometry();
+        self.process_outbox(now_ms, clock);
+        self.damage_geometry(&before, now_ms);
     }
 
     /// El kernel mide la máquina una vez por segundo.
@@ -1603,6 +1655,7 @@ impl<D: BlockDevice> Desktop<D> {
                 && !out.power_menu
                 && !out.screenshot
                 && out.net.is_empty()
+                && out.streams.is_empty()
                 && out.tone.is_none()
                 && out.power.is_none()
                 && out.config.is_none()
@@ -1637,6 +1690,18 @@ impl<D: BlockDevice> Desktop<D> {
                     Ok(()) => self.requests.net.push(req),
                     Err(why) => self.firewall_block(req, why, now_ms, clock),
                 }
+            }
+            for op in out.streams {
+                if let StreamOp::Connect(r) = &op
+                    && let Err(why) = self.config.firewall.check_out(&r.host, r.port, &r.app)
+                {
+                    let target = format!("{}:{}", r.host, r.port);
+                    let msg =
+                        self.firewall_record(&r.app, &r.host, &target, &why, true, now_ms, clock);
+                    self.fw_blocked_streams.push((r.id, msg));
+                    continue;
+                }
+                self.requests.streams.push(op);
             }
             if out.tone.is_some() {
                 self.requests.tone = out.tone;

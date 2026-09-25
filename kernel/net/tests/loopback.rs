@@ -123,3 +123,116 @@ fn conexion_rechazada_da_error() {
     assert_eq!(parse_ipv4("10.0.2.15"), Some([10, 0, 2, 15]));
     assert_eq!(parse_ipv4("example.com"), None);
 }
+
+// --- Conexiones largas -------------------------------------------------------------------
+
+use jarvis_desktop::{StreamEvent, StreamOp, StreamRequest};
+
+/// Un servidor "eco" que devuelve todo lo que recibe, y cierra cuando recibe `FIN\n`.
+fn echo(net: &mut Net<Loopback>, h: SocketHandle, echoed: &mut usize) {
+    let s = net.sockets_mut().get_mut::<tcp::Socket>(h);
+    while s.can_recv() && s.can_send() {
+        let mut buf = [0u8; 4096];
+        let room = s.send_capacity() - s.send_queue();
+        let n = s.recv_slice(&mut buf[..room.min(4096)]).unwrap();
+        if n == 0 {
+            break;
+        }
+        s.send_slice(&buf[..n]).unwrap();
+        *echoed += n;
+        if buf[..n].ends_with(b"FIN\n") {
+            s.close();
+        }
+    }
+}
+
+fn connect(net: &mut Net<Loopback>, id: u32, port: u16) {
+    net.stream(
+        StreamOp::Connect(StreamRequest {
+            id,
+            host: "127.0.0.1".into(),
+            port,
+            app: "brave".into(),
+        }),
+        0,
+    );
+}
+
+#[test]
+fn conexion_larga_manda_y_recibe_mucho_y_cierra() {
+    let mut n = net();
+    let srv = server(&mut n, 7000);
+    connect(&mut n, 3, 7000);
+    // 300 KB en trozos: más que los buffers de los dos lados.
+    let payload: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+    let mut sent = false;
+    let (mut got, mut connected, mut closed, mut echoed) = (Vec::new(), false, None, 0);
+    for now in 1..200_000u64 {
+        n.poll(now);
+        echo(&mut n, srv, &mut echoed);
+        for (id, ev) in n.take_stream_events() {
+            assert_eq!(id, 3);
+            match ev {
+                StreamEvent::Connected => connected = true,
+                StreamEvent::Data(d) => got.extend_from_slice(&d),
+                StreamEvent::Closed(e) => closed = Some(e),
+            }
+        }
+        if connected && !sent {
+            for chunk in payload.chunks(10_000) {
+                n.stream(StreamOp::Send(3, chunk.to_vec()), now);
+            }
+            n.stream(StreamOp::Send(3, b"FIN\n".to_vec()), now);
+            sent = true;
+        }
+        if closed.is_some() {
+            break;
+        }
+    }
+    assert!(connected);
+    assert_eq!(closed, Some(None), "cierre normal");
+    assert_eq!(got.len(), payload.len() + 4);
+    assert_eq!(&got[..payload.len()], &payload[..]);
+    assert_eq!(n.open_streams(), 0);
+}
+
+#[test]
+fn conexion_larga_rechazada_y_cierre_propio() {
+    let mut n = net();
+    connect(&mut n, 1, 9);
+    let mut events = Vec::new();
+    for now in 1..5_000 {
+        n.poll(now);
+        events.extend(n.take_stream_events());
+        if !events.is_empty() {
+            break;
+        }
+    }
+    assert!(matches!(&events[0], (1, StreamEvent::Closed(Some(e))) if e.contains("rechaz")));
+
+    // Cierre pedido por la app: el servidor ve el FIN.
+    let srv = server(&mut n, 7001);
+    connect(&mut n, 2, 7001);
+    let mut state = None;
+    for now in 5_000..20_000 {
+        n.poll(now);
+        for (_, ev) in n.take_stream_events() {
+            if ev == StreamEvent::Connected {
+                n.stream(StreamOp::Close(2), now);
+            }
+            if let StreamEvent::Closed(e) = ev {
+                assert_eq!(e, None);
+            }
+        }
+        let st = n.sockets_mut().get::<tcp::Socket>(srv).state();
+        if st == tcp::State::CloseWait {
+            state = Some(st);
+            break;
+        }
+    }
+    assert_eq!(
+        state,
+        Some(tcp::State::CloseWait),
+        "el servidor recibió el FIN"
+    );
+}

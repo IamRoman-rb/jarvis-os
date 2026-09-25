@@ -512,6 +512,7 @@ static EN: &[(&str, &str)] = &[
     ("Sin disco", "No disk"),
     ("Sin placa de red", "No network adapter"),
     ("Sin título", "Untitled"),
+    ("Sincronización", "Sync"),
     ("Sistema", "System"),
     (
         "Solo el contenido: sin menús, formularios ni estilos",
@@ -1044,6 +1045,7 @@ static PT: &[(&str, &str)] = &[
     ("Sin disco", "Sem disco"),
     ("Sin placa de red", "Sem placa de rede"),
     ("Sin título", "Sem título"),
+    ("Sincronización", "Sincronização"),
     ("Sistema", "Sistema"),
     (
         "Solo el contenido: sin menús, formularios ni estilos",

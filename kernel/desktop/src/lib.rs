@@ -33,5 +33,6 @@ pub use config::Config;
 pub use desktop::{DEMO_PHRASES, Desktop, Dirty, GREETING, Requests};
 pub use input::{Event, Key, Mods, MouseDecoder, MousePacket};
 pub use system::{
-    AppKind, FetchKind, HttpResponse, Launch, NetInfo, NetRequest, Power, SystemStats,
+    AppKind, FetchKind, HttpResponse, Launch, NetInfo, NetRequest, Power, StreamEvent, StreamOp,
+    StreamRequest, SystemStats,
 };
