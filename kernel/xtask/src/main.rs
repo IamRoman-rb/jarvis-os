@@ -678,6 +678,18 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
         Err(e) => println!("(sin internet para Google: {e})"),
     }
 
+    // GitHub: unas 20 hojas de estilo y variables de CSS (internet de verdad, opcional).
+    s.monitor("sendkey ctrl-l")?;
+    s.type_text("https://github.com/rust-lang/rust")?;
+    s.monitor("sendkey ret")?;
+    match s.wait_for("RED_RESPUESTA", Duration::from_secs(30)) {
+        Ok(()) => {
+            thread::sleep(Duration::from_secs(15));
+            shot(&mut s, "jarvis-os-github.png")?;
+        }
+        Err(e) => println!("(sin internet para GitHub: {e})"),
+    }
+
     // Terminal: apt instala programas y fondos del repositorio; neofetch y cowsay.
     s.monitor("sendkey ctrl-alt-t")?;
     s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;

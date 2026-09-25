@@ -15,7 +15,7 @@ use jarvis_gfx::{Canvas, Color, Rect, theme};
 
 use crate::apps::{icon_of, name_of};
 use crate::i18n::{tr, trf};
-use crate::system::{AppKind, History, SystemStats};
+use crate::system::{AppKind, HISTORY, History, Series, SystemStats};
 use crate::text_input::TextInput;
 use crate::widgets::{FIELD_BG, SELECTED_BG, bar, button, draw_fit, graph, ip, label, light, s16};
 
@@ -146,6 +146,289 @@ pub fn draw_toolbar(c: &mut Canvas<'_>, items: &[ToolbarItem], hover: Option<usi
         rounded_rect(c, tx, ty, tw, 26, 6, Color::hex(0x0a1930), 240);
         rounded_outline(c, tx, ty, tw, 26, 6, theme::CYAN.scale(120));
         text::draw(c, tx + 10, ty + 5, &it.name, &st);
+    }
+}
+
+// --- barra de arriba (cuando hay una ventana maximizada) --------------------------------------
+
+pub use crate::wm::TOPBAR_H;
+
+const TOP_SLOT: i32 = 28;
+const TOP_CHIP: i32 = 170;
+const TOP_IP: i32 = 124;
+const TOP_CLOCK: i32 = 92;
+
+/// Una ventana abierta, como se muestra en la barra de arriba.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TopWindow {
+    pub icon: Icon,
+    pub title: String,
+    pub active: bool,
+    pub minimized: bool,
+}
+
+/// Dónde se hizo clic en la barra de arriba.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TopHit {
+    /// Uno de los íconos fijos (el mismo índice que en `LAUNCHERS`).
+    Launcher(usize),
+    /// Una de las ventanas abiertas.
+    Window(usize),
+    /// Los gráficos de estado o la IP (abre el Monitor).
+    Status,
+    Clock,
+}
+
+pub fn topbar_rect(w: usize) -> Rect {
+    Rect::new(0, 0, w as i32, TOPBAR_H)
+}
+
+fn top_launcher_x(i: usize) -> i32 {
+    6 + i as i32 * TOP_SLOT
+}
+
+/// Ancho de cada gráfico de estado: con el valor al lado si la pantalla es ancha.
+fn top_stat_w(w: usize) -> i32 {
+    if w >= 1200 { 124 } else { 84 }
+}
+
+fn top_clock_rect(w: usize) -> Rect {
+    Rect::new(w as i32 - TOP_CLOCK, 0, TOP_CLOCK, TOPBAR_H)
+}
+
+fn top_ip_rect(w: usize) -> Rect {
+    Rect::new(w as i32 - TOP_CLOCK - TOP_IP, 0, TOP_IP, TOPBAR_H)
+}
+
+fn top_stats_rect(w: usize) -> Rect {
+    let sw = top_stat_w(w) * 4;
+    Rect::new(top_ip_rect(w).x - sw, 0, sw, TOPBAR_H)
+}
+
+/// Lugar de la ventana `i` de `n` en la barra (vacío si no entra ninguna).
+pub fn top_chip(w: usize, n: usize, i: usize) -> Rect {
+    let x0 = top_launcher_x(LAUNCHERS.len()) + 8;
+    let avail = top_stats_rect(w).x - 8 - x0;
+    let cw = TOP_CHIP.min(avail / n.max(1) as i32);
+    if cw < 34 {
+        return Rect::new(x0, 0, 0, 0);
+    }
+    Rect::new(x0 + i as i32 * cw, 3, cw - 4, TOPBAR_H - 6)
+}
+
+pub fn topbar_hit(w: usize, windows: usize, x: i32, y: i32) -> Option<TopHit> {
+    if !topbar_rect(w).contains(x, y) {
+        return None;
+    }
+    if let Some(i) = (0..LAUNCHERS.len())
+        .find(|&i| (top_launcher_x(i)..top_launcher_x(i) + TOP_SLOT).contains(&x))
+    {
+        return Some(TopHit::Launcher(i));
+    }
+    if let Some(i) = (0..windows).find(|&i| {
+        let r = top_chip(w, windows, i);
+        !r.is_empty() && (r.x..r.x + r.w).contains(&x)
+    }) {
+        return Some(TopHit::Window(i));
+    }
+    if top_stats_rect(w).contains(x, y) || top_ip_rect(w).contains(x, y) {
+        return Some(TopHit::Status);
+    }
+    if top_clock_rect(w).contains(x, y) {
+        return Some(TopHit::Clock);
+    }
+    None
+}
+
+/// "0K", "12K", "3M": bytes por segundo en poco espacio.
+fn short_rate(b: u32) -> String {
+    if b >= 1024 * 1024 {
+        format!("{}M", b / (1024 * 1024))
+    } else {
+        format!("{}K", b.div_ceil(1024))
+    }
+}
+
+/// Todo lo que muestra la barra de arriba.
+pub struct TopBar<'a> {
+    pub launchers: &'a [ToolbarItem],
+    pub windows: &'a [TopWindow],
+    pub hover: Option<TopHit>,
+    pub clock: &'a str,
+    pub stats: &'a SystemStats,
+    pub history: &'a History,
+    /// (libre, total) del disco.
+    pub disk: Option<(u64, u64)>,
+}
+
+pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
+    let r = topbar_rect(w);
+    c.fill_rect(r.x, r.y, r.w, r.h, theme::PANEL);
+    line(c, 0, r.h - 1, r.w, r.h - 1, theme::PANEL_RIM);
+    let cy = r.h / 2;
+
+    // Íconos fijos.
+    for (i, it) in bar_.launchers.iter().take(LAUNCHERS.len()).enumerate() {
+        let ix = top_launcher_x(i) + TOP_SLOT / 2;
+        let hover = bar_.hover == Some(TopHit::Launcher(i));
+        if it.active || hover {
+            let alpha = if it.active { 90 } else { 45 };
+            rounded_rect(c, ix - 12, 3, 24, r.h - 6, 5, theme::VECTOR_BLUE, alpha);
+        }
+        let color = if it.active || hover {
+            theme::PARTICLE_BRIGHT
+        } else {
+            theme::TEXT_DIM
+        };
+        icon(c, it.icon, ix, cy - 1, color);
+        if it.running {
+            rounded_rect(c, ix - 3, r.h - 4, 6, 2, 1, theme::CYAN, 255);
+        }
+    }
+    let sx = top_launcher_x(LAUNCHERS.len()) + 3;
+    line(c, sx, 6, sx, r.h - 7, theme::PANEL_RIM);
+
+    // Ventanas abiertas.
+    let n = bar_.windows.len();
+    for (i, win) in bar_.windows.iter().enumerate() {
+        let chip = top_chip(w, n, i);
+        if chip.is_empty() {
+            break;
+        }
+        let hover = bar_.hover == Some(TopHit::Window(i));
+        let (bg, alpha) = if win.active {
+            (theme::VECTOR_BLUE, 90)
+        } else if hover {
+            (theme::VECTOR_BLUE, 45)
+        } else {
+            (theme::PANEL_RIM, 110)
+        };
+        rounded_rect(c, chip.x, chip.y, chip.w, chip.h, 5, bg, alpha);
+        let color = if win.minimized {
+            theme::TEXT_FAINT
+        } else if win.active {
+            theme::PARTICLE_BRIGHT
+        } else {
+            theme::TEXT_DIM
+        };
+        icon(c, win.icon, chip.x + 14, cy - 1, color);
+        if chip.w > 44 {
+            let st = s16(if win.minimized {
+                theme::TEXT_FAINT
+            } else {
+                theme::TEXT
+            });
+            draw_fit(c, chip.x + 28, cy - 8, &win.title, &st, chip.w - 34);
+        }
+        if win.active {
+            rounded_rect(
+                c,
+                chip.x + 8,
+                chip.y + chip.h - 2,
+                chip.w - 16,
+                2,
+                1,
+                theme::CYAN,
+                255,
+            );
+        }
+    }
+
+    // Gráficos de estado: CPU, memoria, disco y red.
+    let sr = top_stats_rect(w);
+    let sw = top_stat_w(w);
+    let wide = sw > 100;
+    let key = light(theme::TEXT_DIM);
+    let value = s16(theme::TEXT);
+    let mem_pct = (bar_.stats.heap_used * 100)
+        .checked_div(bar_.stats.heap_total)
+        .unwrap_or(0) as u32;
+    let disk_pct = bar_
+        .disk
+        .map(|(free, total)| {
+            (total.saturating_sub(free) * 100)
+                .checked_div(total)
+                .unwrap_or(0) as u32
+        })
+        .unwrap_or(0);
+    let h = bar_.history;
+    let disk_max = h.disk.max().max(64 * 1024);
+    let net_max = h.rx.max().max(h.tx.max()).max(1024);
+    let rx = h.rx.last().unwrap_or(0) + h.tx.last().unwrap_or(0);
+    let stats: [(&str, &Series<HISTORY>, u32, Color, String); 4] = [
+        (
+            "CPU",
+            &h.cpu,
+            100,
+            theme::CYAN,
+            format!("{}%", bar_.stats.cpu_pct),
+        ),
+        (
+            tr("MEM"),
+            &h.mem,
+            100,
+            theme::PARTICLE_BRIGHT,
+            format!("{mem_pct}%"),
+        ),
+        (
+            tr("DISCO"),
+            &h.disk,
+            disk_max,
+            theme::AMBER,
+            format!("{disk_pct}%"),
+        ),
+        (tr("RED"), &h.rx, net_max, theme::CYAN, short_rate(rx)),
+    ];
+    for (i, (name, series, max, color, val)) in stats.iter().enumerate() {
+        let x = sr.x + i as i32 * sw;
+        line(c, x, 6, x, r.h - 7, theme::PANEL_RIM);
+        text::draw(c, x + 8, cy - 8, name, &key);
+        let gx = x + 8 + text::width(name, &key) + 6;
+        let gw = if wide { 40 } else { (x + sw - 6 - gx).max(12) };
+        sparkline(c, Rect::new(gx, 6, gw, r.h - 13), series, *max, *color);
+        if wide {
+            text::draw_right(c, x + sw - 6, cy - 8, val, &value);
+        }
+    }
+
+    // IP.
+    let ipr = top_ip_rect(w);
+    line(c, ipr.x, 6, ipr.x, r.h - 7, theme::PANEL_RIM);
+    let (net, net_color) = match (bar_.stats.net.present, bar_.stats.net.ip) {
+        (false, _) => (String::from(tr("sin placa")), theme::TEXT_FAINT),
+        (true, None) => (String::from("DHCP..."), theme::AMBER),
+        (true, Some(a)) => (ip(a), theme::TEXT),
+    };
+    let st = s16(net_color);
+    let tw = text::width(&net, &st);
+    text::draw(c, ipr.x + (ipr.w - tw) / 2, cy - 8, &net, &st);
+
+    // Hora.
+    let cr = top_clock_rect(w);
+    line(c, cr.x, 6, cr.x, r.h - 7, theme::PANEL_RIM);
+    let color = if bar_.hover == Some(TopHit::Clock) {
+        theme::PARTICLE_BRIGHT
+    } else {
+        theme::CYAN
+    };
+    let st = crate::widgets::bold(color);
+    let tw = text::width(bar_.clock, &st);
+    text::draw(c, cr.x + (cr.w - tw) / 2, cy - 8, bar_.clock, &st);
+}
+
+/// "23:05", o "11:05 PM" con el reloj de 12 horas.
+pub fn clock_text(clock: Option<DateTime>, h24: bool) -> String {
+    match clock {
+        None => String::from("--:--"),
+        Some(t) if h24 => format!("{:02}:{:02}", t.hour, t.minute),
+        Some(t) => {
+            let h = match t.hour % 12 {
+                0 => 12,
+                h => h,
+            };
+            let ampm = if t.hour < 12 { "AM" } else { "PM" };
+            format!("{h}:{:02} {ampm}", t.minute)
+        }
     }
 }
 

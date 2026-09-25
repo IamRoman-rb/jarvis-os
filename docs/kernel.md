@@ -5,6 +5,11 @@ Red y navegador: [ADR 0004](adr/0004-red-y-navegador-propio.md). Terminal, paque
 otros sistemas: [ADR 0005](adr/0005-terminal-paquetes-y-programas.md). Motor web, firewall, snap,
 winget e idiomas: [ADR 0006](adr/0006-motor-web-firewall-tiendas-e-idiomas.md).
 
+**Ventana maximizada con la barra de arriba** (íconos, ventanas abiertas, CPU, memoria, disco,
+red, IP y hora), con GitHub en el navegador:
+
+![Barra de arriba](img/k5-barra-superior.png)
+
 | Wikipedia en el navegador | YouTube (sin JavaScript) |
 |---|---|
 | ![Wikipedia](img/k5-wikipedia.png) | ![YouTube](img/k5-youtube.png) |
@@ -19,6 +24,11 @@ winget e idiomas: [ADR 0006](adr/0006-motor-web-firewall-tiendas-e-idiomas.md).
   mover, esquina para cambiar el tamaño, doble clic para maximizar. Alt+Tab, Win+D, Win+flechas,
   escritorios virtuales, enlaces rápidos (Win+X), configuración rápida (Win+A), notificaciones con
   calendario (Win+N), menú de la ventana (Alt+Espacio) y más: ver la tabla de abajo o F1.
+- **Barra de arriba**: al maximizar una ventana ocupa toda la pantalla, y arriba aparece una barra
+  con los íconos, las ventanas abiertas (clic para traerla o minimizarla), gráficos en vivo de
+  CPU, memoria, disco y red (clic: Monitor), la IP y la hora (clic: notificaciones).
+- **Transiciones**: las ventanas aparecen, se cierran, se minimizan, vuelven, se maximizan y se
+  acoplan con una animación corta (se apagan con "Animaciones" en la Configuración).
 - **Terminal** (Ctrl+Alt+T): shell `jsh` parecida a bash, con tuberías, redirecciones, variables,
   comodines, historial, Tab y colores; ~80 comandos de Linux sobre el FAT32 propio y un `/proc`.
 - **`apt`**: instala, actualiza y desinstala programas de JARVIS-OS desde el repositorio del
@@ -305,6 +315,17 @@ firmware UEFI (OVMF en QEMU)
 - **El firewall donde pasa todo**: como ninguna app abre sockets, el lugar más simple y más
   seguro es el `Outbox`: se decide antes del DNS y se sabe qué app lo pidió (un filtro de
   paquetes no lo sabría). Cuando haya sockets de verdad, bajará a la pila de red.
+- **Transiciones sin romper el render por partes**: cada animación depende solo de la hora del
+  frame (no de cuántos frames pasaron) y marca como sucia toda su zona en cada frame y una vez
+  más al terminar. Mezclar con transparencia no es idempotente: si dos zonas de recorte se
+  superponen, el píxel se mezclaba dos veces y el render por partes daba distinto que el
+  completo. Ahora cada píxel se mezcla una sola vez (el test lo prueba a mitad de cada animación).
+- **Revisando el navegador con sitios reales** aparecieron errores que las páginas chicas no
+  muestran: las variables de CSS distinguen mayúsculas (`--fgColor-accent`, y GitHub quedaba sin
+  colores); un `@media` con saltos de línea entre las condiciones (Hacker News se armaba como en
+  un celular); un elemento flex con `flex: 1` no puede quedar más bajo que su contenido (el pie
+  de rust-lang.org tapaba la página); y GitHub enlaza 18 variantes de tema antes de su CSS de
+  verdad, así que el tope de hojas de estilo dejaba afuera lo importante.
 - **Idiomas con el texto original como clave**: `tr("Papelera")` en vez de `tr(TRASH_LABEL)`.
   Se lee igual que antes, un texto sin traducir no rompe nada, y la búsqueda es binaria sobre
   tablas ordenadas (un test verifica el orden y que todo sea Latin-1).
@@ -405,12 +426,12 @@ terminal con paquetes (K4) y el motor web con firewall e idiomas (K5) se adelant
 | **K2** ✅ | **Archivos**: PCI, virtio-blk, FAT32 propio, mouse PS/2 | Drivers con DMA, sistemas de archivos, UI dirigida por eventos |
 | **K3** ✅ | **Escritorio y red**: ventanas y atajos como Windows, monitor, apps, virtio-net + TCP/IP, navegador | Composición, gestores de ventanas, redes, HTTP/HTML |
 | **K4** ✅ | **Terminal y sistema**: shell `jsh`, `apt`, Configuración, más atajos, escritorios virtuales, navegador con CSS e imágenes, teclado latinoamericano | Intérpretes, gestión de paquetes, CSS y la cascada |
-| **K5** ✅ | **Motor web y sistema**: maquetación en cajas (flex, grid, tablas, flotantes), fuente proporcional, SVG y transparencias, YouTube sin JavaScript, firewall (`ufw`), `snap`, `winget`, idiomas | Motores de maquetación, tipografía, filtrado de red, internacionalización |
+| **K5** ✅ | **Motor web y sistema**: maquetación en cajas (flex, grid, tablas, flotantes), fuente proporcional, SVG y transparencias, YouTube sin JavaScript, firewall (`ufw`), `snap`, `winget`, idiomas, barra de arriba y transiciones de ventanas | Motores de maquetación, tipografía, filtrado de red, internacionalización, animación |
 | K6 | **Puente con el cerebro**: la consola de JARVIS le habla a Claude (por la red, al `jarvis` del anfitrión) y la esfera pulsa con la respuesta | Protocolos, el sistema "piensa" |
 | K7 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
 | K8 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
 | K9 | **TLS en el kernel** (sin puente) y decodificadores PNG/JPEG | Criptografía, certificados, compresión |
-| K10 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript | Aislamiento, ABI |
+| K10 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Firefox o Brave necesitan además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: son la meta de este camino, no el primer paso | Aislamiento, ABI |
 | K11 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
 | K12 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe, USB, ACPI, arranque en la PC | Drivers reales |
 
