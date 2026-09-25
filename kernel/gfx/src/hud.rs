@@ -139,6 +139,8 @@ pub enum Icon {
     Calendar,
     /// Descarga (flecha hacia abajo sobre una bandeja).
     Download,
+    /// Escudo (Brave).
+    Shield,
 }
 
 /// Dibuja el ícono `which` centrado en (x, y).
@@ -294,6 +296,18 @@ pub fn icon(c: &mut Canvas<'_>, which: Icon, x: i32, y: i32, col: Color) {
             line(c, x - 7, y + 3, x - 7, y + 6, col);
             line(c, x - 7, y + 6, x + 7, y + 6, col);
             line(c, x + 7, y + 3, x + 7, y + 6, col);
+        }
+        Icon::Shield => {
+            // Escudo: arriba recto con dos "orejas", abajo en punta.
+            line(c, x - 7, y - 5, x - 4, y - 8, col);
+            line(c, x - 4, y - 8, x + 4, y - 8, col);
+            line(c, x + 4, y - 8, x + 7, y - 5, col);
+            line(c, x - 7, y - 5, x - 6, y + 2, col);
+            line(c, x + 7, y - 5, x + 6, y + 2, col);
+            line(c, x - 6, y + 2, x, y + 8, col);
+            line(c, x + 6, y + 2, x, y + 8, col);
+            line(c, x - 3, y - 2, x, y + 2, col);
+            line(c, x + 3, y - 2, x, y + 2, col);
         }
     }
 }

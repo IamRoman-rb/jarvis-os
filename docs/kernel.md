@@ -3,12 +3,13 @@
 Kernel propio en Rust para x86_64 con arranque UEFI. Decisión y motivos: [ADR 0003](adr/0003-kernel-propio-rust.md).
 Red y navegador: [ADR 0004](adr/0004-red-y-navegador-propio.md). Terminal, paquetes y programas de
 otros sistemas: [ADR 0005](adr/0005-terminal-paquetes-y-programas.md). Motor web, firewall, snap,
-winget e idiomas: [ADR 0006](adr/0006-motor-web-firewall-tiendas-e-idiomas.md).
+winget e idiomas: [ADR 0006](adr/0006-motor-web-firewall-tiendas-e-idiomas.md). Conexiones largas,
+Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincronizacion.md).
 
-**Ventana maximizada con la barra de arriba** (íconos, ventanas abiertas, CPU, memoria, disco,
-red, IP y hora), con GitHub en el navegador:
+**Brave en JARVIS-OS**: YouTube con JavaScript, en una ventana maximizada con la barra de arriba
+(íconos, ventanas abiertas, CPU, memoria, disco, red, IP y hora):
 
-![Barra de arriba](img/k5-barra-superior.png)
+![Brave](img/k6-brave.png)
 
 | Wikipedia en el navegador | YouTube (sin JavaScript) |
 |---|---|
@@ -18,6 +19,10 @@ red, IP y hora), con GitHub en el navegador:
 | **Escritorio** | **Terminal y `apt`** |
 | ![JARVIS](img/k4-escritorio.png) | ![Terminal](img/k4-terminal.png) |
 
+- **Brave**: el navegador de verdad (JavaScript, YouTube, cualquier sitio). Corre en el
+  anfitrión sin ventana y JARVIS-OS lo muestra en una ventana propia, con pestañas, barra de
+  dirección, atrás/adelante, mouse, rueda y teclado. Se instala con `cargo xtask brave
+  --instalar`. El navegador propio de K3–K5 queda como "Navegador simple".
 - **JARVIS**: la esfera gira en tiempo real y late cuando JARVIS habla. El reloj usa una fuente
   vectorial propia (nítida a cualquier tamaño), en 24 o 12 horas.
 - **Ventanas como en Windows**: barra de título con minimizar, maximizar y cerrar; arrastrar para
@@ -35,7 +40,7 @@ red, IP y hora), con GitHub en el navegador:
   proyecto (`kernel/paquetes/`). `neofetch`, `cowsay`, `fortune`, fondos de pantalla…
 - **Programas de Windows y Linux**: se descargan (navegador, `wget`, `winget`, `snap download`) y
   se inspeccionan (`file`, `strings`, `xxd`); todavía no se pueden ejecutar (hace falta espacio de
-  usuario: K10).
+  usuario: K11).
 - **Configuración** (Win+I): fondo de pantalla, idioma, zona horaria, reloj, red, navegador,
   sonido, mouse, teclado, programas, almacenamiento, PIN de bloqueo y firewall. Se guarda en
   `/Sistema/config.ini`.
@@ -51,8 +56,8 @@ red, IP y hora), con GitHub en el navegador:
 - **Idiomas**: castellano, inglés o portugués (Configuración → Hora e idioma).
 - **Teclado latinoamericano** (ñ, tildes con tecla muerta, AltGr+Q = @) o de EE. UU.
 - **Panel de estado** (abajo a la izquierda) con gráficos en vivo de CPU, memoria, disco y red.
-- **Apps**: Archivos, Terminal, Configuración, Monitor, Consola JARVIS, Editor, Música, Visor y
-  Navegador.
+- **Apps**: Brave, Archivos, Terminal, Configuración, Monitor, Consola JARVIS, Editor, Música,
+  Visor y Navegador simple.
 - **Red propia**: driver virtio-net, TCP/IP (smoltcp), DHCP y DNS. Las páginas `https://` pasan por
   un puente en el anfitrión (el kernel todavía no tiene TLS).
 
@@ -69,6 +74,8 @@ cargo xtask test         # sin ventana, de punta a punta (lo usa la CI)
 cargo xtask screenshot   # capturas del escritorio, las apps y los menús (en target/)
 cargo xtask disk --reset # vuelve el disco a su contenido inicial (kernel/rootfs/)
 cargo xtask vdi          # target/jarvis-os.vdi para bootear en VirtualBox (VM con EFI)
+cargo xtask brave --instalar           # instala Brave en el anfitrión (winget)
+cargo xtask brave --probar https://…   # prueba el puente de Brave sin QEMU (target/brave-prueba.png)
 cargo test               # tests en el host: FAT32, red, escritorio, terminal y gráficos
 ```
 
@@ -89,6 +96,10 @@ cargo test               # tests en el host: FAT32, red, escritorio, terminal y 
   la computadora anfitriona. El puente (HTTPS, imágenes y paquetes) escucha solo en
   127.0.0.1:8118 mientras dura `run`: sin `cargo xtask run`, no hay `https://`, `apt`, `snap` ni
   `winget`.
+- **Brave**: mientras dura `cargo xtask run` también corre el puente de Brave (127.0.0.1:8119,
+  que QEMU ve como 10.0.2.2:8119). Brave usa su propio perfil (`kernel/target/brave-perfil`:
+  cookies y sesiones), separado del Brave que uses en Windows. Para usarlo desde otra máquina:
+  `cargo xtask brave --red --token <secreto>` y, en esa máquina, Configuración → Navegador.
 - Los logs del kernel (puerto serie) salen en la terminal donde corriste `cargo xtask run`.
 - En Windows, `xtask` usa la aceleración por hardware (WHPX) si está disponible.
 - Para compilar mientras tenés QEMU abierto (la imagen queda bloqueada), usá otra carpeta de
@@ -287,11 +298,30 @@ firmware UEFI (OVMF en QEMU)
 | `gfx` (`jarvis-gfx`) | Dibujo: canvas con recorte (anidado) y `blit`, paleta, texto, **fuente vectorial**, **fuente proporcional de las páginas** (DejaVu, cualquier tamaño), figuras, íconos, trigonometría en punto fijo, esfera, asistente, HUD. | `cargo test`: 39 tests |
 | `fs` (`jarvis-fs`) | FAT32 propio: montaje, FAT (dos copias), nombres largos, lectura, escritura, carpetas, renombrar, mover, **copiar**, borrar, **caché de sectores**. Sobre un trait `BlockDevice`. | 22 tests, 14 de ellos **cruzados contra `fatfs`**: cada uno lee lo que escribe el otro, y el espacio libre se cuenta sobre la FAT cruda |
 | `desktop` (`jarvis-desktop`) | Escritorio: gestor de ventanas (con escritorios virtuales), atajos, barra, panel de estado, menús y paneles, configuración, firewall, idiomas, composición; apps (Archivos, Terminal, Configuración, Monitor, Consola, Editor, Música, Visor, Navegador); shell `jsh`, `apt`, `snap`, `winget`, `ufw`, formatos PE/ELF/squashfs; web: URL, HTTP, DOM, selectores y cascada, maquetación en cajas (flujo, flotantes, flex, grid, tablas), JSON, adaptador de YouTube; teclado latinoamericano. | 116 tests: el escritorio manejado con teclas y clics sobre un disco en memoria, verificado con `fatfs`; la terminal, `apt`, `snap` y `winget` contra el repositorio real y respuestas grabadas; el firewall; la maquetación sobre HTML de prueba; incluye "render incremental == redibujar todo". Más `vista_previa` (a mano): arma una página real, con imágenes, y la guarda en BMP |
-| `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente. | 3 tests de punta a punta en memoria (placa "loopback" + servidor HTTP de juguete) |
+| `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente, conexiones TCP largas. | 5 tests de punta a punta en memoria (placa "loopback" + servidores de juguete) |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
-| `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
+| `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K6: Brave, sesión, personalización y sincronización
+- **Un navegador remoto es un VNC con más información**: en vez de mandar la pantalla entera, el
+  puente le pide a Brave cada cuadro por DevTools (`Page.startScreencast`), lo compara con el
+  anterior en mosaicos de 64×64 y manda solo los que cambiaron, comprimidos con LZ4. Una página
+  entera son ~1 MB la primera vez, y después unos pocos KB por cambio. Además de la imagen viajan
+  las pestañas, el título y si se puede ir atrás: por eso la barra la dibuja JARVIS.
+- **Control de flujo de punta a punta**: Brave no manda otro cuadro hasta que se le confirma el
+  anterior, y el puente no se lo confirma hasta que el kernel confirmó el suyo. Si el kernel está
+  ocupado, los cuadros intermedios se descartan en vez de acumularse (lo que importa es el último).
+- **El mismo protocolo en los dos lados**: `desktop/src/remote.rs` es `no_std` y lo usan el kernel y
+  el puente (que corre en Windows). Un cambio de formato no puede quedar a medias.
+- **Conexiones largas**: hasta K5 la red solo hacía "pedí esto, dame la respuesta". Una conexión
+  que dura necesita una cola de salida con tope (si el otro lado no lee, es un error y no se come
+  la memoria) y un cierre en dos pasos: en smoltcp, sacar el socket enseguida después de
+  `close()` hacía que el FIN no saliera nunca.
+- **Procesos huérfanos**: si `xtask` se corta con Ctrl+C, su Brave sin ventana queda vivo y con el
+  perfil tomado, y el próximo no arranca. Al empezar, el puente cierra solo los Brave que usan
+  **su** perfil (nunca el de Roman).
 
 ### K5: motor web, firewall, tiendas e idiomas
 - **Un navegador son cuatro etapas**: HTML → árbol, árbol + CSS → estilo de cada elemento
@@ -417,7 +447,8 @@ firmware UEFI (OVMF en QEMU)
 ## Roadmap
 
 El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritorio con red (K3), la
-terminal con paquetes (K4) y el motor web con firewall e idiomas (K5) se adelantaron.
+terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
+(K6) se adelantaron.
 
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
@@ -427,13 +458,15 @@ terminal con paquetes (K4) y el motor web con firewall e idiomas (K5) se adelant
 | **K3** ✅ | **Escritorio y red**: ventanas y atajos como Windows, monitor, apps, virtio-net + TCP/IP, navegador | Composición, gestores de ventanas, redes, HTTP/HTML |
 | **K4** ✅ | **Terminal y sistema**: shell `jsh`, `apt`, Configuración, más atajos, escritorios virtuales, navegador con CSS e imágenes, teclado latinoamericano | Intérpretes, gestión de paquetes, CSS y la cascada |
 | **K5** ✅ | **Motor web y sistema**: maquetación en cajas (flex, grid, tablas, flotantes), fuente proporcional, SVG y transparencias, YouTube sin JavaScript, firewall (`ufw`), `snap`, `winget`, idiomas, barra de arriba y transiciones de ventanas | Motores de maquetación, tipografía, filtrado de red, internacionalización, animación |
-| K6 | **Puente con el cerebro**: la consola de JARVIS le habla a Claude (por la red, al `jarvis` del anfitrión) y la esfera pulsa con la respuesta | Protocolos, el sistema "piensa" |
-| K7 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
-| K8 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
-| K9 | **TLS en el kernel** (sin puente) y decodificadores PNG/JPEG | Criptografía, certificados, compresión |
-| K10 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Firefox o Brave necesitan además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: son la meta de este camino, no el primer paso | Aislamiento, ABI |
-| K11 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
-| K12 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe, USB, ACPI, arranque en la PC | Drivers reales |
+| **K6** 🚧 | **Brave y sistema**: conexiones TCP largas, Brave remoto (DevTools + mosaicos), temperatura, cerrar sesión y suspender, personalización en capas, sincronización de carpetas entre máquinas (relé + ChaCha20-Poly1305) e ISO | Protocolos binarios, control de flujo, relojes lógicos, criptografía autenticada, El Torito |
+| K7 | **Puente con el cerebro**: la consola de JARVIS le habla a Claude (por la red, al `jarvis` del anfitrión) y la esfera pulsa con la respuesta | Protocolos, el sistema "piensa" |
+| K8 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
+| K9 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
+| K10 | **TLS en el kernel** (sin puente) y decodificadores PNG/JPEG | Criptografía, certificados, compresión |
+| K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
+| K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
+| K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |
+| K14 | **Wi-Fi**: un driver de placa real (firmware del fabricante), 802.11 y WPA2. La sincronización no cambia: ya funciona entre redes distintas | Redes inalámbricas, criptografía de enlace |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),
 la especificación de virtio y la especificación "Microsoft FAT32 File System".

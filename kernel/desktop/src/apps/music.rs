@@ -1,6 +1,6 @@
 //! Música por el parlante de la PC ("PC speaker"): el chip PIT genera una onda cuadrada a la
 //! frecuencia de cada nota. Suena como una computadora de los 80, pero no necesita driver de
-//! audio (eso llega en K11). Las canciones son de dominio público.
+//! audio (eso llega en K12). Las canciones son de dominio público.
 //!
 //! Las partituras se escriben como texto: `"E4:4 D#4:8. R:8"` = mi de la 4.ª octava negra,
 //! re sostenido corchea con puntillo, silencio de corchea.

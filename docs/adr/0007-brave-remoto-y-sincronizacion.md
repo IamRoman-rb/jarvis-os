@@ -15,7 +15,7 @@ Hasta ahora la red del kernel hacía una sola cosa: pedidos HTTP GET que termina
 puente del anfitrión (ADR 0004/0005/0006) escucha solo en 127.0.0.1 y solo acepta GET.
 
 Brave es un programa de Windows/Linux de decenas de millones de líneas. Para correrlo adentro de
-JARVIS-OS hace falta todo el camino de K10: espacio de usuario, ABI de Linux, bibliotecas
+JARVIS-OS hace falta todo el camino de K11: espacio de usuario, ABI de Linux, bibliotecas
 dinámicas, hilos y un servidor gráfico. En la PC de Roman no hay WSL ni Docker, así que tampoco
 hay una VM de Linux donde correrlo al lado.
 
@@ -53,7 +53,7 @@ modelo de los "navegadores remotos" (y, en el fondo, de VNC y RDP).
 
 - **Por qué no VNC con un Brave con ventana:** en Windows, un servidor VNC comparte el escritorio
   entero, no una ventana; y para aislar a Brave en un Linux hace falta WSL o Docker, que no hay.
-- **Por qué no esperar a K10:** Brave nativo es la meta de ese camino, pero faltan varios hitos.
+- **Por qué no esperar a K11:** Brave nativo es la meta de ese camino, pero faltan varios hitos.
   El protocolo de este puente no cambia cuando exista.
 
 **Red del puente de Brave:**
@@ -76,7 +76,7 @@ reenvía mensajes entre las máquinas del mismo grupo.
   otra. Con HKDF-SHA256 salen de él el **id de grupo**, que ve el relé, y la clave de
   **ChaCha20-Poly1305**, que no la ve nadie más. El relé solo ve bytes cifrados: ni nombres, ni
   contenido, ni cuántos archivos hay.
-- **Por qué ChaCha20-Poly1305 y no TLS:** TLS en el kernel es K9 (certificados, X.509, varios
+- **Por qué ChaCha20-Poly1305 y no TLS:** TLS en el kernel es K10 (certificados, X.509, varios
   cifrados). Acá las dos puntas comparten un secreto, así que alcanza con un cifrado autenticado
   (AEAD) y un contador por mensaje. Las crates de RustCrypto son `no_std` y rápidas por software.
 - **Qué se sincroniza:** la carpeta `/Sincronizado`. El estado va en `/Sistema/sync.db`: por
@@ -93,7 +93,7 @@ reenvía mensajes entre las máquinas del mismo grupo.
 UEFI (la que ya genera `bootloader`). El escritor es propio y mínimo (unas 200 líneas), para no
 depender de `xorriso`.
 
-Hasta que haya drivers de disco reales (AHCI/NVMe, K12), en una PC real el sistema arranca en
+Hasta que haya drivers de disco reales (AHCI/NVMe, K13), en una PC real el sistema arranca en
 **modo en vivo**: un FAT32 en RAM, sembrado con el rootfs.
 
 ## Consecuencias
@@ -106,6 +106,6 @@ Hasta que haya drivers de disco reales (AHCI/NVMe, K12), en una PC real el siste
 - La interfaz de Brave (Shields, extensiones, sincronización de Brave) no se ve: solo la página.
   Las descargas de Brave quedan en el anfitrión.
 - El Wi-Fi sigue pendiente: necesita drivers reales, firmware y WPA2. Viene después de las placas
-  Ethernet de K12, y el protocolo de sincronización no cambia cuando llegue.
+  Ethernet de K13 (el Wi-Fi es K14), y el protocolo de sincronización no cambia cuando llegue.
 - Si el relé se cae, cada máquina sigue funcionando sola. Al reconectar, se comparan los
   manifiestos y se pone al día lo que cambió mientras tanto.

@@ -340,7 +340,7 @@ pub fn why_not(b: &[u8]) -> Option<String> {
     };
     Some(format!(
         "{what}\nJARVIS-OS todavía no puede ejecutarlo: le falta espacio de usuario (ring 3), un\n\
-         cargador de programas y {needs}. Está en el roadmap (K10). Mientras tanto: `file`,\n\
+         cargador de programas y {needs}. Está en el roadmap (K11). Mientras tanto: `file`,\n\
          `xxd` y `strings` para inspeccionarlo, y `apt install` para programas de JARVIS-OS."
     ))
 }

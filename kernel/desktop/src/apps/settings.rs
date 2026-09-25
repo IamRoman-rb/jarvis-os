@@ -112,6 +112,10 @@ pub enum Opt {
     Zone,
     Clock24,
     TestNet,
+    BraveDefault,
+    BraveServer,
+    BraveToken,
+    BraveHome,
     Homepage,
     Search,
     LightPages,
@@ -443,8 +447,45 @@ impl Settings {
             }
             Section::Browser => alloc::vec![
                 Row::new(
+                    Opt::BraveDefault,
+                    tr("Navegador principal"),
+                    tr("El que abre la barra: Brave (en el anfitrión) o el simple de JARVIS"),
+                    Choice(if c.brave_default {
+                        "Brave".into()
+                    } else {
+                        tr("Navegador simple").into()
+                    })
+                ),
+                Row::new(
+                    Opt::BraveServer,
+                    tr("Puente de Brave"),
+                    tr("Dirección y puerto (en QEMU el anfitrión es 10.0.2.2)"),
+                    Text {
+                        value: c.brave_server.clone(),
+                        secret: false
+                    }
+                ),
+                Row::new(
+                    Opt::BraveToken,
+                    tr("Token del puente"),
+                    tr("Solo si el puente corre en otra máquina (--red)"),
+                    Text {
+                        value: c.brave_token.clone(),
+                        secret: true
+                    }
+                ),
+                Row::new(
+                    Opt::BraveHome,
+                    tr("Página de inicio de Brave"),
+                    tr("Lo primero que abre Brave"),
+                    Text {
+                        value: c.brave_home.clone(),
+                        secret: false
+                    }
+                ),
+                Row::new(
                     Opt::Homepage,
-                    tr("Página de inicio"),
+                    tr("Página de inicio (navegador simple)"),
                     tr("Lo que abre el navegador (about:inicio = la de JARVIS)"),
                     Text {
                         value: c.homepage.clone(),
@@ -985,12 +1026,22 @@ impl Settings {
         self.dirty = true;
         let c = &mut self.cfg;
         match opt {
-            Opt::Hostname | Opt::User | Opt::Homepage | Opt::Pin | Opt::FwAddSite => {
+            Opt::Hostname
+            | Opt::User
+            | Opt::Homepage
+            | Opt::Pin
+            | Opt::FwAddSite
+            | Opt::BraveServer
+            | Opt::BraveToken
+            | Opt::BraveHome => {
                 if delta == 0 {
                     let (value, max) = match opt {
                         Opt::Hostname => (c.hostname.clone(), 24),
                         Opt::User => (c.user.clone(), 24),
                         Opt::Homepage => (c.homepage.clone(), 200),
+                        Opt::BraveServer => (c.brave_server.clone(), 100),
+                        Opt::BraveToken => (c.brave_token.clone(), 64),
+                        Opt::BraveHome => (c.brave_home.clone(), 200),
                         Opt::FwAddSite => (String::new(), 100),
                         _ => (String::new(), 8),
                     };
@@ -1027,6 +1078,7 @@ impl Settings {
                 self.net_test = Some((id, tr("Probando...").into()));
                 return;
             }
+            Opt::BraveDefault => c.brave_default = !c.brave_default,
             Opt::Search => {
                 let all = SearchEngine::ALL;
                 let pos = all.iter().position(|s| *s == c.search).unwrap_or(0) as i32;
@@ -1154,6 +1206,18 @@ impl Settings {
             }
             Opt::Homepage if !v.is_empty() => {
                 self.cfg.homepage = v;
+                true
+            }
+            Opt::BraveServer if crate::config::parse_server(&v).is_some() => {
+                self.cfg.brave_server = v;
+                true
+            }
+            Opt::BraveToken if !v.contains(char::is_whitespace) => {
+                self.cfg.brave_token = v;
+                true
+            }
+            Opt::BraveHome if !v.is_empty() => {
+                self.cfg.brave_home = crate::apps::brave::to_url(&v);
                 true
             }
             Opt::Pin if v.len() <= 8 && v.chars().all(|c| c.is_ascii_digit()) => {

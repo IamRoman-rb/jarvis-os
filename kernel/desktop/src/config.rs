@@ -102,6 +102,14 @@ pub struct Config {
     pub load_images: bool,
     /// Modo lectura: sin menús ni formularios, solo el contenido.
     pub reader_mode: bool,
+    // Brave (ADR 0007)
+    /// Dónde está el puente de Brave: `host:puerto` (QEMU ve al anfitrión en 10.0.2.2).
+    pub brave_server: String,
+    /// Token del puente, si corre en otra máquina con `--red` (vacío = local).
+    pub brave_token: String,
+    pub brave_home: String,
+    /// El navegador principal es Brave (si no, el navegador simple de JARVIS).
+    pub brave_default: bool,
     // Cuentas y seguridad
     pub user: String,
     pub hostname: String,
@@ -133,6 +141,10 @@ impl Default for Config {
             light_pages: true,
             load_images: true,
             reader_mode: false,
+            brave_server: "10.0.2.2:8119".into(),
+            brave_token: String::new(),
+            brave_home: "https://search.brave.com/".into(),
+            brave_default: true,
             user: "roman".into(),
             hostname: "jarvis".into(),
             pin: String::new(),
@@ -196,6 +208,12 @@ impl Config {
                 "paginas_claras" => c.light_pages = yes(v),
                 "imagenes" => c.load_images = yes(v),
                 "modo_lectura" => c.reader_mode = yes(v),
+                "brave_servidor" if parse_server(v).is_some() => c.brave_server = v.into(),
+                "brave_token" if v.len() <= 64 && !v.contains(char::is_whitespace) => {
+                    c.brave_token = v.into()
+                }
+                "brave_inicio" if !v.is_empty() => c.brave_home = v.into(),
+                "navegador_principal" => c.brave_default = v != "simple",
                 "usuario" if valid_name(v) => c.user = v.into(),
                 "equipo" if valid_name(v) => c.hostname = v.into(),
                 "pin" if v.chars().all(|ch| ch.is_ascii_digit()) && v.len() <= 8 => {
@@ -237,6 +255,17 @@ impl Config {
             format!("paginas_claras={}", yn(self.light_pages)),
             format!("imagenes={}", yn(self.load_images)),
             format!("modo_lectura={}", yn(self.reader_mode)),
+            format!("brave_servidor={}", self.brave_server),
+            format!("brave_token={}", self.brave_token),
+            format!("brave_inicio={}", self.brave_home),
+            format!(
+                "navegador_principal={}",
+                if self.brave_default {
+                    "brave"
+                } else {
+                    "simple"
+                }
+            ),
             format!("usuario={}", self.user),
             format!("equipo={}", self.hostname),
             format!("pin={}", self.pin),
@@ -269,6 +298,18 @@ impl Config {
     }
 }
 
+/// `"10.0.2.2:8119"` → `("10.0.2.2", 8119)`. El puerto es obligatorio.
+pub fn parse_server(s: &str) -> Option<(&str, u16)> {
+    let (host, port) = s.rsplit_once(':')?;
+    let port = port.parse::<u16>().ok().filter(|&p| p != 0)?;
+    let ok = !host.is_empty()
+        && host.len() <= 253
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    ok.then_some((host, port))
+}
+
 /// Nombres de usuario y de equipo: letras, números y guiones (como en Linux).
 pub fn valid_name(s: &str) -> bool {
     !s.is_empty()
@@ -292,6 +333,9 @@ mod tests {
             pin: "1234".into(),
             lock_minutes: 5,
             language: Lang::Pt,
+            brave_server: "brave.casa.lan:9000".into(),
+            brave_token: "secreto123".into(),
+            brave_default: false,
             ..Config::default()
         };
         let mut c = c;
@@ -312,5 +356,10 @@ mod tests {
         assert_eq!(c.user, "roman");
         assert_eq!(c.wallpaper, Wallpaper::Solid(SOLID_COLORS.len() - 1));
         assert_eq!(Config::default().zone_label(), "UTC-03:00");
+        let c = Config::parse("brave_servidor=sin-puerto\nbrave_token=con espacio");
+        assert_eq!(c.brave_server, "10.0.2.2:8119");
+        assert_eq!(c.brave_token, "");
+        assert_eq!(parse_server("10.0.2.2:8119"), Some(("10.0.2.2", 8119)));
+        assert_eq!(parse_server("x:0"), None);
     }
 }
