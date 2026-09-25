@@ -19,7 +19,10 @@ use jarvis_gfx::text;
 use jarvis_gfx::{Canvas, Rect, theme};
 
 use super::{Click, Ctx, SysView};
-use crate::config::{Config, SOLID_COLORS, SearchEngine, Wallpaper, valid_name};
+use crate::config::{
+    AnimStyle, Config, FONT_SIZES, SOLID_COLORS, SearchEngine, ThemeKind, TitleDouble, Wallpaper,
+    valid_name,
+};
 use crate::files::{TRASH, format_size, join};
 use crate::firewall::{Action, Dir, Rule};
 use crate::i18n::{Lang, tr, trf};
@@ -27,11 +30,11 @@ use crate::input::{Key, Mods};
 use crate::system::{Launch, Power};
 use crate::text_input::TextInput;
 use crate::widgets::{
-    FIELD_BG, SELECTED_BG, WINDOW_BG, bar, big, button, draw_fit, duration, ip, label, light, s16,
+    bar, big, button, draw_fit, duration, field_bg, ip, label, light, s16, selected_bg, window_bg,
 };
 
 const SIDEBAR_W: i32 = 236;
-const SECTION_H: i32 = 38;
+const SECTION_H: i32 = 34;
 const ROW_H: i32 = 60;
 const HEADER_H: i32 = 76;
 
@@ -39,6 +42,10 @@ const HEADER_H: i32 = 76;
 pub enum Section {
     System,
     Personalization,
+    Appearance,
+    Typography,
+    Windows,
+    Taskbar,
     DateTime,
     Network,
     Browser,
@@ -50,9 +57,13 @@ pub enum Section {
     Firewall,
 }
 
-pub const SECTIONS: [Section; 11] = [
+pub const SECTIONS: [Section; 15] = [
     Section::System,
     Section::Personalization,
+    Section::Appearance,
+    Section::Typography,
+    Section::Windows,
+    Section::Taskbar,
     Section::DateTime,
     Section::Network,
     Section::Browser,
@@ -69,6 +80,10 @@ impl Section {
         match self {
             Section::System => tr("Sistema"),
             Section::Personalization => tr("Personalización"),
+            Section::Appearance => tr("Apariencia"),
+            Section::Typography => tr("Tipografía"),
+            Section::Windows => tr("Ventanas"),
+            Section::Taskbar => tr("Barra y cursor"),
             Section::DateTime => tr("Hora e idioma"),
             Section::Network => tr("Red e Internet"),
             Section::Browser => tr("Navegador"),
@@ -85,6 +100,10 @@ impl Section {
         match self {
             Section::System => Icon::Screen,
             Section::Personalization => Icon::Image,
+            Section::Appearance => Icon::Screen,
+            Section::Typography => Icon::Document,
+            Section::Windows => Icon::Start,
+            Section::Taskbar => Icon::Gauge,
             Section::DateTime => Icon::Gauge,
             Section::Network => Icon::Globe,
             Section::Browser => Icon::Globe,
@@ -108,6 +127,24 @@ pub enum Opt {
     Wallpaper,
     Animations,
     StatusPanel,
+    Theme,
+    Accent,
+    UiLarge,
+    BoldTitles,
+    TermSize,
+    EditorSize,
+    AnimStyle,
+    AnimSpeed,
+    ButtonsSide,
+    TitleDouble,
+    SnapEdges,
+    DragOutline,
+    FocusFollows,
+    Topbar,
+    /// Un gráfico de la barra de arriba (bit de `look::STAT_*`).
+    TopStat(u8),
+    ClockSeconds,
+    CursorBig,
     Language,
     Zone,
     Clock24,
@@ -364,6 +401,133 @@ impl Settings {
                     on(c.status_panel)
                 ),
             ],
+            Section::Appearance => alloc::vec![
+                Row::new(
+                    Opt::Theme,
+                    tr("Tema"),
+                    tr("Colores de todo el sistema: ventanas, menús y el escritorio"),
+                    Choice(tr(c.theme.name()).into())
+                ),
+                Row::new(
+                    Opt::Accent,
+                    tr("Color de acento"),
+                    tr("Bordes, íconos activos, el cursor de texto y la esfera"),
+                    Choice(tr(crate::look::ACCENTS[c.accent as usize].0).into())
+                ),
+            ],
+            Section::Typography => alloc::vec![
+                Row::new(
+                    Opt::UiLarge,
+                    tr("Texto grande"),
+                    tr("Menús, listas y botones en 20 px (si no, 16)"),
+                    on(c.ui_large)
+                ),
+                Row::new(
+                    Opt::BoldTitles,
+                    tr("Títulos en negrita"),
+                    tr("El nombre de cada ventana en su barra de título"),
+                    on(c.bold_titles)
+                ),
+                Row::new(
+                    Opt::TermSize,
+                    tr("Letra de la terminal"),
+                    tr("Tamaño en píxeles"),
+                    Choice(format!("{} px", c.term_size))
+                ),
+                Row::new(
+                    Opt::EditorSize,
+                    tr("Letra del editor"),
+                    tr("Tamaño en píxeles"),
+                    Choice(format!("{} px", c.editor_size))
+                ),
+            ],
+            Section::Windows => alloc::vec![
+                Row::new(
+                    Opt::AnimStyle,
+                    tr("Animación al abrir y cerrar"),
+                    tr("Necesita \"Animaciones\" encendido (Personalización)"),
+                    Choice(tr(c.anim_style.name()).into())
+                ),
+                Row::new(
+                    Opt::AnimSpeed,
+                    tr("Velocidad de las animaciones"),
+                    tr("También al maximizar, acoplar y minimizar"),
+                    Choice(tr(crate::config::ANIM_SPEEDS[c.anim_speed.min(2) as usize].0).into())
+                ),
+                Row::new(
+                    Opt::ButtonsSide,
+                    tr("Botones de la barra de título"),
+                    tr("Minimizar, maximizar y cerrar"),
+                    Choice(
+                        if c.buttons_left {
+                            tr("A la izquierda")
+                        } else {
+                            tr("A la derecha")
+                        }
+                        .into()
+                    )
+                ),
+                Row::new(
+                    Opt::TitleDouble,
+                    tr("Doble clic en el título"),
+                    tr("Qué hace con la ventana"),
+                    Choice(tr(c.title_double.name()).into())
+                ),
+                Row::new(
+                    Opt::SnapEdges,
+                    tr("Acoplar a los bordes"),
+                    tr("Arrastrar al costado ocupa media pantalla; arriba, maximiza"),
+                    on(c.snap_edges)
+                ),
+                Row::new(
+                    Opt::DragOutline,
+                    tr("Arrastrar solo el contorno"),
+                    tr("La ventana salta a su lugar al soltar (más liviano)"),
+                    on(c.drag_outline)
+                ),
+                Row::new(
+                    Opt::FocusFollows,
+                    tr("El foco sigue al mouse"),
+                    tr("La ventana bajo el mouse pasa adelante sin hacer clic"),
+                    on(c.focus_follows)
+                ),
+            ],
+            Section::Taskbar => {
+                use crate::look::*;
+                let mut rows = alloc::vec![Row::new(
+                    Opt::Topbar,
+                    tr("Barra de arriba al maximizar"),
+                    tr("Ventanas abiertas, gráficos, IP y hora arriba de todo"),
+                    on(c.topbar)
+                )];
+                for (bit, name) in [
+                    (STAT_CPU, "CPU"),
+                    (STAT_MEM, tr("Memoria")),
+                    (STAT_DISK, tr("Disco")),
+                    (STAT_NET, tr("Red")),
+                    (STAT_TEMP, tr("Temperatura")),
+                ] {
+                    rows.push(Row::new(
+                        Opt::TopStat(bit),
+                        trf("Gráfico: {}", &[name]),
+                        tr("En la barra de arriba"),
+                        on(c.top_stats & bit != 0),
+                    ));
+                }
+                rows.push(Row::new(
+                    Opt::ClockSeconds,
+                    tr("Segundos en el reloj"),
+                    tr("El de la barra de arriba"),
+                    on(c.clock_seconds),
+                ));
+                rows.push(Row::new(
+                    Opt::CursorBig,
+                    tr("Cursor grande"),
+                    tr("El doble de tamaño"),
+                    on(c.cursor_big),
+                ));
+                rows
+            }
             Section::DateTime => alloc::vec![
                 Row::new(
                     Opt::Language,
@@ -787,30 +951,38 @@ impl Settings {
         self.disk = sys
             .disk
             .map(|(_, free, total)| (total.saturating_sub(free), total));
-        c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+        c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
         // Barra lateral.
-        c.fill_rect(r.x, r.y, SIDEBAR_W, r.h, theme::PANEL);
+        c.fill_rect(r.x, r.y, SIDEBAR_W, r.h, theme::panel());
         text::draw(
             c,
             r.x + 20,
             r.y + 20,
             tr("CONFIGURACIÓN"),
-            &label(theme::CYAN),
+            &label(theme::cyan()),
         );
         for (i, s) in SECTIONS.iter().enumerate() {
             let sr = Self::section_rect(r, i);
             let active = *s == self.section;
             if active {
-                rounded_rect(c, sr.x, sr.y, sr.w, sr.h, 4, SELECTED_BG, 255);
-                c.fill_rect(sr.x, sr.y + 8, 3, sr.h - 16, theme::CYAN);
+                rounded_rect(c, sr.x, sr.y, sr.w, sr.h, 4, selected_bg(), 255);
+                c.fill_rect(sr.x, sr.y + 8, 3, sr.h - 16, theme::cyan());
             }
-            let col = if active { theme::TEXT } else { theme::TEXT_DIM };
+            let col = if active {
+                theme::text()
+            } else {
+                theme::text_dim()
+            };
             icon(
                 c,
                 s.icon(),
                 sr.x + 22,
                 sr.y + sr.h / 2,
-                if active { theme::CYAN } else { theme::TEXT_DIM },
+                if active {
+                    theme::cyan()
+                } else {
+                    theme::text_dim()
+                },
             );
             text::draw(c, sr.x + 42, sr.y + 9, s.name(), &s16(col));
         }
@@ -821,7 +993,7 @@ impl Settings {
             p.x + 20,
             p.y + 20,
             self.section.name(),
-            &big(theme::TEXT),
+            &big(theme::text()),
         );
         let rows = self.rows(sys.stats);
         let visible = ((p.h - HEADER_H) / ROW_H).max(1) as usize;
@@ -836,7 +1008,7 @@ impl Settings {
                 rr.w,
                 rr.h,
                 6,
-                if sel { SELECTED_BG } else { theme::PANEL },
+                if sel { selected_bg() } else { theme::panel() },
                 255,
             );
             rounded_outline(
@@ -847,9 +1019,9 @@ impl Settings {
                 rr.h,
                 6,
                 if sel {
-                    theme::CYAN.scale(160)
+                    theme::cyan().scale(160)
                 } else {
-                    theme::PANEL_RIM
+                    theme::panel_rim()
                 },
             );
             let cr = Self::control_rect(rr);
@@ -859,7 +1031,7 @@ impl Settings {
                 rr.x + 16,
                 rr.y + 10,
                 &row.title,
-                &s16(theme::TEXT),
+                &s16(theme::text()),
                 text_w,
             );
             draw_fit(
@@ -867,7 +1039,7 @@ impl Settings {
                 rr.x + 16,
                 rr.y + 31,
                 &row.detail,
-                &light(theme::TEXT_DIM),
+                &light(theme::text_dim()),
                 text_w,
             );
             self.draw_control(c, row, cr, sel);
@@ -877,7 +1049,13 @@ impl Settings {
                 "{} de {} · flechas para ver más",
                 &[&(self.selected + 1).to_string(), &rows.len().to_string()],
             );
-            text::draw_right(c, p.x + p.w - 24, p.y + 30, &hint, &light(theme::TEXT_DIM));
+            text::draw_right(
+                c,
+                p.x + p.w - 24,
+                p.y + 30,
+                &hint,
+                &light(theme::text_dim()),
+            );
         }
     }
 
@@ -888,9 +1066,9 @@ impl Settings {
                 let x = cr.x + cr.w - w;
                 let y = cr.y + (cr.h - h) / 2;
                 let fill = if *v {
-                    theme::CYAN.scale(200)
+                    theme::cyan().scale(200)
                 } else {
-                    theme::PANEL_RIM
+                    theme::panel_rim()
                 };
                 rounded_rect(c, x, y, w, h, h / 2, fill, 255);
                 let knob = if *v { x + w - h / 2 } else { x + h / 2 };
@@ -899,10 +1077,10 @@ impl Settings {
                     knob,
                     y + h / 2,
                     h / 2 - 4,
-                    if *v { theme::VOID } else { theme::TEXT_DIM },
+                    if *v { theme::void() } else { theme::text_dim() },
                     true,
                 );
-                let st = light(theme::TEXT_DIM);
+                let st = light(theme::text_dim());
                 text::draw_right(
                     c,
                     x - 10,
@@ -916,7 +1094,7 @@ impl Settings {
                 );
             }
             Control::Choice(v) => {
-                rounded_rect(c, cr.x, cr.y, cr.w, cr.h, 4, FIELD_BG, 255);
+                rounded_rect(c, cr.x, cr.y, cr.w, cr.h, 4, field_bg(), 255);
                 rounded_outline(
                     c,
                     cr.x,
@@ -924,9 +1102,13 @@ impl Settings {
                     cr.w,
                     cr.h,
                     4,
-                    if sel { theme::CYAN } else { theme::PANEL_RIM },
+                    if sel {
+                        theme::cyan()
+                    } else {
+                        theme::panel_rim()
+                    },
                 );
-                let st = s16(theme::TEXT);
+                let st = s16(theme::text());
                 text::draw(c, cr.x + 10, cr.y + (cr.h - 16) / 2, "<", &st);
                 text::draw_right(c, cr.x + cr.w - 10, cr.y + (cr.h - 16) / 2, ">", &st);
                 let shown = text::fit(v, &st, cr.w - 50);
@@ -940,7 +1122,7 @@ impl Settings {
                 );
             }
             Control::Text { value, secret } => {
-                rounded_rect(c, cr.x, cr.y, cr.w, cr.h, 4, FIELD_BG, 255);
+                rounded_rect(c, cr.x, cr.y, cr.w, cr.h, 4, field_bg(), 255);
                 let editing = self.editing.as_ref().filter(|(o, _)| *o == row.opt);
                 rounded_outline(
                     c,
@@ -950,9 +1132,9 @@ impl Settings {
                     cr.h,
                     4,
                     if editing.is_some() {
-                        theme::CYAN
+                        theme::cyan()
                     } else {
-                        theme::PANEL_RIM
+                        theme::panel_rim()
                     },
                 );
                 let raw = editing.map_or(value.as_str(), |(_, t)| t.text.as_str());
@@ -963,9 +1145,9 @@ impl Settings {
                 };
                 let placeholder = shown.is_empty() && editing.is_none();
                 let st = s16(if placeholder {
-                    theme::TEXT_DIM
+                    theme::text_dim()
                 } else {
-                    theme::TEXT
+                    theme::text()
                 });
                 let tw = draw_fit(
                     c,
@@ -980,7 +1162,7 @@ impl Settings {
                     cr.w - 20,
                 );
                 if editing.is_some() {
-                    c.fill_rect(cr.x + 12 + tw, cr.y + 7, 2, cr.h - 14, theme::CYAN);
+                    c.fill_rect(cr.x + 12 + tw, cr.y + 7, 2, cr.h - 14, theme::cyan());
                 }
             }
             Control::Button(t) => {
@@ -994,20 +1176,35 @@ impl Settings {
                     c,
                     b,
                     t,
-                    if danger { theme::AMBER } else { theme::CYAN },
+                    if danger {
+                        theme::amber()
+                    } else {
+                        theme::cyan()
+                    },
                     if sel { 70 } else { 30 },
                 );
             }
             Control::Value(v) => {
-                draw_fit(c, cr.x, cr.y + (cr.h - 16) / 2, v, &s16(theme::CYAN), cr.w);
+                draw_fit(
+                    c,
+                    cr.x,
+                    cr.y + (cr.h - 16) / 2,
+                    v,
+                    &s16(theme::cyan()),
+                    cr.w,
+                );
             }
             Control::Usage(pct, t) => {
-                text::draw_right(c, cr.x + cr.w, cr.y, t, &light(theme::TEXT_DIM));
+                text::draw_right(c, cr.x + cr.w, cr.y, t, &light(theme::text_dim()));
                 bar(
                     c,
                     Rect::new(cr.x, cr.y + cr.h - 8, cr.w, 7),
                     *pct,
-                    if *pct > 85 { theme::AMBER } else { theme::CYAN },
+                    if *pct > 85 {
+                        theme::amber()
+                    } else {
+                        theme::cyan()
+                    },
                 );
             }
         }
@@ -1065,6 +1262,45 @@ impl Settings {
                 c.wallpaper = all[step(pos, all.len() as i32) as usize].clone();
             }
             Opt::Animations => c.animations = !c.animations,
+            Opt::Theme => {
+                let all = ThemeKind::ALL;
+                let pos = all.iter().position(|t| *t == c.theme).unwrap_or(0) as i32;
+                c.theme = all[step(pos, all.len() as i32) as usize];
+            }
+            Opt::Accent => {
+                let n = crate::look::ACCENTS.len() as i32;
+                c.accent = step(c.accent as i32, n) as u8;
+            }
+            Opt::UiLarge => c.ui_large = !c.ui_large,
+            Opt::BoldTitles => c.bold_titles = !c.bold_titles,
+            Opt::TermSize | Opt::EditorSize => {
+                let v = if opt == Opt::TermSize {
+                    &mut c.term_size
+                } else {
+                    &mut c.editor_size
+                };
+                let pos = FONT_SIZES.iter().position(|s| s == v).unwrap_or(0) as i32;
+                *v = FONT_SIZES[step(pos, FONT_SIZES.len() as i32) as usize];
+            }
+            Opt::AnimStyle => {
+                let all = AnimStyle::ALL;
+                let pos = all.iter().position(|a| *a == c.anim_style).unwrap_or(0) as i32;
+                c.anim_style = all[step(pos, all.len() as i32) as usize];
+            }
+            Opt::AnimSpeed => c.anim_speed = step(c.anim_speed as i32, 3) as u8,
+            Opt::ButtonsSide => c.buttons_left = !c.buttons_left,
+            Opt::TitleDouble => {
+                let all = TitleDouble::ALL;
+                let pos = all.iter().position(|t| *t == c.title_double).unwrap_or(0) as i32;
+                c.title_double = all[step(pos, all.len() as i32) as usize];
+            }
+            Opt::SnapEdges => c.snap_edges = !c.snap_edges,
+            Opt::DragOutline => c.drag_outline = !c.drag_outline,
+            Opt::FocusFollows => c.focus_follows = !c.focus_follows,
+            Opt::Topbar => c.topbar = !c.topbar,
+            Opt::TopStat(bit) => c.top_stats ^= bit,
+            Opt::ClockSeconds => c.clock_seconds = !c.clock_seconds,
+            Opt::CursorBig => c.cursor_big = !c.cursor_big,
             Opt::StatusPanel => c.status_panel = !c.status_panel,
             Opt::Zone => c.utc_offset = (step(c.utc_offset as i32 + 12, 27) - 12) as i8,
             Opt::Clock24 => c.clock_24h = !c.clock_24h,

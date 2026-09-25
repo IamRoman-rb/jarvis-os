@@ -52,7 +52,7 @@ impl Default for ClockFace {
 }
 
 fn date_style() -> Style {
-    Style::new(Weight::Regular, Size::Size16, theme::CYAN.scale(190)).tracking(3)
+    Style::new(Weight::Regular, Size::Size16, theme::cyan().scale(190)).tracking(3)
 }
 
 // --- capa estática ----------------------------------------------------------------------------
@@ -90,23 +90,30 @@ pub fn draw_title(c: &mut Canvas<'_>) {
         right - tw,
         MARGIN - 10,
         "JARVIS",
-        theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 90),
+        theme::text_faint().lerp(theme::text_dim(), 90),
     );
 }
 
 fn background(c: &mut Canvas<'_>) {
     let (w, h) = (c.width() as i32, c.height() as i32);
-    c.fill(theme::VOID);
+    c.fill(theme::void());
     // Grilla de puntos cada 32 px (DESIGN.md: "holographic crosshair dot grid").
-    let dot = theme::VOID.lerp(theme::CYAN, 14);
+    let dot = theme::void().lerp(theme::cyan(), 14);
     for y in (16..h).step_by(32) {
         for x in (16..w).step_by(32) {
             c.put(x, y, dot);
         }
     }
     // Luz ambiente arriba a la izquierda y detrás de la esfera.
-    glow(c, w / 6, 0, h * 7 / 10, Color::hex(0x0a2350), 120);
-    glow(c, w / 2, h / 2, h * 45 / 100, Color::hex(0x0a2a66), 90);
+    glow(c, w / 6, 0, h * 7 / 10, theme::vector_blue().scale(80), 120);
+    glow(
+        c,
+        w / 2,
+        h / 2,
+        h * 45 / 100,
+        theme::vector_blue().scale(100),
+        90,
+    );
 }
 
 /// Íconos de línea de 16×16 px (centrados en el punto que se pasa).
@@ -383,7 +390,7 @@ pub fn draw_clock(c: &mut Canvas<'_>, face: &mut ClockFace, now: Option<DateTime
     let ty = MARGIN + 38;
     let tx = right - tw - 10;
     face.halo
-        .draw_alpha(c, tx, ty, time.as_str(), theme::CYAN, 22);
+        .draw_alpha(c, tx, ty, time.as_str(), theme::cyan(), 22);
     face.digits.draw(c, tx, ty, time.as_str(), Color::WHITE);
     if !suffix.is_empty() {
         text::draw_right(c, tx - 12, ty + TIME_HEIGHT - 18, suffix, &date_style());
@@ -411,14 +418,14 @@ pub fn message_rect(width: usize, height: usize) -> Rect {
 pub fn draw_message(c: &mut Canvas<'_>, msg: &str, speaking: bool) {
     let (w, h) = (c.width() as i32, c.height() as i32);
     let right = w - MARGIN - 8;
-    let body = Style::new(Weight::Regular, Size::Size16, theme::TEXT);
+    let body = Style::new(Weight::Regular, Size::Size16, theme::text());
     text::draw_right(c, right, h - MARGIN - 50, msg, &body);
 
-    let meta = Style::new(Weight::Light, Size::Size16, theme::TEXT_DIM).tracking(2);
-    let who = meta.color(theme::CYAN.scale(200));
+    let meta = Style::new(Weight::Light, Size::Size16, theme::text_dim()).tracking(2);
+    let who = meta.color(theme::cyan().scale(200));
     let who_w = text::draw_right(c, right, h - MARGIN - 24, "JARVIS", &who);
     let (status, style) = if speaking {
-        ("HABLANDO ·", meta.color(theme::CYAN.scale(150)))
+        ("HABLANDO ·", meta.color(theme::cyan().scale(150)))
     } else {
         ("HACE UN INSTANTE ·", meta)
     };

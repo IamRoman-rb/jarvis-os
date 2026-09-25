@@ -20,6 +20,7 @@ pub mod firewall;
 pub mod i18n;
 pub mod input;
 pub mod keymap;
+pub mod look;
 pub mod panels;
 pub mod remote;
 pub mod shell;

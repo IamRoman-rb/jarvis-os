@@ -40,10 +40,12 @@ const SIDEBAR_ITEM_H: i32 = 34;
 const DIALOG_W: i32 = 470;
 const DIALOG_H: i32 = 190;
 
-const WINDOW_BG: Color = Color::hex(0x08121f);
-const SIDEBAR_BG: Color = Color::hex(0x0a1626);
-const FIELD_BG: Color = Color::hex(0x050c16);
-const SELECTED_BG: Color = Color::hex(0x0b2a3a);
+use crate::widgets::{field_bg, selected_bg, window_bg};
+
+/// El panel lateral: entre el fondo de la ventana y el de los paneles.
+fn sidebar_bg() -> Color {
+    theme::window().lerp(theme::panel(), 110)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -126,7 +128,7 @@ impl Layout {
         let mut right = x + w - 12;
         let mut buttons = Vec::new();
         for (action, text) in specs.into_iter().rev() {
-            let bw = text::width(text, &label(theme::TEXT)) + 24;
+            let bw = text::width(text, &label(theme::text())) + 24;
             right -= bw;
             buttons.push((action, text, Rect::new(right, by, bw, 30)));
             right -= 8;
@@ -246,13 +248,13 @@ impl Layout {
 
 fn kind_color(kind: Kind) -> Color {
     match kind {
-        Kind::Folder => theme::CYAN,
-        Kind::Trash => theme::TEXT_DIM,
-        Kind::Text => theme::TEXT,
-        Kind::Code => theme::AMBER,
-        Kind::Image => theme::PARTICLE_BRIGHT,
-        Kind::Archive => theme::AMBER,
-        Kind::Binary => theme::TEXT_DIM,
+        Kind::Folder => theme::cyan(),
+        Kind::Trash => theme::text_dim(),
+        Kind::Text => theme::text(),
+        Kind::Code => theme::amber(),
+        Kind::Image => theme::particle_bright(),
+        Kind::Archive => theme::amber(),
+        Kind::Binary => theme::text_dim(),
     }
 }
 
@@ -347,7 +349,7 @@ fn button(c: &mut Canvas<'_>, r: Rect, text_label: &str, color: Color, fill: u8)
 
 pub fn draw(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
     let w = l.window;
-    c.fill_rect(w.x, w.y, w.w, w.h, WINDOW_BG);
+    c.fill_rect(w.x, w.y, w.w, w.h, window_bg());
     draw_toolbar(c, app, l);
     draw_sidebar(c, app, l);
     draw_list(c, app, l, has_disk);
@@ -362,14 +364,14 @@ pub fn draw(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
 
 fn draw_toolbar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
     for (r, up) in [(l.back, false), (l.up, true)] {
-        rounded_rect(c, r.x, r.y, r.w, r.h, 4, theme::PANEL, 255);
-        rounded_outline(c, r.x, r.y, r.w, r.h, 4, theme::PANEL_RIM);
-        arrow(c, r, up, theme::TEXT);
+        rounded_rect(c, r.x, r.y, r.w, r.h, 4, theme::panel(), 255);
+        rounded_outline(c, r.x, r.y, r.w, r.h, 4, theme::panel_rim());
+        arrow(c, r, up, theme::text());
     }
     let p = l.path;
-    rounded_rect(c, p.x, p.y, p.w, p.h, 4, FIELD_BG, 255);
-    rounded_outline(c, p.x, p.y, p.w, p.h, 4, theme::PANEL_RIM);
-    let st = s16(theme::TEXT_DIM);
+    rounded_rect(c, p.x, p.y, p.w, p.h, 4, field_bg(), 255);
+    rounded_outline(c, p.x, p.y, p.w, p.h, 4, theme::panel_rim());
+    let st = s16(theme::text_dim());
     text::draw(
         c,
         p.x + 10,
@@ -379,11 +381,11 @@ fn draw_toolbar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
     );
     for (action, text_label, r) in &l.buttons {
         let color = match action {
-            Action::Restore | Action::Paste => theme::CYAN,
-            Action::Delete if app.in_trash() => theme::CRIMSON,
-            Action::EmptyTrash => theme::CRIMSON,
-            Action::Delete => theme::AMBER,
-            _ => theme::CYAN,
+            Action::Restore | Action::Paste => theme::cyan(),
+            Action::Delete if app.in_trash() => theme::crimson(),
+            Action::EmptyTrash => theme::crimson(),
+            Action::Delete => theme::amber(),
+            _ => theme::cyan(),
         };
         button(c, *r, text_label, color, 30);
     }
@@ -394,34 +396,34 @@ fn draw_toolbar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
         t.y + t.h - 1,
         t.x + t.w - 2,
         t.y + t.h - 1,
-        theme::PANEL_RIM,
+        theme::panel_rim(),
     );
 }
 
 fn draw_sidebar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
     let s = l.sidebar;
-    c.fill_rect(s.x + 1, s.y, s.w - 1, s.h, SIDEBAR_BG);
+    c.fill_rect(s.x + 1, s.y, s.w - 1, s.h, sidebar_bg());
     line(
         c,
         s.x + s.w - 1,
         s.y,
         s.x + s.w - 1,
         s.y + s.h - 1,
-        theme::PANEL_RIM,
+        theme::panel_rim(),
     );
     text::draw(
         c,
         s.x + 16,
         s.y + 12,
         tr("ACCESOS"),
-        &label(theme::TEXT_DIM),
+        &label(theme::text_dim()),
     );
     for (i, (name, path)) in SHORTCUTS.iter().enumerate() {
         let r = l.shortcut_rect(i);
         let current = app.cwd == *path;
         if current {
-            rounded_rect(c, r.x, r.y, r.w, r.h, 4, SELECTED_BG, 255);
-            c.fill_rect(r.x, r.y + 4, 3, r.h - 8, theme::CYAN);
+            rounded_rect(c, r.x, r.y, r.w, r.h, 4, selected_bg(), 255);
+            c.fill_rect(r.x, r.y + 4, 3, r.h - 8, theme::cyan());
         }
         let kind = if *path == crate::files::TRASH {
             Kind::Trash
@@ -429,7 +431,11 @@ fn draw_sidebar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
             Kind::Folder
         };
         kind_icon(c, kind, r.x + 12, r.y + 5, 1);
-        let col = if current { theme::CYAN } else { theme::TEXT };
+        let col = if current {
+            theme::cyan()
+        } else {
+            theme::text()
+        };
         text::draw(c, r.x + 42, r.y + 7, tr(name), &s16(col));
     }
 
@@ -443,12 +449,12 @@ fn draw_sidebar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
         s.x + 16,
         y,
         tr("ALMACENAMIENTO"),
-        &label(theme::TEXT_DIM),
+        &label(theme::text_dim()),
     );
     let card = Rect::new(s.x + 10, y + 28, s.w - 20, 84);
-    rounded_rect(c, card.x, card.y, card.w, card.h, 6, theme::PANEL, 255);
-    rounded_outline(c, card.x, card.y, card.w, card.h, 6, theme::PANEL_RIM);
-    text::draw(c, card.x + 12, card.y + 10, &app.label, &s16(theme::TEXT));
+    rounded_rect(c, card.x, card.y, card.w, card.h, 6, theme::panel(), 255);
+    rounded_outline(c, card.x, card.y, card.w, card.h, 6, theme::panel_rim());
+    text::draw(c, card.x + 12, card.y + 10, &app.label, &s16(theme::text()));
     let used = app.total_bytes.saturating_sub(app.free_bytes);
     let pct = (used * 100).checked_div(app.total_bytes).unwrap_or(0) as i32;
     text::draw_right(
@@ -456,14 +462,14 @@ fn draw_sidebar(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout) {
         card.x + card.w - 12,
         card.y + 10,
         &format!("{pct}%"),
-        &s16(theme::CYAN),
+        &s16(theme::cyan()),
     );
     let bar = Rect::new(card.x + 12, card.y + 36, card.w - 24, 6);
-    rounded_rect(c, bar.x, bar.y, bar.w, bar.h, 3, theme::PANEL_RIM, 255);
+    rounded_rect(c, bar.x, bar.y, bar.w, bar.h, 3, theme::panel_rim(), 255);
     let filled = (bar.w * pct / 100).max(if used > 0 { 3 } else { 0 });
-    rounded_rect(c, bar.x, bar.y, filled, bar.h, 3, theme::CYAN, 255);
+    rounded_rect(c, bar.x, bar.y, filled, bar.h, 3, theme::cyan(), 255);
     let free = trf("{} libres", &[&format_size(app.free_bytes)]);
-    text::draw(c, card.x + 12, card.y + 54, &free, &s16(theme::TEXT_DIM));
+    text::draw(c, card.x + 12, card.y + 54, &free, &s16(theme::text_dim()));
 }
 
 fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
@@ -478,7 +484,11 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         (Column::Modified, tr("MODIFICADO"), Some(date_x)),
     ] {
         let active = col == column;
-        let st = label(if active { theme::CYAN } else { theme::TEXT_DIM });
+        let st = label(if active {
+            theme::cyan()
+        } else {
+            theme::text_dim()
+        });
         let (x0, w) = match anchor {
             None => (r.x + 20, text::draw(c, r.x + 20, r.y + 8, name, &st)),
             Some(right) => {
@@ -497,7 +507,7 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         r.y + LIST_HEADER_H - 1,
         r.x + r.w - 1,
         r.y + LIST_HEADER_H - 1,
-        theme::PANEL_RIM,
+        theme::panel_rim(),
     );
 
     if !has_disk || app.entries.is_empty() {
@@ -506,7 +516,7 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         } else {
             tr("No hay disco: arrancá QEMU con el disco virtual")
         };
-        let st = s16(theme::TEXT_DIM);
+        let st = s16(theme::text_dim());
         let tw = text::width(msg, &st);
         text::draw(c, r.x + (r.w - tw) / 2, r.y + r.h / 2 - 8, msg, &st);
         return;
@@ -520,13 +530,17 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         let row = l.row_rect(v);
         let selected = index == app.selected;
         if selected {
-            c.fill_rect(row.x + 1, row.y + 1, row.w - 2, row.h - 2, SELECTED_BG);
-            c.fill_rect(row.x + 1, row.y + 1, 3, row.h - 2, theme::CYAN);
+            c.fill_rect(row.x + 1, row.y + 1, row.w - 2, row.h - 2, selected_bg());
+            c.fill_rect(row.x + 1, row.y + 1, 3, row.h - 2, theme::cyan());
         }
         let path = join(&app.cwd, &entry.name);
         let kind = Kind::of(entry, &path);
         kind_icon(c, kind, row.x + 20, row.y + 12, 1);
-        let name_col = if selected { theme::CYAN } else { theme::TEXT };
+        let name_col = if selected {
+            theme::cyan()
+        } else {
+            theme::text()
+        };
         let name_st = Style::new(Weight::Bold, Size::Size16, name_col);
         text::draw(
             c,
@@ -540,7 +554,7 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
             row.x + 56,
             row.y + 23,
             kind.description(entry),
-            &Style::new(Weight::Light, Size::Size16, theme::TEXT_DIM),
+            &Style::new(Weight::Light, Size::Size16, theme::text_dim()),
         );
         if !entry.is_dir {
             text::draw_right(
@@ -548,7 +562,7 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
                 size_x,
                 row.y + 14,
                 &format_size(entry.size as u64),
-                &s16(theme::TEXT),
+                &s16(theme::text()),
             );
         }
         text::draw_right(
@@ -556,7 +570,7 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
             date_x,
             row.y + 14,
             &format_date(entry.modified),
-            &s16(theme::TEXT_DIM),
+            &s16(theme::text_dim()),
         );
         line(
             c,
@@ -564,7 +578,7 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
             row.y + row.h - 1,
             row.x + row.w - 16,
             row.y + row.h - 1,
-            theme::PANEL.lerp(theme::PANEL_RIM, 120),
+            theme::panel().lerp(theme::panel_rim(), 120),
         );
     }
     // Indicador de desplazamiento si no entra todo.
@@ -577,10 +591,10 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
             3,
             r.h - LIST_HEADER_H - 8,
         );
-        c.fill_rect(track.x, track.y, track.w, track.h, theme::PANEL_RIM);
+        c.fill_rect(track.x, track.y, track.w, track.h, theme::panel_rim());
         let h = (track.h * visible as i32 / total as i32).max(12);
         let y = track.y + (track.h - h) * app.scroll as i32 / (total - visible) as i32;
-        c.fill_rect(track.x, y, track.w, h, theme::CYAN.scale(180));
+        c.fill_rect(track.x, y, track.w, h, theme::cyan().scale(180));
     }
 }
 
@@ -588,18 +602,18 @@ fn draw_list(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
 fn sort_mark(c: &mut Canvas<'_>, x: i32, y: i32, ascending: bool) {
     for i in 0..4 {
         let row = if ascending { y - 2 + i } else { y + 1 - i };
-        line(c, x - i, row, x + i, row, theme::CYAN);
+        line(c, x - i, row, x + i, row, theme::cyan());
     }
 }
 
 fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
-    line(c, r.x, r.y, r.x, r.y + r.h - 1, theme::PANEL_RIM);
+    line(c, r.x, r.y, r.x, r.y + r.h - 1, theme::panel_rim());
     text::draw(
         c,
         r.x + 18,
         r.y + 12,
         tr("INSPECTOR"),
-        &label(theme::TEXT_DIM),
+        &label(theme::text_dim()),
     );
     let Some(entry) = app.selected_entry() else {
         text::draw(
@@ -607,14 +621,14 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
             r.x + 18,
             r.y + 50,
             tr("Nada seleccionado"),
-            &s16(theme::TEXT_DIM),
+            &s16(theme::text_dim()),
         );
         return;
     };
     let path = join(&app.cwd, &entry.name);
     let kind = Kind::of(entry, &path);
     let card = Rect::new(r.x + 14, r.y + 40, r.w - 28, 96);
-    rounded_rect(c, card.x, card.y, card.w, card.h, 6, theme::PANEL, 255);
+    rounded_rect(c, card.x, card.y, card.w, card.h, 6, theme::panel(), 255);
     rounded_outline(
         c,
         card.x,
@@ -625,7 +639,7 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
         kind_color(kind).scale(120),
     );
     kind_icon(c, kind, card.x + card.w / 2 - 20, card.y + 12, 2);
-    let name_st = Style::new(Weight::Bold, Size::Size16, theme::TEXT);
+    let name_st = Style::new(Weight::Bold, Size::Size16, theme::text());
     let name = text::fit(&entry.name, &name_st, card.w - 16);
     let nw = text::width(&name, &name_st);
     text::draw(c, card.x + (card.w - nw) / 2, card.y + 64, &name, &name_st);
@@ -650,9 +664,9 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
             r.x + 18,
             y,
             k,
-            &Style::new(Weight::Light, Size::Size16, theme::TEXT_DIM),
+            &Style::new(Weight::Light, Size::Size16, theme::text_dim()),
         );
-        let st = s16(theme::TEXT);
+        let st = s16(theme::text());
         text::draw_right(c, r.x + r.w - 18, y, &text::fit(&v, &st, r.w - 150), &st);
         y += 22;
     }
@@ -661,11 +675,17 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
     if y + 60 > r.y + r.h {
         return;
     }
-    text::draw(c, r.x + 18, y, tr("VISTA PREVIA"), &label(theme::TEXT_DIM));
+    text::draw(
+        c,
+        r.x + 18,
+        y,
+        tr("VISTA PREVIA"),
+        &label(theme::text_dim()),
+    );
     let bx = Rect::new(r.x + 14, y + 24, r.w - 28, r.y + r.h - (y + 24) - 12);
-    rounded_rect(c, bx.x, bx.y, bx.w, bx.h, 4, FIELD_BG, 255);
-    rounded_outline(c, bx.x, bx.y, bx.w, bx.h, 4, theme::PANEL_RIM);
-    let st = Style::new(Weight::Light, Size::Size16, theme::TEXT.scale(220));
+    rounded_rect(c, bx.x, bx.y, bx.w, bx.h, 4, field_bg(), 255);
+    rounded_outline(c, bx.x, bx.y, bx.w, bx.h, 4, theme::panel_rim());
+    let st = Style::new(Weight::Light, Size::Size16, theme::text().scale(220));
     match &app.preview {
         Some(Preview::Text(lines)) => {
             let max_lines = ((bx.h - 12) / 18).max(0) as usize;
@@ -703,13 +723,13 @@ fn draw_inspector(c: &mut Canvas<'_>, app: &FilesApp, r: Rect) {
 
 fn draw_status(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
     let s = l.status;
-    line(c, s.x + 1, s.y, s.x + s.w - 2, s.y, theme::PANEL_RIM);
+    line(c, s.x + 1, s.y, s.x + s.w - 2, s.y, theme::panel_rim());
     let ty = s.y + 8;
     if let Some(toast) = &app.toast {
         let col = if toast.error {
-            theme::CRIMSON
+            theme::crimson()
         } else {
-            theme::CYAN
+            theme::cyan()
         };
         circle(c, s.x + 20, ty + 8, 4, col, true);
         text::draw(
@@ -731,9 +751,9 @@ fn draw_status(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         "{} elementos · {}",
         &[&app.entries.len().to_string(), &format_size(files)],
     );
-    text::draw(c, s.x + 16, ty, &left, &s16(theme::TEXT));
+    text::draw(c, s.x + 16, ty, &left, &s16(theme::text()));
     let mid = trf("libre: {}", &[&format_size(app.free_bytes)]);
-    text::draw(c, s.x + s.w / 3, ty, &mid, &s16(theme::TEXT_DIM));
+    text::draw(c, s.x + s.w / 3, ty, &mid, &s16(theme::text_dim()));
     let help = tr("CTRL+C/X/V · F2 RENOMBRAR · SUPR PAPELERA");
     let right = if has_disk {
         tr("SINCRONIZADO")
@@ -745,24 +765,32 @@ fn draw_status(c: &mut Canvas<'_>, app: &FilesApp, l: &Layout, has_disk: bool) {
         s.x + s.w - 16,
         ty,
         right,
-        &label(if has_disk { theme::CYAN } else { theme::AMBER }),
+        &label(if has_disk {
+            theme::cyan()
+        } else {
+            theme::amber()
+        }),
     );
     circle(
         c,
         s.x + s.w - 28 - rw,
         ty + 8,
         4,
-        if has_disk { theme::CYAN } else { theme::AMBER },
+        if has_disk {
+            theme::cyan()
+        } else {
+            theme::amber()
+        },
         true,
     );
     let help_st = Style::new(
         Weight::Light,
         Size::Size16,
-        theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 150),
+        theme::text_faint().lerp(theme::text_dim(), 150),
     );
     let help_right = s.x + s.w - 48 - rw;
     if help_right - text::width(help, &help_st)
-        > s.x + s.w / 3 + text::width(&mid, &s16(theme::TEXT)) + 24
+        > s.x + s.w / 3 + text::width(&mid, &s16(theme::text())) + 24
     {
         text::draw_right(c, help_right, ty, help, &help_st);
     }
@@ -778,14 +806,14 @@ fn draw_dialog(c: &mut Canvas<'_>, dialog: &Dialog, l: &Layout) {
     }
     let d = l.dialog_rect();
     let accent = if dialog.is_destructive() {
-        theme::CRIMSON
+        theme::crimson()
     } else {
-        theme::CYAN
+        theme::cyan()
     };
-    rounded_rect(c, d.x, d.y, d.w, d.h, 10, Color::hex(0x0a1930), 250);
+    rounded_rect(c, d.x, d.y, d.w, d.h, 10, theme::menu(), 250);
     rounded_outline(c, d.x, d.y, d.w, d.h, 10, accent.scale(200));
     text::draw(c, d.x + 22, d.y + 18, dialog.title(), &label(accent));
-    let msg_st = s16(theme::TEXT);
+    let msg_st = s16(theme::text());
     text::draw(
         c,
         d.x + 22,
@@ -795,13 +823,13 @@ fn draw_dialog(c: &mut Canvas<'_>, dialog: &Dialog, l: &Layout) {
     );
     if let Some(input) = dialog.input() {
         let f = Rect::new(d.x + 22, d.y + 78, d.w - 44, 34);
-        rounded_rect(c, f.x, f.y, f.w, f.h, 4, FIELD_BG, 255);
+        rounded_rect(c, f.x, f.y, f.w, f.h, 4, field_bg(), 255);
         rounded_outline(c, f.x, f.y, f.w, f.h, 4, accent.scale(160));
         let shown = text::fit(&input.text, &msg_st, f.w - 30);
         let tw = text::draw(c, f.x + 10, f.y + 9, &shown, &msg_st);
         c.fill_rect(f.x + 12 + tw, f.y + 8, 2, 18, accent); // cursor
     }
     let (cancel, accept) = l.dialog_buttons();
-    button(c, cancel, tr("CANCELAR"), theme::TEXT_DIM, 20);
+    button(c, cancel, tr("CANCELAR"), theme::text_dim(), 20);
     button(c, accept, dialog.accept_label(), accent, 60);
 }

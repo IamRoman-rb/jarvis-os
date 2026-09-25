@@ -169,7 +169,7 @@ impl App {
             App::Viewer(_) => (760, 560),
             App::Browser(_) => (1060, 620),
             App::Terminal(_) => (860, 520),
-            App::Settings(_) => (1000, 620),
+            App::Settings(_) => (1000, 660),
             App::Brave(_) => (1180, 720),
         }
     }

@@ -19,7 +19,7 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
     - fs/          FAT32 propio sobre un trait BlockDevice (+ caché de sectores)
     - desktop/     escritorio: gestor de ventanas (wm.rs), atajos y composición (desktop.rs),
                    barra/panel/menús (shell.rs), paneles Win+X/A/N (panels.rs), configuración
-                   (config.rs), firewall (firewall.rs), idiomas (i18n.rs), teclado latino
+                   (config.rs), aspecto no cromático (look.rs: tamaños, botones, gráficos de la barra), firewall (firewall.rs), idiomas (i18n.rs), teclado latino
                    (keymap.rs), apps (apps/), shell, apt, snap y winget (term/), web sin red
                    (web/: URL, HTTP, DOM, CSS y estilos, maquetación en cajas, JSON, adaptadores)
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`

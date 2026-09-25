@@ -17,7 +17,7 @@ fn settings_section(t: &Driver) -> String {
 #[test]
 fn el_idioma_cambia_la_interfaz() {
     let mut t = Driver::new();
-    t.d.open(Launch::Settings(2), t.now, CLOCK);
+    t.d.open(Launch::Settings(6), t.now, CLOCK);
     assert_eq!(settings_section(&t), "Hora e idioma");
     // Primera fila: el idioma. → pasa a inglés.
     t.key(Key::Right);

@@ -6,25 +6,35 @@ use jarvis_gfx::{Canvas, Color, Rect, theme};
 
 use crate::system::Series;
 
-pub const WINDOW_BG: Color = Color::hex(0x08121f);
-pub const FIELD_BG: Color = Color::hex(0x050c16);
-pub const SELECTED_BG: Color = Color::hex(0x0b2a3a);
+/// Fondo de las ventanas, de los campos de texto y de la fila elegida (según el tema).
+pub fn window_bg() -> Color {
+    theme::window()
+}
 
+pub fn field_bg() -> Color {
+    theme::field()
+}
+
+pub fn selected_bg() -> Color {
+    theme::selected()
+}
+
+/// Texto normal de la interfaz (16 px, o 20 con "texto grande" en Tipografía).
 pub fn s16(color: Color) -> Style {
-    Style::new(Weight::Regular, Size::Size16, color)
+    Style::new(Weight::Regular, crate::look::ui_size(), color)
 }
 
 pub fn light(color: Color) -> Style {
-    Style::new(Weight::Light, Size::Size16, color)
+    Style::new(Weight::Light, crate::look::ui_size(), color)
 }
 
 pub fn bold(color: Color) -> Style {
-    Style::new(Weight::Bold, Size::Size16, color)
+    Style::new(Weight::Bold, crate::look::ui_size(), color)
 }
 
 /// Etiqueta en mayúsculas espaciadas (el estilo del HUD).
 pub fn label(color: Color) -> Style {
-    Style::new(Weight::Regular, Size::Size16, color).tracking(2)
+    Style::new(Weight::Regular, crate::look::ui_size(), color).tracking(2)
 }
 
 pub fn big(color: Color) -> Style {
@@ -33,10 +43,10 @@ pub fn big(color: Color) -> Style {
 
 /// Panel con borde y un título arriba a la izquierda. Devuelve la zona de adentro.
 pub fn card(c: &mut Canvas<'_>, r: Rect, title: &str) -> Rect {
-    rounded_rect(c, r.x, r.y, r.w, r.h, 6, theme::PANEL, 255);
-    rounded_outline(c, r.x, r.y, r.w, r.h, 6, theme::PANEL_RIM);
+    rounded_rect(c, r.x, r.y, r.w, r.h, 6, theme::panel(), 255);
+    rounded_outline(c, r.x, r.y, r.w, r.h, 6, theme::panel_rim());
     if !title.is_empty() {
-        text::draw(c, r.x + 14, r.y + 10, title, &label(theme::TEXT_DIM));
+        text::draw(c, r.x + 14, r.y + 10, title, &label(theme::text_dim()));
         Rect::new(r.x + 14, r.y + 34, r.w - 28, r.h - 44)
     } else {
         Rect::new(r.x + 12, r.y + 10, r.w - 24, r.h - 20)
@@ -60,13 +70,13 @@ pub fn button(c: &mut Canvas<'_>, r: Rect, text_label: &str, color: Color, fill:
 
 /// Ancho de un botón para `text_label`.
 pub fn button_width(text_label: &str) -> i32 {
-    text::width(text_label, &label(theme::TEXT)) + 24
+    text::width(text_label, &label(theme::text())) + 24
 }
 
 /// Barra de progreso (0..=100).
 pub fn bar(c: &mut Canvas<'_>, r: Rect, pct: u32, color: Color) {
     let rad = (r.h / 2).min(3);
-    rounded_rect(c, r.x, r.y, r.w, r.h, rad, theme::PANEL_RIM, 255);
+    rounded_rect(c, r.x, r.y, r.w, r.h, rad, theme::panel_rim(), 255);
     let pct = pct.min(100) as i32;
     let filled = (r.w * pct / 100).max(if pct > 0 { 2 } else { 0 });
     rounded_rect(c, r.x, r.y, filled, r.h, rad, color, 255);
@@ -74,13 +84,13 @@ pub fn bar(c: &mut Canvas<'_>, r: Rect, pct: u32, color: Color) {
 
 /// Gráfico de área de una serie. `max`: el valor que llega arriba (0 = el máximo de la serie).
 pub fn graph<const N: usize>(c: &mut Canvas<'_>, r: Rect, s: &Series<N>, max: u32, color: Color) {
-    c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
+    c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
     // Líneas de guía cada cuarto.
     for i in 1..4 {
         let y = r.y + r.h * i / 4;
         let mut x = r.x;
         while x < r.x + r.w {
-            c.put(x, y, theme::PANEL_RIM);
+            c.put(x, y, theme::panel_rim());
             x += 4;
         }
     }
@@ -106,7 +116,7 @@ pub fn graph<const N: usize>(c: &mut Canvas<'_>, r: Rect, s: &Series<N>, max: u3
         }
         prev = Some((x, y));
     }
-    rounded_outline(c, r.x, r.y, r.w, r.h, 2, theme::PANEL_RIM);
+    rounded_outline(c, r.x, r.y, r.w, r.h, 2, theme::panel_rim());
 }
 
 /// Texto que no pasa de `max_w` (le agrega ".." si hay que cortarlo).

@@ -16,13 +16,28 @@ use crate::files::{error_message, format_size};
 use crate::i18n::{tr, trf};
 use crate::input::{Key, Mods};
 use crate::text_input::TextInput;
-use crate::widgets::{FIELD_BG, WINDOW_BG, draw_fit, label, light, s16};
+use crate::widgets::{draw_fit, field_bg, label, light, s16, window_bg};
 
-const LINE_H: i32 = 20;
 const GUTTER: i32 = 56;
 const STATUS_H: i32 = 30;
-/// Ancho de un carácter de la fuente monoespaciada de 16 px.
-const CHAR_W: i32 = 8;
+/// Letra del editor (Configuración → Tipografía).
+fn text_style(color: jarvis_gfx::Color) -> jarvis_gfx::text::Style {
+    jarvis_gfx::text::Style::new(
+        jarvis_gfx::text::Weight::Regular,
+        crate::look::editor_size(),
+        color,
+    )
+}
+
+/// Alto de un renglón.
+fn line_h() -> i32 {
+    text_style(jarvis_gfx::Color::WHITE).line_height() + 4
+}
+
+/// Ancho de un carácter (la fuente es monoespaciada).
+fn char_w() -> i32 {
+    jarvis_gfx::text::width("M", &text_style(jarvis_gfx::Color::WHITE)).max(1)
+}
 const MAX_FILE: usize = 512 * 1024;
 
 pub struct Editor {
@@ -135,11 +150,11 @@ impl Editor {
     }
 
     fn visible_rows(content: Rect) -> usize {
-        ((content.h - STATUS_H - 12) / LINE_H).max(1) as usize
+        ((content.h - STATUS_H - 12) / line_h()).max(1) as usize
     }
 
     fn visible_cols(content: Rect) -> usize {
-        ((content.w - GUTTER - 20) / CHAR_W).max(1) as usize
+        ((content.w - GUTTER - 20) / char_w()).max(1) as usize
     }
 
     fn keep_cursor_visible(&mut self, content: Rect) {
@@ -322,8 +337,8 @@ impl Editor {
     }
 
     pub fn click(&mut self, click: Click, content: Rect) {
-        let row = self.top as i32 + (click.y - content.y - 6) / LINE_H;
-        let col = (click.x - content.x - GUTTER + CHAR_W / 2) / CHAR_W;
+        let row = self.top as i32 + (click.y - content.y - 6) / line_h();
+        let col = (click.x - content.x - GUTTER + char_w() / 2) / char_w();
         if row >= 0 && (row as usize) < self.lines.len() {
             self.row = row as usize;
             self.col = (col.max(0) as usize).min(self.line_len());
@@ -352,72 +367,76 @@ impl Editor {
     }
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect, _now_ms: u64) {
-        c.fill_rect(r.x, r.y, r.w, r.h, WINDOW_BG);
-        c.fill_rect(r.x, r.y, GUTTER - 8, r.h - STATUS_H, FIELD_BG);
+        c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
+        c.fill_rect(r.x, r.y, GUTTER - 8, r.h - STATUS_H, field_bg());
         let rows = Self::visible_rows(r);
         let cols = Self::visible_cols(r);
         // Desplazamiento horizontal: lo justo para que el cursor se vea.
         let left = self.col.saturating_sub(cols.saturating_sub(4));
-        let text_st = s16(theme::TEXT);
+        let text_st = text_style(theme::text());
         for i in 0..rows {
             let n = self.top + i;
             let Some(line) = self.lines.get(n) else { break };
-            let y = r.y + 6 + i as i32 * LINE_H;
+            let y = r.y + 6 + i as i32 * line_h();
             let num_st = light(if n == self.row {
-                theme::CYAN
+                theme::cyan()
             } else {
-                theme::TEXT_FAINT.lerp(theme::TEXT_DIM, 140)
+                theme::text_faint().lerp(theme::text_dim(), 140)
             });
             text::draw_right(c, r.x + GUTTER - 16, y, &format!("{}", n + 1), &num_st);
             let visible: String = line.chars().skip(left).take(cols).collect();
             text::draw(c, r.x + GUTTER, y, &visible, &text_st);
             if n == self.row && self.save_as.is_none() {
-                let cx = r.x + GUTTER + (self.col - left) as i32 * CHAR_W;
-                c.fill_rect(cx, y - 1, 2, LINE_H - 2, theme::CYAN);
+                let cx = r.x + GUTTER + (self.col - left) as i32 * char_w();
+                c.fill_rect(cx, y - 1, 2, line_h() - 2, theme::cyan());
             }
         }
 
         // Barra de estado.
         let s = Rect::new(r.x, r.y + r.h - STATUS_H, r.w, STATUS_H);
-        c.fill_rect(s.x, s.y, s.w, s.h, theme::PANEL);
+        c.fill_rect(s.x, s.y, s.w, s.h, theme::panel());
         let ty = s.y + 7;
         match &self.status {
             Some((msg, error, _)) => {
-                let col = if *error { theme::AMBER } else { theme::CYAN };
+                let col = if *error {
+                    theme::amber()
+                } else {
+                    theme::cyan()
+                };
                 draw_fit(c, s.x + 12, ty, msg, &s16(col), s.w - 260);
             }
             None => {
                 let path = self.path.as_deref().unwrap_or(tr("(sin guardar)"));
-                draw_fit(c, s.x + 12, ty, path, &light(theme::TEXT_DIM), s.w - 260);
+                draw_fit(c, s.x + 12, ty, path, &light(theme::text_dim()), s.w - 260);
             }
         }
         let pos = trf(
             "LÍN {} · COL {} · CTRL+S GUARDAR",
             &[&(self.row + 1).to_string(), &(self.col + 1).to_string()],
         );
-        text::draw_right(c, s.x + s.w - 12, ty, &pos, &label(theme::TEXT_DIM));
+        text::draw_right(c, s.x + s.w - 12, ty, &pos, &label(theme::text_dim()));
 
         if let Some(input) = &self.save_as {
             let d = Rect::new(r.x + (r.w - 460) / 2, r.y + 60, 460, 120);
-            jarvis_gfx::shapes::rounded_rect(c, d.x, d.y, d.w, d.h, 8, theme::PANEL, 255);
-            jarvis_gfx::shapes::rounded_outline(c, d.x, d.y, d.w, d.h, 8, theme::CYAN.scale(180));
+            jarvis_gfx::shapes::rounded_rect(c, d.x, d.y, d.w, d.h, 8, theme::panel(), 255);
+            jarvis_gfx::shapes::rounded_outline(c, d.x, d.y, d.w, d.h, 8, theme::cyan().scale(180));
             text::draw(
                 c,
                 d.x + 18,
                 d.y + 16,
                 tr("GUARDAR COMO"),
-                &label(theme::CYAN),
+                &label(theme::cyan()),
             );
             let f = Rect::new(d.x + 18, d.y + 46, d.w - 36, 32);
-            c.fill_rect(f.x, f.y, f.w, f.h, FIELD_BG);
+            c.fill_rect(f.x, f.y, f.w, f.h, field_bg());
             let tw = draw_fit(c, f.x + 8, f.y + 8, &input.text, &text_st, f.w - 20);
-            c.fill_rect(f.x + 10 + tw, f.y + 7, 2, 18, theme::CYAN);
+            c.fill_rect(f.x + 10 + tw, f.y + 7, 2, 18, theme::cyan());
             text::draw(
                 c,
                 d.x + 18,
                 d.y + 90,
                 tr("Enter guarda · Esc cancela"),
-                &light(theme::TEXT_DIM),
+                &light(theme::text_dim()),
             );
         }
     }

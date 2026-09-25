@@ -12,15 +12,14 @@ use jarvis_gfx::clock::DateTime;
 use jarvis_gfx::hud::{Icon, MARGIN, icon};
 use jarvis_gfx::shapes::{rounded_outline, rounded_rect};
 use jarvis_gfx::text;
-use jarvis_gfx::{Canvas, Color, Rect, theme};
+use jarvis_gfx::{Canvas, Rect, theme};
 
 use crate::config::Config;
 use crate::i18n::{tr, trf};
 use crate::system::Launch;
-use crate::widgets::{SELECTED_BG, button, draw_fit, label, light, s16};
+use crate::widgets::{button, draw_fit, label, light, s16, selected_bg};
 use crate::wm::{Side, WinId};
 
-const PANEL_BG: Color = Color::hex(0x081527);
 /// Opacidad de los paneles (casi opacos: lo de atrás no se lee a través).
 const PANEL_ALPHA: u8 = 255;
 
@@ -92,24 +91,24 @@ impl Menu {
 
     pub fn draw(&self, c: &mut Canvas<'_>, w: usize, h: usize) {
         let r = self.rect(w, h);
-        rounded_rect(c, r.x, r.y, r.w, r.h, 10, PANEL_BG, PANEL_ALPHA);
-        rounded_outline(c, r.x, r.y, r.w, r.h, 10, theme::CYAN.scale(120));
-        text::draw(c, r.x + 16, r.y + 14, self.title, &label(theme::TEXT_DIM));
+        rounded_rect(c, r.x, r.y, r.w, r.h, 10, theme::menu(), PANEL_ALPHA);
+        rounded_outline(c, r.x, r.y, r.w, r.h, 10, theme::cyan().scale(120));
+        text::draw(c, r.x + 16, r.y + 14, self.title, &label(theme::text_dim()));
         for (i, it) in self.items.iter().enumerate() {
             let rr = self.row(r, i);
             if i == self.sel {
-                rounded_rect(c, rr.x, rr.y, rr.w, rr.h, 5, SELECTED_BG, 255);
-                c.fill_rect(rr.x, rr.y + 6, 3, rr.h - 12, theme::CYAN);
+                rounded_rect(c, rr.x, rr.y, rr.w, rr.h, 5, selected_bg(), 255);
+                c.fill_rect(rr.x, rr.y + 6, 3, rr.h - 12, theme::cyan());
             }
             if let Some(ic) = it.icon {
-                icon(c, ic, rr.x + 20, rr.y + rr.h / 2, theme::CYAN);
+                icon(c, ic, rr.x + 20, rr.y + rr.h / 2, theme::cyan());
             }
             draw_fit(
                 c,
                 rr.x + 40,
                 rr.y + 8,
                 &it.label,
-                &s16(theme::TEXT),
+                &s16(theme::text()),
                 rr.w - 150,
             );
             text::draw_right(
@@ -117,7 +116,7 @@ impl Menu {
                 rr.x + rr.w - 10,
                 rr.y + 8,
                 it.hint,
-                &light(theme::TEXT_DIM),
+                &light(theme::text_dim()),
             );
         }
     }
@@ -134,7 +133,7 @@ pub fn quick_links() -> Menu {
                 tr("Aplicaciones instaladas"),
                 "",
                 Some(Icon::Package),
-                Action::Launch(Launch::Settings(7))
+                Action::Launch(Launch::Settings(11))
             ),
             MenuItem::new(
                 tr("Monitor del sistema"),
@@ -331,28 +330,32 @@ pub fn quick_hit(w: usize, h: usize, x: i32, y: i32) -> Option<QuickHit> {
 
 pub fn draw_quick(c: &mut Canvas<'_>, w: usize, h: usize, cfg: &Config, sel: usize, net: &str) {
     let r = quick_rect(w, h);
-    rounded_rect(c, r.x, r.y, r.w, r.h, 12, PANEL_BG, PANEL_ALPHA);
-    rounded_outline(c, r.x, r.y, r.w, r.h, 12, theme::CYAN.scale(120));
+    rounded_rect(c, r.x, r.y, r.w, r.h, 12, theme::menu(), PANEL_ALPHA);
+    rounded_outline(c, r.x, r.y, r.w, r.h, 12, theme::cyan().scale(120));
     text::draw(
         c,
         r.x + 16,
         r.y + 16,
         tr("CONFIGURACIÓN RÁPIDA"),
-        &label(theme::TEXT_DIM),
+        &label(theme::text_dim()),
     );
-    text::draw_right(c, r.x + r.w - 16, r.y + 16, net, &light(theme::CYAN));
+    text::draw_right(c, r.x + r.w - 16, r.y + 16, net, &light(theme::cyan()));
     for (i, (q, name)) in QUICK.iter().enumerate() {
         let t = tile(r, i);
         let on = quick_value(cfg, *q);
-        let fill = if on { theme::VECTOR_BLUE } else { theme::PANEL };
+        let fill = if on {
+            theme::vector_blue()
+        } else {
+            theme::panel()
+        };
         rounded_rect(c, t.x, t.y, t.w, t.h, 8, fill, if on { 200 } else { 255 });
         let rim = if i == sel {
-            theme::CYAN
+            theme::cyan()
         } else {
-            theme::PANEL_RIM
+            theme::panel_rim()
         };
         rounded_outline(c, t.x, t.y, t.w, t.h, 8, rim);
-        draw_fit(c, t.x + 12, t.y + 14, name, &s16(theme::TEXT), t.w - 20);
+        draw_fit(c, t.x + 12, t.y + 14, name, &s16(theme::text()), t.w - 20);
         text::draw(
             c,
             t.x + 12,
@@ -362,14 +365,14 @@ pub fn draw_quick(c: &mut Canvas<'_>, w: usize, h: usize, cfg: &Config, sel: usi
             } else {
                 tr("Desactivado")
             },
-            &light(if on { theme::TEXT } else { theme::TEXT_DIM }),
+            &light(if on { theme::text() } else { theme::text_dim() }),
         );
     }
     for (i, (b, name)) in QB.iter().enumerate() {
         let col = if *b == QuickButton::Power {
-            theme::CRIMSON
+            theme::crimson()
         } else {
-            theme::CYAN
+            theme::cyan()
         };
         let sel_here = sel == QUICK.len() + i;
         button(
@@ -418,20 +421,20 @@ pub fn draw_notices(
     now: Option<DateTime>,
 ) {
     let r = notices_rect(w, h);
-    rounded_rect(c, r.x, r.y, r.w, r.h, 12, PANEL_BG, PANEL_ALPHA);
-    rounded_outline(c, r.x, r.y, r.w, r.h, 12, theme::CYAN.scale(120));
+    rounded_rect(c, r.x, r.y, r.w, r.h, 12, theme::menu(), PANEL_ALPHA);
+    rounded_outline(c, r.x, r.y, r.w, r.h, 12, theme::cyan().scale(120));
     text::draw(
         c,
         r.x + 16,
         r.y + 18,
         tr("NOTIFICACIONES"),
-        &label(theme::TEXT_DIM),
+        &label(theme::text_dim()),
     );
     button(
         c,
         clear_button(w, h),
         tr("BORRAR TODO"),
-        theme::TEXT_DIM,
+        theme::text_dim(),
         20,
     );
     let mut y = r.y + 56;
@@ -441,7 +444,7 @@ pub fn draw_notices(
             r.x + 16,
             y,
             tr("No hay notificaciones nuevas."),
-            &light(theme::TEXT_DIM),
+            &light(theme::text_dim()),
         );
         y += 30;
     }
@@ -450,23 +453,27 @@ pub fn draw_notices(
         if y + 50 > r.y + r.h - cal_h {
             break;
         }
-        let col = if *error { theme::AMBER } else { theme::CYAN };
+        let col = if *error {
+            theme::amber()
+        } else {
+            theme::cyan()
+        };
         let n = Rect::new(r.x + 12, y, r.w - 24, 46);
-        rounded_rect(c, n.x, n.y, n.w, n.h, 6, theme::PANEL, 255);
+        rounded_rect(c, n.x, n.y, n.w, n.h, 6, theme::panel(), 255);
         c.fill_rect(n.x + 1, n.y + 8, 3, n.h - 16, col);
-        draw_fit(c, n.x + 14, n.y + 6, msg, &s16(theme::TEXT), n.w - 28);
-        text::draw(c, n.x + 14, n.y + 25, time, &light(theme::TEXT_DIM));
+        draw_fit(c, n.x + 14, n.y + 6, msg, &s16(theme::text()), n.w - 28);
+        text::draw(c, n.x + 14, n.y + 25, time, &light(theme::text_dim()));
         y += 52;
     }
     // Calendario del mes.
     let Some(t) = now else { return };
     let top = r.y + r.h - cal_h + 10;
-    c.fill_rect(r.x + 12, top - 8, r.w - 24, 1, theme::PANEL_RIM);
+    c.fill_rect(r.x + 12, top - 8, r.w - 24, 1, theme::panel_rim());
     let title = trf(
         "{} de {}",
         &[tr(MONTHS[t.month as usize - 1]), &t.year.to_string()],
     );
-    text::draw(c, r.x + 16, top, &title, &s16(theme::TEXT));
+    text::draw(c, r.x + 16, top, &title, &s16(theme::text()));
     let cw = (r.w - 32) / 7;
     for (i, d) in [
         tr("do"),
@@ -485,7 +492,7 @@ pub fn draw_notices(
             r.x + 16 + i as i32 * cw + 10,
             top + 30,
             d,
-            &light(theme::TEXT_DIM),
+            &light(theme::text_dim()),
         );
     }
     let first = DateTime { day: 1, ..t }.weekday();
@@ -498,9 +505,13 @@ pub fn draw_notices(
         let (col, row) = ((cell % 7) as i32, (cell / 7) as i32);
         let x = r.x + 16 + col * cw;
         let y = top + 56 + row * 30;
-        let st = s16(if d == t.day { theme::VOID } else { theme::TEXT });
+        let st = s16(if d == t.day {
+            theme::void()
+        } else {
+            theme::text()
+        });
         if d == t.day {
-            rounded_rect(c, x + 2, y - 5, cw - 4, 26, 13, theme::CYAN, 255);
+            rounded_rect(c, x + 2, y - 5, cw - 4, 26, 13, theme::cyan(), 255);
         }
         let s = format!("{d:>2}");
         text::draw(c, x + (cw - text::width(&s, &st)) / 2, y, &s, &st);

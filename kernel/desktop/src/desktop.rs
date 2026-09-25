@@ -30,7 +30,7 @@ use jarvis_gfx::clock::DateTime;
 use jarvis_gfx::hud;
 use jarvis_gfx::sphere::ParticleCloud;
 use jarvis_gfx::vfont::VectorText;
-use jarvis_gfx::{Canvas, Color, MAX_CLIP, PixelFormat, Rect};
+use jarvis_gfx::{Canvas, Color, MAX_CLIP, PixelFormat, Rect, theme};
 
 use crate::apps::{
     App, Click, Ctx, Pointer, PointerKind, SysView, TaskInfo, brave::Brave, browser::Browser,
@@ -38,7 +38,7 @@ use crate::apps::{
     settings::Settings, terminal::Terminal, viewer::Viewer,
 };
 use crate::chrome::{self, Hover};
-use crate::config::{self, Config, Wallpaper};
+use crate::config::{self, AnimStyle, Config, TitleDouble, Wallpaper};
 use crate::cursor;
 use crate::i18n::{tr, trf};
 use crate::input::{Event, Key, Mods, MousePacket};
@@ -168,6 +168,8 @@ struct Anim {
     from: Rect,
     to: Rect,
     start: u64,
+    /// Cuánto dura (Configuración → Ventanas → velocidad).
+    dur: u64,
     /// Solo para `Close`: el dibujo de la ventana que ya se cerró.
     buf: Vec<u8>,
     size: (i32, i32),
@@ -176,13 +178,14 @@ struct Anim {
 impl Anim {
     /// Avance de 0 a 1000, con desaceleración al final (ease-out cúbico).
     fn progress(&self, now_ms: u64) -> i64 {
-        let t = (now_ms.saturating_sub(self.start).min(ANIM_MS) * 1000 / ANIM_MS) as i64;
+        let dur = self.dur.max(1);
+        let t = (now_ms.saturating_sub(self.start).min(dur) * 1000 / dur) as i64;
         let r = 1000 - t;
         1000 - r * r * r / 1_000_000
     }
 
     fn done(&self, now_ms: u64) -> bool {
-        now_ms >= self.start + ANIM_MS
+        now_ms >= self.start + self.dur
     }
 
     /// Dónde se dibuja y con qué opacidad en `now_ms`.
@@ -206,6 +209,15 @@ impl Anim {
     /// Toda la zona que ocupa mientras dura.
     fn area(&self) -> Rect {
         self.from.union(&self.to)
+    }
+}
+
+/// De dónde viene una ventana que aparece (y a dónde va una que se cierra), según el estilo.
+fn appear_from(style: AnimStyle, r: Rect) -> Rect {
+    match style {
+        AnimStyle::Slide => Rect::new(r.x, r.y + 48, r.w, r.h),
+        AnimStyle::Fade | AnimStyle::None => r,
+        AnimStyle::Zoom => shrink(r, 92),
     }
 }
 
@@ -282,6 +294,8 @@ pub struct Desktop<D: BlockDevice> {
     cursor_drawn: Option<Rect>,
     left_down: bool,
     right_down: bool,
+    /// Arrastrando "con contorno": dónde está el contorno.
+    outline: Option<Rect>,
     /// "Cerrar sesión": la pantalla de bloqueo pasa a ser la de iniciar sesión.
     session_closed: bool,
     /// Ventana que recibe los movimientos del mouse hasta que se suelte el botón (se apretó
@@ -381,13 +395,16 @@ impl<D: BlockDevice> Desktop<D> {
             .map(|b| Config::parse(&String::from_utf8_lossy(&b)))
             .unwrap_or_default();
         crate::i18n::set(config.language);
+        crate::look::apply(&config);
         let screen = Rect::new(0, 0, width as i32, height as i32);
         let work = Rect::new(0, WORK_TOP, width as i32, height as i32 - WORK_TOP);
+        let mut wm = WindowManager::new(screen, work);
+        wm.set_topbar(config.topbar);
         Desktop {
             width,
             height,
             fs,
-            wm: WindowManager::new(screen, work),
+            wm,
             slots: Vec::new(),
             overlay: Overlay::None,
             overlay_dirty: false,
@@ -405,6 +422,7 @@ impl<D: BlockDevice> Desktop<D> {
             cursor_drawn: None,
             left_down: false,
             right_down: false,
+            outline: None,
             session_closed: false,
             pointer_capture: None,
             drag: None,
@@ -453,7 +471,7 @@ impl<D: BlockDevice> Desktop<D> {
                 let color = self
                     .config
                     .wallpaper_color()
-                    .unwrap_or(jarvis_gfx::theme::VOID);
+                    .unwrap_or(jarvis_gfx::theme::void());
                 hud::draw_solid(bg, color);
             }
             Wallpaper::Image(path) => {
@@ -829,9 +847,11 @@ impl<D: BlockDevice> Desktop<D> {
         now: &(WinId, Rect, bool, bool, bool),
         now_ms: u64,
     ) {
-        if !self.config.animations {
+        let dur = self.config.anim_ms();
+        if dur == 0 {
             return;
         }
+        let style = self.config.anim_style;
         let (id, rect, visible) = (now.0, now.1, now.2);
         let current = self
             .anims
@@ -839,7 +859,7 @@ impl<D: BlockDevice> Desktop<D> {
             .find(|a| a.id == id)
             .map(|a| a.frame(now_ms).0);
         let (kind, from, to) = match old {
-            None if visible => (AnimKind::Open, shrink(rect, 92), rect),
+            None if visible => (AnimKind::Open, appear_from(style, rect), rect),
             Some((_, true)) if !visible => (AnimKind::Hide, current.unwrap_or(rect), hidden(rect)),
             Some((_, false)) if visible => (AnimKind::Show, hidden(rect), rect),
             Some((before, true)) if visible && before != rect && self.drag.is_none() => {
@@ -866,6 +886,7 @@ impl<D: BlockDevice> Desktop<D> {
             from,
             to,
             start: now_ms,
+            dur,
             buf: Vec::new(),
             size: (0, 0),
         });
@@ -1356,10 +1377,31 @@ impl<D: BlockDevice> Desktop<D> {
                 s.chrome_dirty = true;
             }
         }
+        if crate::look::palette(&old) != crate::look::palette(&self.config) {
+            // Otro tema o acento: cambia el fondo (el HUD) y todo lo demás.
+            self.bg_dirty = true;
+        }
+        crate::look::apply(&self.config);
+        self.wm.set_topbar(self.config.topbar);
+        let look_changed = old.theme != self.config.theme
+            || old.accent != self.config.accent
+            || old.ui_large != self.config.ui_large
+            || old.bold_titles != self.config.bold_titles
+            || old.buttons_left != self.config.buttons_left
+            || old.cursor_big != self.config.cursor_big;
+        if look_changed {
+            for s in &mut self.slots {
+                s.chrome_dirty = true;
+            }
+        }
         if old.clock_24h != self.config.clock_24h
             || old.status_panel != self.config.status_panel
             || old.animations != self.config.animations
             || old.language != self.config.language
+            || old.topbar != self.config.topbar
+            || old.top_stats != self.config.top_stats
+            || old.clock_seconds != self.config.clock_seconds
+            || look_changed
         {
             self.full_redraw = true;
         }
@@ -1719,8 +1761,9 @@ impl<D: BlockDevice> Desktop<D> {
             self.damage.push(a.area());
         }
         self.anims.retain(|a| a.id != id);
+        let dur = self.config.anim_ms();
         if let Some(win) = self.wm.get(id)
-            && self.config.animations
+            && dur > 0
             && win.visible()
             && slot.size == (win.rect.w, win.rect.h)
         {
@@ -1728,8 +1771,9 @@ impl<D: BlockDevice> Desktop<D> {
                 id,
                 kind: AnimKind::Close,
                 from: win.rect,
-                to: shrink(win.rect, 92),
+                to: appear_from(self.config.anim_style, win.rect),
                 start: now_ms,
+                dur,
                 buf: core::mem::take(&mut slot.buf),
                 size: slot.size,
             });
@@ -1860,6 +1904,16 @@ impl<D: BlockDevice> Desktop<D> {
             && p.left
         {
             match *drag {
+                Drag::Move { id, dx, dy } if self.config.drag_outline => {
+                    let size = self.wm.get(id).map(|w| (w.rect.w, w.rect.h));
+                    if let Some((w, h)) = size {
+                        let r = Rect::new(x - dx, y - dy, w, h);
+                        if let Some(old) = self.outline.replace(r) {
+                            self.damage.push(old.inset(-2));
+                        }
+                        self.damage.push(r.inset(-2));
+                    }
+                }
                 Drag::Move { id, dx, dy } => self.wm.move_to(id, x - dx, y - dy),
                 Drag::Resize {
                     id,
@@ -1907,8 +1961,8 @@ impl<D: BlockDevice> Desktop<D> {
         let right_pressed = p.right && !self.right_down;
         self.left_down = p.left;
         self.right_down = p.right;
-        if released {
-            self.drag = None;
+        if released && let Some(drag) = self.drag.take() {
+            self.end_drag(drag, x, y);
         }
         if p.dx != 0 || p.dy != 0 || released {
             let kind = if released {
@@ -1966,6 +2020,32 @@ impl<D: BlockDevice> Desktop<D> {
         }
     }
 
+    /// Se soltó el mouse después de arrastrar: el contorno pasa a ser la ventana, y contra un
+    /// borde la ventana se acopla (arriba se maximiza), como en Windows.
+    fn end_drag(&mut self, drag: Drag, x: i32, y: i32) {
+        let Drag::Move { id, dx, dy } = drag else {
+            return;
+        };
+        if let Some(r) = self.outline.take() {
+            self.damage.push(r.inset(-2));
+            self.wm.move_to(id, x - dx, y - dy);
+        }
+        if !self.config.snap_edges {
+            return;
+        }
+        let (w, _) = (self.width as i32, self.height as i32);
+        if x <= 1 {
+            self.wm.snap(id, Side::Left);
+        } else if x >= w - 2 {
+            self.wm.snap(id, Side::Right);
+        } else if y <= 1 && !self.wm.get(id).is_some_and(|w| w.maximized) {
+            self.wm.toggle_maximize(id);
+        } else {
+            return;
+        }
+        self.logs.push("VENTANA_ACOPLADA".into());
+    }
+
     fn update_hover(&mut self, x: i32, y: i32) {
         if self.topbar_mode() {
             self.toolbar_hover = None;
@@ -1976,6 +2056,16 @@ impl<D: BlockDevice> Desktop<D> {
             self.top_hover = None;
         }
         let hit = self.wm.at(x, y);
+        // El foco sigue al mouse (como en muchos escritorios de Linux).
+        if self.config.focus_follows
+            && self.drag.is_none()
+            && matches!(self.overlay, Overlay::None)
+            && let Some((id, _)) = hit
+            && self.wm.focused() != Some(id)
+        {
+            self.wm.activate(id);
+            self.log_focus(id);
+        }
         for s in &mut self.slots {
             let hover = match hit {
                 Some((id, Part::Minimize)) if id == s.id => Hover::Minimize,
@@ -2118,7 +2208,11 @@ impl<D: BlockDevice> Desktop<D> {
                 self.wm.activate(id);
             }
             match part {
-                Part::Title if double => self.wm.toggle_maximize(id),
+                Part::Title if double => match self.config.title_double {
+                    TitleDouble::Maximize => self.wm.toggle_maximize(id),
+                    TitleDouble::Minimize => self.wm.minimize(id),
+                    TitleDouble::Nothing => {}
+                },
                 Part::Title => {
                     let r = self.wm.get(id).map_or(Rect::new(0, 0, 0, 0), |w| w.rect);
                     // Si está maximizada, al arrastrarla vuelve a su tamaño bajo el mouse.
@@ -2244,7 +2338,7 @@ impl<D: BlockDevice> Desktop<D> {
     /// ¿Se muestra la barra de arriba? (Hay una ventana maximizada y nada tapa toda la
     /// pantalla.)
     pub fn topbar_mode(&self) -> bool {
-        self.wm.any_maximized() && !self.overlay_is_fullscreen()
+        self.config.topbar && self.wm.any_maximized() && !self.overlay_is_fullscreen()
     }
 
     /// Las ventanas abiertas, en el orden en que se abrieron (para la barra de arriba).
@@ -2456,7 +2550,7 @@ impl<D: BlockDevice> Desktop<D> {
                 toolbar.0.clone(),
                 self.top_windows(),
                 self.top_hover,
-                shell::clock_text(clock, self.config.clock_24h),
+                shell::clock_text(clock, self.config.clock_24h, self.config.clock_seconds),
                 self.stats_version,
             )
         });
@@ -2710,6 +2804,17 @@ impl<D: BlockDevice> Desktop<D> {
                 }
             }
         }
+        if let Some(r) = self.outline {
+            jarvis_gfx::shapes::rect_outline(frame, r.x, r.y, r.w, r.h, theme::cyan());
+            jarvis_gfx::shapes::rect_outline(
+                frame,
+                r.x - 1,
+                r.y - 1,
+                r.w + 2,
+                r.h + 2,
+                theme::cyan(),
+            );
+        }
         // Las que se cierran o se minimizan, encima de todo.
         for a in &mut self.anims {
             if !matches!(a.kind, AnimKind::Close | AnimKind::Hide) || !dirty.touches(&a.area()) {
@@ -2740,7 +2845,8 @@ impl<D: BlockDevice> Desktop<D> {
         }
         if self.topbar_mode() {
             let windows = self.top_windows();
-            let clock_s = shell::clock_text(clock, self.config.clock_24h);
+            let clock_s =
+                shell::clock_text(clock, self.config.clock_24h, self.config.clock_seconds);
             let disk = self
                 .fs
                 .as_ref()
