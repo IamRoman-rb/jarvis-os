@@ -41,6 +41,9 @@ pub struct SystemStats {
     pub net_rx: u64,
     pub net_tx: u64,
     pub net: NetInfo,
+    /// Temperatura de la CPU en °C, si hay un sensor que el kernel sepa leer (en una máquina
+    /// virtual no hay: QEMU no emula el sensor térmico).
+    pub temp_c: Option<u8>,
 }
 
 /// Últimos `N` valores (una muestra por segundo), para los gráficos.
@@ -107,6 +110,8 @@ pub struct History {
     pub disk: Series<HISTORY>,
     pub rx: Series<HISTORY>,
     pub tx: Series<HISTORY>,
+    /// °C (0 = sin dato).
+    pub temp: Series<HISTORY>,
     last: Option<SystemStats>,
 }
 
@@ -134,6 +139,7 @@ impl History {
         self.disk.push(disk);
         self.rx.push(rx);
         self.tx.push(tx);
+        self.temp.push(s.temp_c.unwrap_or(0) as u32);
         self.last = Some(s.clone());
     }
 }

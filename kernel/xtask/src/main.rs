@@ -623,6 +623,28 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
 
     s.monitor("sendkey print")?;
     s.wait_for("CAPTURA /Imágenes/", STEP)?;
+
+    // Energía: suspender (el mouse despierta) y cerrar sesión (una tecla vuelve a entrar).
+    s.monitor("sendkey meta_l-d")?;
+    thread::sleep(Duration::from_millis(300));
+    s.monitor("sendkey alt-f4")?;
+    s.wait_for("ESCRITORIO_MENU apagado", STEP)?;
+    s.monitor("sendkey right")?;
+    s.monitor("sendkey right")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("SUSPENDIDO", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    s.monitor("mouse_move 20 0")?;
+    s.wait_for("DESPIERTO", STEP)?;
+    s.monitor("sendkey alt-f4")?;
+    s.wait_for("ESCRITORIO_MENU apagado", STEP)?;
+    for _ in 0..3 {
+        s.monitor("sendkey right")?;
+    }
+    s.monitor("sendkey ret")?;
+    s.wait_for("SESION_CERRADA", STEP)?;
+    s.monitor("sendkey a")?;
+    s.wait_for("SESION_INICIADA", STEP)?;
     s.quit();
     drop(s);
     verify_dir_on_disk(disk, "prueba")?;
@@ -632,7 +654,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     verify_file_exists(disk, "snap/bin/saludo")?;
     verify_file_exists(disk, "Sistema/firewall.log")?;
     println!(
-        "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, snap, firewall, configuración, Brave ({}) y disco verificados",
+        "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, snap, firewall, configuración, Brave ({}), suspender, cerrar sesión y disco verificados",
         if brave_ok {
             "con página"
         } else {
@@ -953,7 +975,23 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey meta_l")?;
     s.wait_for("ESCRITORIO_MENU inicio", STEP)?;
     thread::sleep(Duration::from_millis(600));
-    shot(&mut s, "jarvis-os-inicio.png")
+    shot(&mut s, "jarvis-os-inicio.png")?;
+    s.monitor("sendkey esc")?;
+
+    // Energía (Alt+F4 con el escritorio al frente) y la pantalla de inicio de sesión.
+    s.monitor("sendkey meta_l-d")?;
+    thread::sleep(Duration::from_millis(300));
+    s.monitor("sendkey alt-f4")?;
+    s.wait_for("ESCRITORIO_MENU apagado", STEP)?;
+    s.monitor("sendkey right")?;
+    s.monitor("sendkey right")?;
+    s.monitor("sendkey right")?;
+    thread::sleep(Duration::from_millis(400));
+    shot(&mut s, "jarvis-os-energia.png")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("SESION_CERRADA", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    shot(&mut s, "jarvis-os-sesion.png")
 }
 
 /// Convierte el PPM binario (P6) que genera QEMU a PNG.

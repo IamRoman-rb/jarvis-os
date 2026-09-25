@@ -114,6 +114,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     );
     let cpu_name = cpu::brand();
     serial_println!("CPU: {}", cpu_name);
+    let thermal = cpu::Thermal::detect();
+    match thermal.as_ref().and_then(cpu::Thermal::read) {
+        Some(t) => serial_println!("TEMP {} C", t),
+        None => serial_println!("TEMP sin sensor"),
+    }
 
     // Disco: virtio-blk + caché de sectores + FAT32. Si no hay disco, el sistema arranca igual.
     let disk = VirtioBlk::init(phys_offset).and_then(|blk| {
@@ -212,7 +217,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         MouseDecoder::new()
     };
     x86_64::instructions::interrupts::enable();
-    run(&mut desktop, &mut frame, &mut bg, &mut net, base, decoder)
+    run(
+        &mut desktop,
+        &mut frame,
+        &mut bg,
+        &mut net,
+        base,
+        decoder,
+        thermal,
+    )
 }
 
 /// Bucle principal: dormir hasta el próximo tick, atender la red, pasarle la entrada al
@@ -224,6 +237,7 @@ fn run(
     net: &mut Option<Net<VirtioNet>>,
     mut stats: SystemStats,
     mut mouse_decoder: MouseDecoder,
+    thermal: Option<cpu::Thermal>,
 ) -> ! {
     let mut keyboard = keyboard::Keyboard::new();
     let mut clock = local_time(desktop.utc_offset());
@@ -342,6 +356,7 @@ fn run(
             stats.net_rx = virtio_net::RX_BYTES.load(Ordering::Relaxed);
             stats.net_tx = virtio_net::TX_BYTES.load(Ordering::Relaxed);
             stats.net = net.as_ref().map(|n| n.info().clone()).unwrap_or_default();
+            stats.temp_c = thermal.as_ref().and_then(cpu::Thermal::read);
             desktop.set_stats(stats.clone());
             if now - last_report >= REPORT_MS {
                 serial_println!(

@@ -33,7 +33,8 @@ impl Default for Monitor {
 }
 
 struct Layout {
-    cards: [Rect; 4],
+    /// Procesador, memoria, temperatura (arriba); disco y red (abajo).
+    cards: [Rect; 5],
     list: Rect,
 }
 
@@ -43,12 +44,13 @@ impl Layout {
         let top = r.y + 46;
         let list_h = (r.h / 3).clamp(110, 200);
         let cards_h = r.h - 46 - list_h - pad * 2;
-        let cw = (r.w - pad * 3) / 2;
         let ch = (cards_h - pad) / 2;
-        let at =
-            |i: i32, j: i32| Rect::new(r.x + pad + i * (cw + pad), top + j * (ch + pad), cw, ch);
+        let cw3 = (r.w - pad * 4) / 3;
+        let cw2 = (r.w - pad * 3) / 2;
+        let top3 = |i: i32| Rect::new(r.x + pad + i * (cw3 + pad), top, cw3, ch);
+        let bottom2 = |i: i32| Rect::new(r.x + pad + i * (cw2 + pad), top + ch + pad, cw2, ch);
         Layout {
-            cards: [at(0, 0), at(1, 0), at(0, 1), at(1, 1)],
+            cards: [top3(0), top3(1), bottom2(0), bottom2(1), top3(2)],
             list: Rect::new(r.x + pad, top + cards_h + pad, r.w - pad * 2, list_h),
         }
     }
@@ -137,6 +139,42 @@ impl Monitor {
         );
         let g = Rect::new(inner.x, inner.y + 42, inner.w, inner.h - 42);
         graph(c, g, &h.cpu, 100, theme::CYAN);
+
+        // Temperatura
+        let inner = card(c, l.cards[4], tr("TEMPERATURA"));
+        match st.temp_c {
+            Some(t) => {
+                let color = if t >= 85 {
+                    theme::CRIMSON
+                } else if t >= 70 {
+                    theme::AMBER
+                } else {
+                    theme::CYAN
+                };
+                text::draw(
+                    c,
+                    inner.x,
+                    inner.y,
+                    &crate::shell::temp_text(Some(t)),
+                    &big(color),
+                );
+                let g = Rect::new(inner.x, inner.y + 42, inner.w, inner.h - 42);
+                graph(c, g, &h.temp, 100, theme::CRIMSON);
+            }
+            None => {
+                text::draw(c, inner.x, inner.y, "--", &big(theme::TEXT_DIM));
+                let st = light(theme::TEXT_DIM);
+                let mut y = inner.y + 44;
+                for l in [
+                    tr("Sin sensor térmico."),
+                    tr("Las máquinas virtuales no lo emulan;"),
+                    tr("en una PC Intel se lee de la CPU."),
+                ] {
+                    draw_fit(c, inner.x, y, l, &st, inner.w);
+                    y += 20;
+                }
+            }
+        }
 
         // Memoria
         let inner = card(c, l.cards[1], tr("MEMORIA (HEAP DEL NÚCLEO)"));

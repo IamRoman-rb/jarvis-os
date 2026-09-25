@@ -32,6 +32,8 @@ pub enum Action {
     PowerMenu,
     ShowDesktop,
     Lock,
+    Logout,
+    Sleep,
     Search,
     Restore(WinId),
     Minimize(WinId),
@@ -173,6 +175,8 @@ pub fn quick_links() -> Menu {
                 Action::ShowDesktop
             ),
             MenuItem::new(tr("Bloquear"), "Win+L", Some(Icon::Lock), Action::Lock),
+            MenuItem::new(tr("Cerrar sesión"), "", Some(Icon::Restart), Action::Logout),
+            MenuItem::new(tr("Suspender"), "", Some(Icon::Screen), Action::Sleep),
             MenuItem::new(
                 tr("Apagar o reiniciar"),
                 "Alt+F4",
