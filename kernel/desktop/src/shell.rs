@@ -43,7 +43,7 @@ pub const LAUNCHERS: [Launcher; 10] = [
     Launcher::Capture,
     Launcher::App(AppKind::Files),
     Launcher::App(AppKind::Music),
-    Launcher::App(AppKind::Browser),
+    Launcher::App(AppKind::Brave),
     Launcher::App(AppKind::Settings),
     Launcher::Jarvis,
 ];
@@ -613,8 +613,9 @@ pub struct StartMenu {
     pub selected: usize,
 }
 
-const MENU_APPS: [AppKind; 8] = [
+const MENU_APPS: [AppKind; 9] = [
     AppKind::Files,
+    AppKind::Brave,
     AppKind::Browser,
     AppKind::Terminal,
     AppKind::Settings,

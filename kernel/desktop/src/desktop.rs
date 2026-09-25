@@ -33,9 +33,9 @@ use jarvis_gfx::vfont::VectorText;
 use jarvis_gfx::{Canvas, MAX_CLIP, PixelFormat, Rect};
 
 use crate::apps::{
-    App, Click, Ctx, SysView, TaskInfo, browser::Browser, console::Console, editor::Editor,
-    files::FilesWindow, monitor::Monitor, music::Music, name_of, settings::Settings,
-    terminal::Terminal, viewer::Viewer,
+    App, Click, Ctx, Pointer, PointerKind, SysView, TaskInfo, brave::Brave, browser::Browser,
+    console::Console, editor::Editor, files::FilesWindow, monitor::Monitor, music::Music, name_of,
+    settings::Settings, terminal::Terminal, viewer::Viewer,
 };
 use crate::chrome::{self, Hover};
 use crate::config::{self, Config, Wallpaper};
@@ -280,6 +280,9 @@ pub struct Desktop<D: BlockDevice> {
     cursor_drawn: Option<Rect>,
     left_down: bool,
     right_down: bool,
+    /// Ventana que recibe los movimientos del mouse hasta que se suelte el botón (se apretó
+    /// sobre el contenido de una app que los pide).
+    pointer_capture: Option<WinId>,
     drag: Option<Drag>,
     last_click: Option<(u64, i32, i32)>,
     toolbar_hover: Option<usize>,
@@ -352,6 +355,7 @@ fn app_tag(kind: AppKind) -> &'static str {
         AppKind::Terminal => "terminal",
         AppKind::Settings => "configuracion",
         AppKind::Console => "jarvis",
+        AppKind::Brave => "brave",
         _ => "sistema",
     }
 }
@@ -397,6 +401,7 @@ impl<D: BlockDevice> Desktop<D> {
             cursor_drawn: None,
             left_down: false,
             right_down: false,
+            pointer_capture: None,
             drag: None,
             last_click: None,
             toolbar_hover: None,
@@ -1279,6 +1284,7 @@ impl<D: BlockDevice> Desktop<D> {
         for s in &mut self.slots {
             match &mut s.app {
                 App::Browser(b) => b.set_config(&self.config),
+                App::Brave(b) => b.set_config(&self.config),
                 App::Settings(st) => st.sync(&self.config),
                 _ => {}
             }
@@ -1574,6 +1580,7 @@ impl<D: BlockDevice> Desktop<D> {
                 b.go(&u, &mut ctx);
                 App::Browser(b)
             }
+            Launch::App(AppKind::Brave) => App::Brave(Brave::new(ctx.config)),
             Launch::App(AppKind::Terminal) | Launch::Terminal(None) => {
                 App::Terminal(Terminal::new(&ctx.config.user, &ctx.config.hostname))
             }
@@ -1807,10 +1814,59 @@ impl<D: BlockDevice> Desktop<D> {
         if released {
             self.drag = None;
         }
+        if p.dx != 0 || p.dy != 0 || released {
+            let kind = if released {
+                PointerKind::Up
+            } else {
+                PointerKind::Move
+            };
+            self.send_pointer(kind, now_ms, clock);
+        }
         if pressed {
             self.click(false, now_ms, clock);
         } else if right_pressed {
             self.click(true, now_ms, clock);
+        }
+    }
+
+    /// Le pasa el movimiento (o el "soltar") a la app que está debajo del mouse, o a la que
+    /// tiene capturado el mouse, si lo pide.
+    fn send_pointer(&mut self, kind: PointerKind, now_ms: u64, clock: Option<DateTime>) {
+        if !matches!(self.overlay, Overlay::None) {
+            return;
+        }
+        let (x, y) = self.cursor;
+        let target = match self.pointer_capture {
+            Some(id) => Some(id),
+            None => match self.wm.at(x, y) {
+                Some((id, Part::Content(..))) => Some(id),
+                _ => None,
+            },
+        };
+        if kind == PointerKind::Up {
+            self.pointer_capture = None;
+        }
+        let Some(id) = target else { return };
+        let Some(i) = self.slot_index(id) else { return };
+        if !self.slots[i].app.wants_pointer() {
+            return;
+        }
+        let Some(r) = self.wm.get(id).map(|w| w.rect) else {
+            return;
+        };
+        let content = self.content_of(id);
+        let tasks = self.tasks();
+        let mut ctx = ctx!(self, now_ms, clock, &tasks);
+        let slot = &mut self.slots[i];
+        ctx.out.app = app_tag(slot.app.kind());
+        let p = Pointer {
+            x: x - r.x,
+            y: y - r.y,
+            kind,
+        };
+        slot.app.pointer(p, content, &mut ctx);
+        if slot.app.take_dirty() {
+            slot.content_dirty = true;
         }
     }
 
@@ -2001,6 +2057,9 @@ impl<D: BlockDevice> Desktop<D> {
                 }
                 Part::Content(cx, cy) => {
                     let Some(i) = self.slot_index(id) else { return };
+                    if !right && self.slots[i].app.wants_pointer() {
+                        self.pointer_capture = Some(id);
+                    }
                     let content = self.content_of(id);
                     let tasks = self.tasks();
                     let mut ctx = ctx!(self, now_ms, clock, &tasks);
@@ -2142,6 +2201,12 @@ impl<D: BlockDevice> Desktop<D> {
                 Launcher::Capture => self.screenshot = true,
                 Launcher::Jarvis => self.wm.toggle_desktop(),
                 Launcher::App(kind) => {
+                    // El navegador principal se elige en la Configuración.
+                    let kind = if kind == AppKind::Brave && !self.config.brave_default {
+                        AppKind::Browser
+                    } else {
+                        kind
+                    };
                     let existing = self
                         .slots
                         .iter()

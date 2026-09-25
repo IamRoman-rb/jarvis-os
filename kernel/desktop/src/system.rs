@@ -155,6 +155,8 @@ pub enum AppKind {
     Terminal,
     /// Configuración del sistema.
     Settings,
+    /// Brave, en el anfitrión (ADR 0007).
+    Brave,
 }
 
 /// Qué abrir.

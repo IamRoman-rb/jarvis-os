@@ -1,6 +1,6 @@
 //! Consola de JARVIS: le escribís una orden y JARVIS responde (y la esfera "habla").
 //!
-//! Es el lugar del micrófono de la barra: hasta que haya audio (K11) y conexión con Claude (K6),
+//! Es el lugar del micrófono de la barra: hasta que haya audio (K12) y conexión con Claude (K7),
 //! a JARVIS se le habla escribiendo. Entiende un puñado de órdenes locales (abrir apps, ver
 //! archivos, navegar, estado de la máquina); lo demás lo va a responder Claude.
 
@@ -234,7 +234,8 @@ impl Console {
                     "archivos" | "explorador" => Some(AppKind::Files),
                     "monitor" | "estado" | "administrador" => Some(AppKind::Monitor),
                     "musica" | "música" => Some(AppKind::Music),
-                    "navegador" | "web" | "brave" | "internet" => Some(AppKind::Browser),
+                    "navegador" | "web" | "brave" | "internet" => Some(AppKind::Brave),
+        "navegador-simple" => Some(AppKind::Browser),
                     "editor" | "notas" | "bloc" => Some(AppKind::Editor),
                     "consola" => Some(AppKind::Console),
                     _ => None,

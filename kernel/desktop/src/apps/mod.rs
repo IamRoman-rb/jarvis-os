@@ -5,6 +5,7 @@
 //! el gestor de ventanas. Lo que necesita del resto del sistema lo recibe en un [`Ctx`] (disco,
 //! hora, pedidos al kernel) y lo que quiere pedir lo deja en el [`Outbox`].
 
+pub mod brave;
 pub mod browser;
 pub mod console;
 pub mod editor;
@@ -80,6 +81,22 @@ pub fn timestamp(clock: Option<DateTime>) -> Timestamp {
     })
 }
 
+/// Movimiento o "soltar" del mouse sobre una app que los pide ([`App::wants_pointer`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerKind {
+    Move,
+    /// Se soltó el botón izquierdo (el "apretar" llega como [`Click`]).
+    Up,
+}
+
+/// Coordenadas relativas a la ventana, como las de [`Click`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pointer {
+    pub x: i32,
+    pub y: i32,
+    pub kind: PointerKind,
+}
+
 /// Un clic: dónde (relativo a la ventana) y si fue doble.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Click {
@@ -101,6 +118,7 @@ pub enum App {
     Browser(browser::Browser),
     Terminal(terminal::Terminal),
     Settings(settings::Settings),
+    Brave(brave::Brave),
 }
 
 macro_rules! each {
@@ -115,6 +133,7 @@ macro_rules! each {
             App::Browser($a) => $e,
             App::Terminal($a) => $e,
             App::Settings($a) => $e,
+            App::Brave($a) => $e,
         }
     };
 }
@@ -131,6 +150,7 @@ impl App {
             App::Browser(_) => AppKind::Browser,
             App::Terminal(_) => AppKind::Terminal,
             App::Settings(_) => AppKind::Settings,
+            App::Brave(_) => AppKind::Brave,
         }
     }
 
@@ -150,6 +170,7 @@ impl App {
             App::Browser(_) => (1060, 620),
             App::Terminal(_) => (860, 520),
             App::Settings(_) => (1000, 620),
+            App::Brave(_) => (1180, 720),
         }
     }
 
@@ -173,6 +194,7 @@ impl App {
             App::Browser(a) => a.draw(c, content, sys.now_ms),
             App::Terminal(a) => a.draw(c, content),
             App::Settings(a) => a.draw(c, content, sys),
+            App::Brave(a) => a.draw(c, content, sys.now_ms),
         }
     }
 
@@ -194,6 +216,7 @@ impl App {
             App::Browser(a) => a.key(key, mods, content, ctx),
             App::Terminal(a) => a.key(key, mods, ctx),
             App::Settings(a) => a.key(key, mods, ctx),
+            App::Brave(a) => a.key(key, mods, ctx),
         }
     }
 
@@ -208,6 +231,7 @@ impl App {
             App::Browser(a) => a.click(click, content, ctx),
             App::Terminal(_) => {}
             App::Settings(a) => a.click(click, content, ctx),
+            App::Brave(a) => a.click(click, content, ctx),
         }
     }
 
@@ -219,6 +243,7 @@ impl App {
             App::Browser(a) => a.wheel(delta, content),
             App::Console(a) => a.wheel(delta),
             App::Terminal(a) => a.wheel(delta),
+            App::Brave(a) => a.wheel(delta, ctx),
             _ => {}
         }
     }
@@ -232,6 +257,7 @@ impl App {
             App::Browser(a) => a.tick(ctx),
             App::Terminal(a) => a.tick(ctx),
             App::Settings(a) => a.tick(ctx),
+            App::Brave(a) => a.tick(ctx),
             _ => {}
         }
     }
@@ -257,7 +283,21 @@ impl App {
         event: &crate::system::StreamEvent,
         ctx: &mut Ctx<'_, D>,
     ) {
-        let _ = (id, event, ctx);
+        if let App::Brave(b) = self {
+            b.stream_event(id, event, ctx);
+        }
+    }
+
+    /// ¿Quiere los movimientos del mouse y el "soltar"? (Brave: la página los necesita para
+    /// los menús que se abren al pasar y para arrastrar.)
+    pub fn wants_pointer(&self) -> bool {
+        matches!(self, App::Brave(_))
+    }
+
+    pub fn pointer<D: BlockDevice>(&mut self, p: Pointer, content: Rect, ctx: &mut Ctx<'_, D>) {
+        if let App::Brave(b) = self {
+            b.pointer(p, content, ctx);
+        }
     }
 
     /// Se va a cerrar la ventana. `false` = todavía no (por ejemplo, cambios sin guardar).
@@ -266,6 +306,10 @@ impl App {
             App::Editor(a) => a.on_close(ctx),
             App::Music(a) => {
                 a.stop(ctx);
+                true
+            }
+            App::Brave(a) => {
+                a.on_close(ctx);
                 true
             }
             _ => true,
@@ -288,6 +332,7 @@ pub fn icon_of(kind: AppKind) -> Icon {
         AppKind::Viewer => Icon::Image,
         AppKind::Terminal => Icon::Terminal,
         AppKind::Settings => Icon::Gear,
+        AppKind::Brave => Icon::Shield,
     }
 }
 
@@ -298,10 +343,11 @@ pub fn name_of(kind: AppKind) -> &'static str {
         AppKind::Monitor => tr("Monitor del sistema"),
         AppKind::Files => tr("Archivos"),
         AppKind::Music => tr("Música"),
-        AppKind::Browser => tr("Navegador"),
+        AppKind::Browser => tr("Navegador simple"),
         AppKind::Editor => tr("Editor de texto"),
         AppKind::Viewer => tr("Visor de imágenes"),
         AppKind::Terminal => "Terminal",
         AppKind::Settings => tr("Configuración"),
+        AppKind::Brave => "Brave",
     }
 }

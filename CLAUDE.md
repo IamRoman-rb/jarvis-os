@@ -3,7 +3,7 @@
 Sistema operativo nuevo, con **kernel propio en Rust** (x86_64, UEFI), cuya interfaz es un HUD
 con el asistente JARVIS en el centro y un escritorio con ventanas al estilo Windows. El "cerebro"
 de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va a hablar por la
-red (K6). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
+red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
 idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
@@ -25,7 +25,8 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
     - xtask/       imagen booteable, disco FAT32, QEMU, puente (puente.rs: HTTPS, paquetes,
-                   imágenes y SVG → BMP), tests, capturas
+                   imágenes y SVG → BMP), puente de Brave (brave.rs: DevTools → mosaicos), tests,
+                   capturas
     - paquetes/    repositorio de `apt`, tienda de snaps (snaps/) y lista de winget (lo sirve el
                    puente en http://paquetes.jarvis/)
     - rootfs/      contenido inicial del disco virtual
@@ -39,6 +40,7 @@ Kernel (desde kernel/):
 - Arrancar:         cargo xtask run            (QEMU con ventana, red, sonido y puente HTTPS)
 - Punta a punta:    cargo xtask test           (sin ventana: teclado, mouse, ventanas, disco y red)
 - Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
+- Brave:            cargo xtask brave --instalar | --probar URL (el puente sin QEMU → target/brave-prueba.png)
 - Captura:          cargo xtask screenshot     (escritorio, apps y menús en target/: miralas si tocás la UI)
 - Vista previa web: JARVIS_URL=https://… cargo test -p jarvis-desktop --test vista_previa -- --ignored
                     (arma una página real sin QEMU, con sus imágenes, y la guarda en
@@ -81,7 +83,7 @@ Cerebro (desde la raíz):
     kernel/paquetes/), convierte imágenes y SVG a BMP (ADR 0005) y pasa solo dos cabeceras más
     (las de la API de snaps, ADR 0006). Cambiar eso (otros métodos, otra interfaz, otras
     carpetas, otras cabeceras) requiere un ADR. El HTTPS y la conversión se van con TLS y
-    decodificadores en el kernel (roadmap K9). El puente de Brave (xtask/src/brave.rs, puerto
+    decodificadores en el kernel (roadmap K10). El puente de Brave (xtask/src/brave.rs, puerto
     8119) y el relé de sincronización (puerto 8120) son servicios aparte con protocolo propio
     (ADR 0007): el de Brave escucha fuera de 127.0.0.1 solo con `--red` y un token; el relé
     nunca ve contenido sin cifrar. Las conexiones largas (`Outbox::connect`) pasan por el
@@ -94,7 +96,7 @@ Cerebro (desde la raíz):
     test en desktop/tests/terminal.rs. Un paquete nuevo: carpeta en kernel/paquetes/ con su
     manifiesto y un renglón en indice.txt; que el test de apt lo instale.
 18. Programas de Windows/Linux: no se simula que corren. Se descargan e inspeccionan; ejecutarlos
-    espera al espacio de usuario (K10). Los textos al usuario usan solo caracteres de Latin-1 (la
+    espera al espacio de usuario (K11). Los textos al usuario usan solo caracteres de Latin-1 (la
     fuente no tiene otros: salen como `?`); las páginas web usan su propia fuente (Unicode).
 19. Idiomas: todo texto nuevo de la interfaz pasa por `i18n::tr("…")` (o `trf` si tiene datos),
     escrito en castellano, con su traducción al inglés y al portugués en las tablas de

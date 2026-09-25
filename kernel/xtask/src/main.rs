@@ -7,6 +7,8 @@
 //! - `screenshot`  capturas del escritorio, las apps y los menús (en `target/`)
 //! - `vdi`         convierte la imagen a `target/jarvis-os.vdi` para VirtualBox
 //! - `disk`        crea el disco virtual `target/disco.img` si no existe (`--reset` lo regenera)
+//! - `brave`       el puente de Brave solo (`--instalar` lo instala con winget, `--red --token X`
+//!   lo abre a la red local, `--probar URL` hace de kernel y guarda la página en un PNG)
 
 use std::env;
 use std::fs;
@@ -18,6 +20,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod brave;
 mod puente;
 
 type Result<T> = std::result::Result<T, String>;
@@ -37,7 +40,11 @@ fn main() -> ExitCode {
             let reset = env::args().any(|a| a == "--reset");
             disk_image(reset).map(|d| println!("disco: {}", d.display()))
         }
-        _ => Err("uso: cargo xtask <build|run|test|screenshot|vdi|disk [--reset]>".into()),
+        "brave" => brave_cmd(),
+        _ => Err(
+            "uso: cargo xtask <build|run|test|screenshot|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+                .into(),
+        ),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -46,6 +53,130 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn brave_profile() -> PathBuf {
+    target_dir().join("brave-perfil")
+}
+
+fn arg_after(flag: &str) -> Option<String> {
+    let args: Vec<String> = env::args().collect();
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1).cloned())
+}
+
+fn brave_cmd() -> Result<()> {
+    if env::args().any(|a| a == "--instalar") {
+        return brave::install();
+    }
+    if let Some(url) = arg_after("--probar") {
+        brave::start(brave_profile());
+        let png = target_dir().join("brave-prueba.png");
+        return brave_probe(&url, &png);
+    }
+    let lan = env::args().any(|a| a == "--red");
+    brave::standalone(
+        brave_profile(),
+        lan,
+        arg_after("--token").unwrap_or_default(),
+    )
+}
+
+/// Hace de kernel: se conecta al puente de Brave, abre `url`, arma la imagen con los mosaicos
+/// que llegan y la guarda en `png` cuando la página deja de cargar.
+fn brave_probe(url: &str, png: &Path) -> Result<()> {
+    use jarvis_desktop::remote::{self, FromBrave, ToBrave};
+    let (w, h) = (1024u16, 700u16);
+    let mut s = TcpStream::connect(("127.0.0.1", remote::PORT)).map_err(|e| e.to_string())?;
+    let hello = ToBrave::Hello {
+        token: String::new(),
+        w,
+        h,
+    };
+    s.write_all(&hello.encode()).map_err(|e| e.to_string())?;
+    s.write_all(&ToBrave::Navigate(url.into()).encode())
+        .map_err(|e| e.to_string())?;
+    s.set_read_timeout(Some(Duration::from_millis(200))).ok();
+    let mut framer = remote::Framer::default();
+    let mut rgb = vec![0u8; w as usize * h as usize * 3];
+    let (mut fw, mut fh) = (w as usize, h as usize);
+    let start = Instant::now();
+    let (mut frames, mut tiles_total, mut bytes) = (0, 0, 0usize);
+    let mut last_frame = Instant::now();
+    let mut loaded = false;
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        match s.read(&mut buf) {
+            Ok(0) => return Err("el puente cerró".into()),
+            Ok(n) => {
+                bytes += n;
+                framer.push(&buf[..n]);
+            }
+            Err(_) => {}
+        }
+        while let Some(m) = framer.next_message() {
+            match FromBrave::decode(&m?).ok_or("mensaje inválido")? {
+                FromBrave::Frame {
+                    w: nw,
+                    h: nh,
+                    tiles,
+                } => {
+                    if (nw as usize, nh as usize) != (fw, fh) {
+                        (fw, fh) = (nw as usize, nh as usize);
+                        rgb = vec![0; fw * fh * 3];
+                    }
+                    for t in &tiles {
+                        let px = remote::tile_pixels(t).ok_or("mosaico roto")?;
+                        for row in 0..t.h as usize {
+                            let dst = ((t.y as usize + row) * fw + t.x as usize) * 3;
+                            rgb[dst..dst + t.w as usize * 3]
+                                .copy_from_slice(&px[row * t.w as usize * 3..][..t.w as usize * 3]);
+                        }
+                    }
+                    frames += 1;
+                    tiles_total += tiles.len();
+                    last_frame = Instant::now();
+                    s.write_all(&ToBrave::FrameAck.encode())
+                        .map_err(|e| e.to_string())?;
+                }
+                FromBrave::State(st) => {
+                    let tab = st.tabs.get(st.active as usize);
+                    println!(
+                        "[probar] estado: {} pestaña(s), {:?}, cargando={}",
+                        st.tabs.len(),
+                        tab.map(|t| (&t.title, &t.url)),
+                        st.loading
+                    );
+                    if !st.loading && tab.is_some_and(|t| t.url.starts_with("http")) {
+                        loaded = true;
+                    }
+                }
+                FromBrave::Error(e) => return Err(e),
+            }
+        }
+        let quiet = last_frame.elapsed() > Duration::from_millis(1500);
+        if (loaded && frames > 0 && quiet) || start.elapsed() > Duration::from_secs(40) {
+            break;
+        }
+    }
+    // Cortar y darle tiempo al puente para cerrar Brave (si no, queda con el perfil tomado).
+    let _ = s.shutdown(std::net::Shutdown::Both);
+    thread::sleep(Duration::from_secs(4));
+    let file = fs::File::create(png).map_err(|e| e.to_string())?;
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), fw as u32, fh as u32);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()
+        .and_then(|mut wr| wr.write_image_data(&rgb))
+        .map_err(|e| e.to_string())?;
+    println!(
+        "[probar] {frames} cuadros, {tiles_total} mosaicos, {} KiB recibidos en {:.1} s -> {}",
+        bytes / 1024,
+        start.elapsed().as_secs_f32(),
+        png.display()
+    );
+    Ok(())
 }
 
 fn workspace_root() -> PathBuf {
@@ -204,6 +335,7 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
 
 fn run(image: &Path, disk: &Path) -> Result<()> {
     puente::start();
+    brave::start(brave_profile());
     let status = qemu(image, disk, false)?
         .status()
         .map_err(|e| format!("no pude abrir QEMU ({}): {e}", qemu_binary().display()))?;
@@ -410,6 +542,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     let port = puente::test_server(TEST_PAGE)?;
     // El puente sirve el repositorio de paquetes (apt).
     puente::start();
+    brave::start(brave_profile());
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.wait_for("RED_IP 10.0.2.15", STEP)?;
@@ -471,6 +604,23 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey meta_l-i")?;
     s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
 
+    // Brave (ADR 0007): la app se conecta con el puente por una conexión larga. Con Brave
+    // instalado llega la página; sin Brave (la CI), el puente lo dice y la app lo muestra.
+    // La consola ya estaba abierta: Win+R la trae adelante.
+    s.monitor("sendkey meta_l-r")?;
+    thread::sleep(Duration::from_millis(500));
+    s.type_text("abrir brave")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("VENTANA_ABIERTA Brave", STEP)?;
+    s.wait_for("BRAVE_CONECTADO 10.0.2.2:8119", STEP)?;
+    let brave_ok = if brave::installed() {
+        s.wait_for("BRAVE_FRAME", Duration::from_secs(40))?;
+        true
+    } else {
+        s.wait_for("BRAVE_ERROR", STEP)?;
+        false
+    };
+
     s.monitor("sendkey print")?;
     s.wait_for("CAPTURA /Imágenes/", STEP)?;
     s.quit();
@@ -482,7 +632,12 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     verify_file_exists(disk, "snap/bin/saludo")?;
     verify_file_exists(disk, "Sistema/firewall.log")?;
     println!(
-        "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, snap, firewall, configuración y disco verificados"
+        "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, snap, firewall, configuración, Brave ({}) y disco verificados",
+        if brave_ok {
+            "con página"
+        } else {
+            "sin Brave en el anfitrión: aviso"
+        }
     );
     Ok(())
 }
@@ -583,6 +738,7 @@ fn verify_dir_on_disk(disk: &Path, dir: &str) -> Result<()> {
 fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     let port = puente::test_server(TEST_PAGE)?;
     puente::start();
+    brave::start(brave_profile());
     let shot = |s: &mut Session, name: &str| s.screenshot(&target_dir().join(name));
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
@@ -688,6 +844,30 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
             shot(&mut s, "jarvis-os-github.png")?;
         }
         Err(e) => println!("(sin internet para GitHub: {e})"),
+    }
+
+    // Brave de verdad (si está instalado en el anfitrión y hay internet), maximizado.
+    if brave::installed() {
+        s.monitor("sendkey meta_l-r")?;
+        thread::sleep(Duration::from_millis(500));
+        s.type_text("abrir brave")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("VENTANA_ABIERTA Brave", STEP)?;
+        match s.wait_for("BRAVE_FRAME", Duration::from_secs(40)) {
+            Ok(()) => {
+                s.monitor("sendkey meta_l-up")?;
+                thread::sleep(Duration::from_millis(500));
+                s.monitor("sendkey ctrl-l")?;
+                s.type_text("https://www.youtube.com/results?search_query=rust+kernel")?;
+                s.monitor("sendkey ret")?;
+                thread::sleep(Duration::from_secs(12));
+                shot(&mut s, "jarvis-os-brave.png")?;
+                // Se cierra, para que no tape las capturas que siguen.
+                s.monitor("sendkey alt-f4")?;
+                s.wait_for("CONEXION_CERRADA", STEP)?;
+            }
+            Err(e) => println!("(Brave no mostró la página: {e})"),
+        }
     }
 
     // Terminal: apt instala programas y fondos del repositorio; neofetch y cowsay.

@@ -21,6 +21,7 @@ pub mod i18n;
 pub mod input;
 pub mod keymap;
 pub mod panels;
+pub mod remote;
 pub mod shell;
 pub mod system;
 pub mod term;

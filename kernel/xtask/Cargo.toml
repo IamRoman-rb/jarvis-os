@@ -16,6 +16,12 @@ ureq = "3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 # Y dibuja los SVG (logos e íconos de las páginas).
 resvg = { version = "0.45", default-features = false }
+# Puente de Brave (ADR 0007): habla con Brave por DevTools (WebSocket + JSON) y usa el mismo
+# protocolo que el kernel (jarvis-desktop::remote).
+jarvis-desktop = { path = "../desktop" }
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+serde_json = "1"
+base64 = "0.22"
 
 [lints]
 workspace = true
