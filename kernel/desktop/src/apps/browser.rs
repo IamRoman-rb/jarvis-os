@@ -38,7 +38,8 @@ const BAR_H: i32 = 48;
 const STATUS_H: i32 = 26;
 const MARGIN: i32 = 28;
 const MAX_IMAGES: usize = 60;
-const MAX_CSS: usize = 8;
+/// Hojas de estilo por página (GitHub, con sus módulos de CSS, usa unas 20).
+const MAX_CSS: usize = 32;
 /// Ancho supuesto de la página hasta que se dibuja por primera vez.
 const DEFAULT_W: i32 = 1000;
 /// Fondo del tema oscuro ("páginas claras" apagado).
@@ -320,6 +321,18 @@ impl Browser {
             .filter(|i| matches!(i, Img::Failed))
             .count();
         (self.doc().images.len(), ready, failed)
+    }
+
+    /// (hojas de estilo pedidas, las que llegaron, bytes de CSS) — para la vista previa.
+    pub fn css_stats(&self) -> (usize, usize, usize) {
+        let ready = self.css.iter().filter(|(_, c)| c.is_some()).count();
+        let bytes = self
+            .css
+            .iter()
+            .filter_map(|(_, c)| c.as_ref())
+            .map(|c| c.len())
+            .sum();
+        (self.css.len(), ready, bytes)
     }
 
     /// Cuánto está bajada la página.

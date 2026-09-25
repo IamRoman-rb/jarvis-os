@@ -448,6 +448,61 @@ impl Canvas<'_> {
             }
         }
     }
+
+    /// Como [`Canvas::blit_scaled`], pero mezclando con lo que ya hay: `alpha` 255 = opaco,
+    /// 0 = invisible. Es lo que usan las transiciones de las ventanas (aparecer, achicarse al
+    /// minimizar, desvanecerse al cerrar), así que recorre solo lo que se ve y, si los formatos
+    /// coinciden, trabaja sobre los bytes.
+    pub fn blit_scaled_alpha(&mut self, src: &Canvas<'_>, dst: Rect, alpha: u8) {
+        if dst.is_empty() || src.width == 0 || src.height == 0 || alpha == 0 {
+            return;
+        }
+        let vis = dst.clamp(self.width, self.height);
+        if vis.is_empty() {
+            return;
+        }
+        let mut areas = [None; MAX_CLIP];
+        if self.clip[0].is_some() {
+            areas = self.clip;
+        } else {
+            areas[0] = Some(vis);
+        }
+        let same = self.format == src.format && self.bytes_per_pixel == src.bytes_per_pixel;
+        let bpp = self.bytes_per_pixel;
+        let a = alpha as u32;
+        for (i, area) in areas.iter().enumerate() {
+            let Some(r) = area.and_then(|a| a.intersection(&vis)) else {
+                continue;
+            };
+            // Las zonas de recorte se pueden superponer: mezclar dos veces el mismo píxel lo
+            // dejaría distinto, así que lo que ya cubrió una zona anterior se saltea.
+            let earlier = &areas[..i];
+            for y in r.y..r.y + r.h {
+                let sy = ((y - dst.y) as i64 * src.height as i64 / dst.h as i64) as usize;
+                for x in r.x..r.x + r.w {
+                    if earlier.iter().flatten().any(|e| e.contains(x, y)) {
+                        continue;
+                    }
+                    let sx = ((x - dst.x) as i64 * src.width as i64 / dst.w as i64) as usize;
+                    if same {
+                        let d = (y as usize * self.stride + x as usize) * bpp;
+                        let s = (sy * src.stride + sx) * bpp;
+                        let n = bpp.min(3);
+                        for k in 0..n {
+                            let (sv, dv) = (src.buf[s + k] as u32, self.buf[d + k] as u32);
+                            self.buf[d + k] = if a == 255 {
+                                sv as u8
+                            } else {
+                                ((sv * a + dv * (255 - a)) / 255) as u8
+                            };
+                        }
+                    } else if let Some(c) = src.get(sx as i32, sy as i32) {
+                        self.blend(x, y, c, alpha);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -479,6 +534,33 @@ mod tests {
             Rect::new(0, 0, 2, 2).union(&Rect::new(5, 5, 1, 1)),
             Rect::new(0, 0, 6, 6)
         );
+    }
+
+    #[test]
+    fn blit_escalado_con_transparencia() {
+        let mut a = vec![0u8; 4 * 4 * 4];
+        let mut src = Canvas::new(&mut a, 4, 4, 4, 4, PixelFormat::Bgr).unwrap();
+        src.fill(Color::WHITE);
+        let mut b = vec![0u8; 10 * 10 * 4];
+        let mut dst = Canvas::new(&mut b, 10, 10, 10, 4, PixelFormat::Bgr).unwrap();
+        // Dos zonas de recorte que se superponen: cada píxel se mezcla una sola vez.
+        dst.set_clip([Rect::new(0, 0, 6, 10), Rect::new(3, 0, 7, 10)]);
+        dst.blit_scaled_alpha(&src, Rect::new(2, 2, 8, 6), 128);
+        dst.clear_clip();
+        let half = Color::BLACK.lerp(Color::WHITE, 128);
+        for y in 0..10 {
+            for x in 0..10 {
+                let inside = (2..10).contains(&x) && (2..8).contains(&y);
+                let want = if inside { half } else { Color::BLACK };
+                let got = dst.get(x, y).unwrap();
+                assert!(got.r.abs_diff(want.r) <= 1, "({x}, {y}): {got:?}");
+            }
+        }
+        // Opaco: copia tal cual; transparente: no toca nada.
+        dst.blit_scaled_alpha(&src, Rect::new(0, 0, 2, 2), 255);
+        assert_eq!(dst.get(1, 1), Some(Color::WHITE));
+        dst.blit_scaled_alpha(&src, Rect::new(0, 8, 2, 2), 0);
+        assert_eq!(dst.get(0, 9), Some(Color::BLACK));
     }
 
     #[test]

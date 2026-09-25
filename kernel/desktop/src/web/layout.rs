@@ -2907,7 +2907,15 @@ impl<'a> L<'a> {
             };
             let (buf, o) = self.detached_kid(k, n, bw, None);
             let basis = if is_el { kst.basis.resolve(ch) } else { None };
-            let main = basis.map_or(o.h, |b| b.max(o.h.min(b)));
+            // Mínimo automático: un elemento flex no queda más bajo que su contenido (con
+            // `flex: 1`, base 0, igual mide lo que su contenido), salvo que recorte lo que
+            // sobra o tenga un `min-height` propio.
+            let auto_min = !kst.clip_y && kst.min_height.is_auto();
+            let main = match basis {
+                None => o.h,
+                Some(b) if auto_min => b.max(o.h),
+                Some(b) => b,
+            };
             built.push((buf, o, e, bw, align, main));
         }
         let gaps = row_gap * (items.len() as i32 - 1);
@@ -3814,6 +3822,44 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("no hay fondo {color:06x}"))
+    }
+
+    /// rust-lang.org: `body` es flex en columna con `min-height: 100vh` para que el pie quede
+    /// abajo; el contenido (`main`) no se achica y el pie va después.
+    #[test]
+    fn pie_abajo_con_body_flex_en_columna() {
+        let p = page(
+            "<body style='margin:0;min-height:100vh;display:flex;flex-direction:column'>\
+             <nav style='height:50px;background:#00ff00'>n</nav>\
+             <main><section style='height:900px;background:#ff0000'>a</section>\
+             <section style='flex:1;background:#0000ff'>b</section></main>\
+             <footer style='background:#222222'>pie</footer></body>",
+            1000,
+        );
+        let main = rect_of(&p, 0xff0000);
+        let foot = rect_of(&p, 0x222222);
+        assert_eq!(main.y, 50);
+        assert!(
+            foot.y >= main.y + main.h,
+            "el pie tapa el contenido: {foot:?} {main:?}"
+        );
+        // Con contenido de texto (sin alturas fijas) y `main` con `flex: 1`, igual.
+        let p = page(
+            "<body style='margin:0;min-height:100vh;display:flex;flex-direction:column'>\
+             <nav style='height:50px'>n</nav>\
+             <main style='flex:1;display:flex;flex-direction:column'><header style='margin:20px auto;max-width:600px'><div style='display:flex'>\
+             <div><h1>Rust</h1><h2>Un lenguaje</h2></div><div><p>Empezar</p></div></div></header>\
+             <section style='background:#ff0000'><p>uno</p><p>dos</p><p>tres</p></section></main>\
+             <footer style='background:#222222'>pie</footer></body>",
+            1000,
+        );
+        let main = rect_of(&p, 0xff0000);
+        let foot = rect_of(&p, 0x222222);
+        assert!(main.y > 150, "{main:?}");
+        assert!(
+            foot.y >= main.y + main.h,
+            "el pie tapa el contenido: {foot:?} {main:?}"
+        );
     }
 
     #[test]

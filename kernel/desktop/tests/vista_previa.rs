@@ -137,6 +137,8 @@ fn vista_previa_de_una_pagina() {
     serve(&mut t);
     // Maximizada, para ver más; JARVIS_BAJAR=N baja N pantallas.
     t.combo(jarvis_desktop::Mods::WIN, jarvis_desktop::Key::Up);
+    // (Que termine la transición.)
+    t.now += jarvis_desktop::desktop::ANIM_MS;
     // Al dibujar con el ancho real se rearman los estilos: puede pedir más imágenes.
     t.frame();
     serve(&mut t);
@@ -163,6 +165,10 @@ fn vista_previa_de_una_pagina() {
     t.d.render(&mut frame, &mut bgc, t.now, CLOCK);
     if let Some(jarvis_desktop::apps::App::Browser(b)) = t.d.app(jarvis_desktop::AppKind::Browser) {
         println!("imágenes (total, listas, fallidas): {:?}", b.image_stats());
+        println!(
+            "hojas de estilo (pedidas, llegaron, bytes): {:?}",
+            b.css_stats()
+        );
     }
     // JARVIS_ID=x: el estilo calculado de ese elemento y de sus ancestros.
     if let (Ok(id), Some(jarvis_desktop::apps::App::Browser(b))) = (

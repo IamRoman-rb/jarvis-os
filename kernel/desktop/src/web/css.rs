@@ -769,7 +769,12 @@ fn matching_brace(s: &str, open: usize) -> usize {
 
 /// ¿Vale una condición `@media` para esta ventana?
 pub fn media_ok(cond: &str, m: Media) -> bool {
-    let c = cond.to_ascii_lowercase();
+    // Los saltos de línea y espacios de más cuentan como un espacio (`screen\nand (…)`).
+    let c = cond
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     // Una lista con comas vale si vale alguna.
     if c.contains(',') {
         return c.split(',').any(|part| media_ok(part, m));
@@ -919,7 +924,13 @@ pub fn parse_decls(block: &str) -> Vec<Decl> {
         let Some((prop, value)) = d.split_once(':') else {
             continue;
         };
-        let prop = prop.trim().to_ascii_lowercase();
+        // Las variables (`--fgColor-accent`) distinguen mayúsculas; las propiedades no.
+        let prop = prop.trim();
+        let prop = if prop.starts_with("--") {
+            prop.to_string()
+        } else {
+            prop.to_ascii_lowercase()
+        };
         // Bloques anidados (CSS "nesting") no son declaraciones.
         if prop.contains(['{', '}', ' ', '&']) {
             continue;
@@ -1838,6 +1849,11 @@ mod tests {
             height: 600,
         };
         assert!(media_ok("screen and (min-width: 720px)", m));
+        // Con saltos de línea (Hacker News).
+        assert!(!media_ok(
+            "only screen\nand (min-width : 300px)\nand (max-width : 750px)",
+            m
+        ));
         assert!(!media_ok("(min-width: 1000px)", m));
         assert!(media_ok("(max-width: 50em)", m));
         assert!(media_ok("(width >= 600px)", m));

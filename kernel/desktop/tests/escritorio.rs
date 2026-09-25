@@ -4,6 +4,7 @@ mod common;
 
 use common::*;
 use jarvis_desktop::apps::App;
+use jarvis_desktop::desktop::ANIM_MS;
 use jarvis_desktop::shell::{self, LAUNCHERS, StartMenu};
 use jarvis_desktop::wm::{BUTTON_W, TITLE_H};
 use jarvis_desktop::{
@@ -425,18 +426,137 @@ fn render_incremental_igual_a_redibujar_todo() {
         t.key(Key::Escape);
         step(&mut t);
     }
+    // Que terminen las transiciones (con una ventana a medio aparecer se verían, a través de
+    // ella, cosas del Monitor que dependen de la hora y el redibujado completo las actualiza).
+    t.now += ANIM_MS;
+    t.d.render(&mut canvas(&mut frame_buf), &mut bg, t.now, CLOCK);
     // Forzar un redibujado completo del mismo estado.
     let mut full_buf = vec![0u8; W * H * 4];
     t.d.invalidate();
     t.d.render(&mut canvas(&mut full_buf), &mut bg, t.now, CLOCK);
-    let diff = frame_buf
+    assert_same(&frame_buf, &full_buf);
+}
+
+/// Al maximizar, arriba aparece una barra con los íconos, las ventanas abiertas, el estado, la IP
+/// y la hora; se puede usar con el mouse.
+#[test]
+fn barra_de_arriba_con_una_ventana_maximizada() {
+    let mut t = Driver::new();
+    open(&mut t, AppKind::Files);
+    open(&mut t, AppKind::Editor);
+    assert!(!t.d.topbar_mode());
+    t.frame();
+    // Doble clic en el título: maximizada, debajo de la barra.
+    let r = t.window(AppKind::Editor);
+    t.double_click(Rect::new(r.x + 200, r.y + 4, 1, 1));
+    assert_eq!(
+        t.window(AppKind::Editor),
+        Rect::new(0, shell::TOPBAR_H, W as i32, H as i32 - shell::TOPBAR_H)
+    );
+    assert!(t.d.topbar_mode());
+    t.frame();
+    // Clic en la ventana de Archivos de la barra: pasa adelante.
+    let chip = shell::top_chip(W, 2, 0);
+    assert!(!chip.is_empty());
+    t.click(chip);
+    assert_eq!(t.d.focused_app(), Some(AppKind::Files));
+    // Clic en la del editor: vuelve; otro clic: se minimiza y la barra se va.
+    let chip = shell::top_chip(W, 2, 1);
+    t.click(chip);
+    assert_eq!(t.d.focused_app(), Some(AppKind::Editor));
+    t.click(chip);
+    assert!(!t.d.topbar_mode());
+    t.frame();
+    // Restaurada sigue maximizada, y el clic en los gráficos abre el Monitor.
+    t.combo(
+        Mods {
+            win: true,
+            shift: true,
+            ..Mods::NONE
+        },
+        Key::Char('M'),
+    );
+    assert!(t.d.topbar_mode());
+    t.click_at(W as i32 - 300, 10, 1000);
+    assert_eq!(t.d.focused_app(), Some(AppKind::Monitor));
+    // El ícono de inicio de la barra abre el menú.
+    t.click_at(10, 10, 1000);
+    assert_eq!(t.d.overlay_name(), "inicio");
+    let logs = t.logs();
+    assert!(logs.iter().any(|l| l == "BARRA_ARRIBA estado"), "{logs:?}");
+    t.frame();
+}
+
+/// Las transiciones (abrir, maximizar, minimizar, restaurar, cerrar) dibujadas por partes dan
+/// lo mismo que redibujar todo, también a mitad de camino.
+#[test]
+fn transiciones_por_partes_igual_a_redibujar_todo() {
+    let mut t = Driver::new();
+    let (mut bg_buf, mut frame_buf) = buffers();
+    let mut bg = canvas(&mut bg_buf);
+    t.d.draw_background(&mut bg);
+    t.d.render(&mut canvas(&mut frame_buf), &mut bg, t.now, CLOCK);
+    let mut full_buf = vec![0u8; W * H * 4];
+    let mut check = |t: &mut Driver, frame_buf: &mut Vec<u8>| {
+        // Unos frames por el medio de la transición y comparar con uno completo.
+        for _ in 0..3 {
+            t.now += 40;
+            t.d.render(&mut canvas(frame_buf), &mut bg, t.now, CLOCK);
+        }
+        t.d.invalidate();
+        t.d.render(&mut canvas(&mut full_buf), &mut bg, t.now, CLOCK);
+        assert_same(frame_buf, &full_buf);
+    };
+    open(&mut t, AppKind::Files);
+    check(&mut t, &mut frame_buf);
+    open(&mut t, AppKind::Editor);
+    check(&mut t, &mut frame_buf);
+    // Maximizar (y aparece la barra de arriba), restaurar, minimizar, volver y cerrar.
+    t.combo(Mods::WIN, Key::Up);
+    assert!(t.d.topbar_mode());
+    check(&mut t, &mut frame_buf);
+    t.combo(Mods::WIN, Key::Down);
+    assert!(!t.d.topbar_mode());
+    check(&mut t, &mut frame_buf);
+    t.combo(Mods::WIN, Key::Down);
+    check(&mut t, &mut frame_buf);
+    // Win+Shift+M: vuelven todas.
+    t.combo(
+        Mods {
+            win: true,
+            shift: true,
+            ..Mods::NONE
+        },
+        Key::Char('M'),
+    );
+    assert!(t.d.window_manager().windows().iter().all(|w| !w.minimized));
+    check(&mut t, &mut frame_buf);
+    t.combo(Mods::ALT, Key::F(4));
+    check(&mut t, &mut frame_buf);
+    // Y cuando terminan, todo en su lugar.
+    t.now += ANIM_MS;
+    check(&mut t, &mut frame_buf);
+}
+
+/// Los dos frames son iguales (si no, dice cuántos bytes difieren y dónde está el primero).
+fn assert_same(a: &[u8], b: &[u8]) {
+    let diff = a.iter().zip(b).filter(|(a, b)| a != b).count();
+    // Esquinas del rectángulo que contiene todas las diferencias.
+    let first = a
         .iter()
-        .zip(&full_buf)
-        .filter(|(a, b)| a != b)
-        .count();
+        .zip(b)
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .map(|(i, _)| (i / 4 % W, i / 4 / W))
+        .fold(None, |acc: Option<(usize, usize, usize, usize)>, (x, y)| {
+            Some(match acc {
+                None => (x, y, x, y),
+                Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+            })
+        });
     assert!(
         diff == 0,
-        "el render incremental dejó restos ({diff} bytes distintos)"
+        "el render incremental dejó restos ({diff} bytes distintos, el primero en {first:?})"
     );
 }
 

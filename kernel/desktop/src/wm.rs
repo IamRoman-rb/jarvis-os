@@ -26,6 +26,10 @@ pub const BUTTON_W: i32 = 46;
 /// Zona de los bordes que sirve para cambiar el tamaño.
 const GRIP: i32 = 8;
 pub const MIN_W: i32 = 380;
+/// Alto de la barra de arriba que aparece cuando hay una ventana maximizada (con los gráficos
+/// de estado, la hora, la IP y las ventanas abiertas). Una ventana maximizada ocupa todo lo
+/// demás de la pantalla.
+pub const TOPBAR_H: i32 = 30;
 pub const MIN_H: i32 = 240;
 
 /// Qué parte de una ventana hay en un punto.
@@ -119,8 +123,10 @@ pub struct WindowManager {
     /// Orden de uso, la más reciente primero (Alt+Tab).
     mru: Vec<WinId>,
     focus: Option<WinId>,
-    /// La zona de la pantalla donde se maximizan y acoplan las ventanas.
+    /// La zona de la pantalla donde se acoplan las ventanas (debajo de la barra de íconos).
     work: Rect,
+    /// Donde va una ventana maximizada: toda la pantalla menos la barra de arriba.
+    full: Rect,
     screen: Rect,
     next_id: WinId,
     /// Ventanas que minimizó "mostrar el escritorio" (Win+D), para volver a mostrarlas.
@@ -138,6 +144,7 @@ impl WindowManager {
             mru: Vec::new(),
             focus: None,
             work,
+            full: Rect::new(screen.x, screen.y + TOPBAR_H, screen.w, screen.h - TOPBAR_H),
             screen,
             next_id: 1,
             peeked: Vec::new(),
@@ -356,8 +363,13 @@ impl WindowManager {
         }
     }
 
+    /// ¿Hay una ventana maximizada a la vista? Entonces se muestra la barra de arriba.
+    pub fn any_maximized(&self) -> bool {
+        self.windows.iter().any(|w| w.visible() && w.maximized)
+    }
+
     pub fn toggle_maximize(&mut self, id: WinId) {
-        let work = self.work;
+        let work = self.full;
         let Some(w) = self.get_mut(id) else { return };
         if w.maximized {
             w.maximized = false;
@@ -526,10 +538,16 @@ mod tests {
         let (mut wm, ids) = wm_with(1);
         let before = wm.get(ids[0]).unwrap().rect;
         wm.toggle_maximize(ids[0]);
-        assert_eq!(wm.get(ids[0]).unwrap().rect, WORK);
+        // Toda la pantalla, menos la barra de arriba.
+        assert_eq!(
+            wm.get(ids[0]).unwrap().rect,
+            Rect::new(0, TOPBAR_H, 1280, 800 - TOPBAR_H)
+        );
+        assert!(wm.any_maximized());
         assert!(wm.covers(&Rect::new(400, 300, 100, 100)));
         wm.toggle_maximize(ids[0]);
         assert_eq!(wm.get(ids[0]).unwrap().rect, before);
+        assert!(!wm.any_maximized());
     }
 
     #[test]

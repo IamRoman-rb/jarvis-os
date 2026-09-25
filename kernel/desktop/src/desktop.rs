@@ -11,6 +11,14 @@
 //! se movió…), se restauran desde el fondo y se vuelven a pintar las capas que las tocan, de
 //! atrás hacia adelante: esfera → reloj y mensaje → panel de estado → ventanas → barra →
 //! menús y avisos. Después el kernel copia solo esas zonas a la pantalla.
+//!
+//! **Barra de arriba**: con una ventana maximizada, la barra flotante de íconos se reemplaza por
+//! una barra que ocupa todo el ancho arriba, con los íconos, las ventanas abiertas, gráficos de
+//! CPU, memoria, disco y red, la IP y la hora.
+//!
+//! **Transiciones**: abrir, cerrar, minimizar, restaurar, maximizar y acoplar ventanas se anima
+//! (si las animaciones están activadas). Cada animación depende solo de la hora del frame, así
+//! que dibujar por partes sigue dando lo mismo que redibujar todo.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -37,6 +45,7 @@ use crate::input::{Event, Key, Mods, MousePacket};
 use crate::panels::{self, Action, Menu, QuickButton, QuickHit};
 use crate::shell::{
     self, LAUNCHERS, Launcher, MAX_EXTRA, StartItem, StartMenu, StatusHit, Thumb, ToolbarItem,
+    TopHit, TopWindow,
 };
 use crate::system::{
     AppKind, History, HttpResponse, Launch, NetRequest, Outbox, Power, SystemStats,
@@ -55,6 +64,8 @@ const DOUBLE_CLICK_MS: u64 = 450;
 const TOAST_MS: u64 = 4500;
 /// Arriba queda libre para la barra de íconos (siempre visible, como la barra de tareas).
 const WORK_TOP: i32 = 76;
+/// Duración de las transiciones de las ventanas.
+pub const ANIM_MS: u64 = 180;
 
 /// Zonas de la pantalla que cambiaron en un frame.
 #[derive(Clone, Debug, Default)]
@@ -133,6 +144,89 @@ enum Overlay {
     Notices,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnimKind {
+    /// Aparece, agrandándose un poco.
+    Open,
+    /// Se va, achicándose (con una copia de su último dibujo).
+    Close,
+    /// Se minimiza: se achica hacia arriba y se desvanece.
+    Hide,
+    /// Vuelve de minimizada.
+    Show,
+    /// Cambió de lugar o de tamaño de golpe (maximizar, restaurar, acoplar).
+    Move,
+}
+
+/// Una transición de una ventana, de `from` a `to`, que empieza en `start`.
+struct Anim {
+    id: WinId,
+    kind: AnimKind,
+    from: Rect,
+    to: Rect,
+    start: u64,
+    /// Solo para `Close`: el dibujo de la ventana que ya se cerró.
+    buf: Vec<u8>,
+    size: (i32, i32),
+}
+
+impl Anim {
+    /// Avance de 0 a 1000, con desaceleración al final (ease-out cúbico).
+    fn progress(&self, now_ms: u64) -> i64 {
+        let t = (now_ms.saturating_sub(self.start).min(ANIM_MS) * 1000 / ANIM_MS) as i64;
+        let r = 1000 - t;
+        1000 - r * r * r / 1_000_000
+    }
+
+    fn done(&self, now_ms: u64) -> bool {
+        now_ms >= self.start + ANIM_MS
+    }
+
+    /// Dónde se dibuja y con qué opacidad en `now_ms`.
+    fn frame(&self, now_ms: u64) -> (Rect, u8) {
+        let e = self.progress(now_ms);
+        let lerp = |a: i32, b: i32| a + ((b - a) as i64 * e / 1000) as i32;
+        let r = Rect::new(
+            lerp(self.from.x, self.to.x),
+            lerp(self.from.y, self.to.y),
+            lerp(self.from.w, self.to.w).max(1),
+            lerp(self.from.h, self.to.h).max(1),
+        );
+        let alpha = match self.kind {
+            AnimKind::Open | AnimKind::Show => (e * 255 / 1000) as u8,
+            AnimKind::Close | AnimKind::Hide => (255 - e * 255 / 1000) as u8,
+            AnimKind::Move => 255,
+        };
+        (r, alpha)
+    }
+
+    /// Toda la zona que ocupa mientras dura.
+    fn area(&self) -> Rect {
+        self.from.union(&self.to)
+    }
+}
+
+/// `r` achicado al `pct` % alrededor de su centro.
+fn shrink(r: Rect, pct: i32) -> Rect {
+    let (w, h) = (r.w * pct / 100, r.h * pct / 100);
+    Rect::new(r.x + (r.w - w) / 2, r.y + (r.h - h) / 2, w, h)
+}
+
+/// A dónde va una ventana al minimizarse: chiquita, arriba (hacia la barra).
+fn hidden(r: Rect) -> Rect {
+    let (w, h) = (r.w / 5, r.h / 5);
+    Rect::new(r.x + (r.w - w) / 2, 0, w, h)
+}
+
+/// Lo que se dibujó en la barra de arriba (para saber si hay que redibujarla).
+type TopKey = (
+    Vec<ToolbarItem>,
+    Vec<TopWindow>,
+    Option<TopHit>,
+    String,
+    u64,
+);
+
 enum Drag {
     Move {
         id: WinId,
@@ -186,6 +280,7 @@ pub struct Desktop<D: BlockDevice> {
     drag: Option<Drag>,
     last_click: Option<(u64, i32, i32)>,
     toolbar_hover: Option<usize>,
+    top_hover: Option<TopHit>,
     toasts: Vec<(String, bool, u64)>,
     logs: Vec<String>,
     out: Outbox,
@@ -200,6 +295,11 @@ pub struct Desktop<D: BlockDevice> {
     drawn_message: Option<(usize, bool)>,
     drawn_stats: u64,
     drawn_toolbar: Option<(Vec<ToolbarItem>, Option<usize>)>,
+    drawn_top: Option<TopKey>,
+    /// ¿El último frame tenía la barra de arriba (una ventana maximizada)?
+    drawn_top_mode: bool,
+    /// Transiciones de ventanas en curso.
+    anims: Vec<Anim>,
     drawn_toasts: Vec<(String, bool)>,
     config: Config,
     /// Hay que volver a dibujar el fondo (cambió el fondo de pantalla).
@@ -295,6 +395,7 @@ impl<D: BlockDevice> Desktop<D> {
             drag: None,
             last_click: None,
             toolbar_hover: None,
+            top_hover: None,
             toasts: Vec::new(),
             logs: Vec::new(),
             out: Outbox::default(),
@@ -308,6 +409,9 @@ impl<D: BlockDevice> Desktop<D> {
             drawn_message: None,
             drawn_stats: u64::MAX,
             drawn_toolbar: None,
+            drawn_top: None,
+            drawn_top_mode: false,
+            anims: Vec::new(),
             drawn_toasts: Vec::new(),
             config,
             bg_dirty: true,
@@ -555,7 +659,7 @@ impl<D: BlockDevice> Desktop<D> {
         let clock = self.last_clock;
         let before = self.geometry();
         self.process_outbox(now_ms, clock);
-        self.damage_geometry(&before);
+        self.damage_geometry(&before, now_ms);
     }
 
     fn tasks(&self) -> Vec<TaskInfo> {
@@ -592,7 +696,7 @@ impl<D: BlockDevice> Desktop<D> {
             Event::Mouse(p) => self.on_mouse(p, now_ms, clock),
         }
         self.process_outbox(now_ms, clock);
-        self.damage_geometry(&before);
+        self.damage_geometry(&before, now_ms);
     }
 
     /// (id, zona, visible, tiene el foco, maximizada) de cada ventana, de atrás hacia adelante.
@@ -613,10 +717,11 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     /// Compara la geometría de antes con la de ahora y marca como sucio lo que cambió.
-    fn damage_geometry(&mut self, before: &[(WinId, Rect, bool, bool, bool)]) {
+    fn damage_geometry(&mut self, before: &[(WinId, Rect, bool, bool, bool)], now_ms: u64) {
         let after = self.geometry();
         for (i, now) in after.iter().enumerate() {
             let old = before.iter().position(|b| b.0 == now.0);
+            self.start_anim(old.map(|j| (before[j].1, before[j].2)), now, now_ms);
             let changed = match old {
                 Some(j) => before[j] != *now || j != i,
                 None => true,
@@ -641,6 +746,55 @@ impl<D: BlockDevice> Desktop<D> {
                 self.damage.push(b.1); // se cerró
             }
         }
+    }
+
+    /// Empieza la transición de una ventana que cambió: `old` es (zona, visible) de antes.
+    fn start_anim(
+        &mut self,
+        old: Option<(Rect, bool)>,
+        now: &(WinId, Rect, bool, bool, bool),
+        now_ms: u64,
+    ) {
+        if !self.config.animations {
+            return;
+        }
+        let (id, rect, visible) = (now.0, now.1, now.2);
+        let current = self
+            .anims
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.frame(now_ms).0);
+        let (kind, from, to) = match old {
+            None if visible => (AnimKind::Open, shrink(rect, 92), rect),
+            Some((_, true)) if !visible => (AnimKind::Hide, current.unwrap_or(rect), hidden(rect)),
+            Some((_, false)) if visible => (AnimKind::Show, hidden(rect), rect),
+            Some((before, true)) if visible && before != rect && self.drag.is_none() => {
+                (AnimKind::Move, current.unwrap_or(before), rect)
+            }
+            Some((before, true)) if visible && before != rect => {
+                // Se arrastra con el mouse: la transición que tenía se corta, así la ventana
+                // sigue al mouse.
+                if let Some(a) = self.anims.iter().find(|a| a.id == id) {
+                    self.damage.push(a.area());
+                }
+                self.anims.retain(|a| a.id != id);
+                return;
+            }
+            _ => return,
+        };
+        if let Some(a) = self.anims.iter().find(|a| a.id == id) {
+            self.damage.push(a.area());
+        }
+        self.anims.retain(|a| a.id != id);
+        self.anims.push(Anim {
+            id,
+            kind,
+            from,
+            to,
+            start: now_ms,
+            buf: Vec::new(),
+            size: (0, 0),
+        });
     }
 
     fn on_mods(&mut self, m: Mods, now_ms: u64, clock: Option<DateTime>) {
@@ -1297,7 +1451,7 @@ impl<D: BlockDevice> Desktop<D> {
         let before = self.geometry();
         self.launch(what, now_ms, clock);
         self.process_outbox(now_ms, clock);
-        self.damage_geometry(&before);
+        self.damage_geometry(&before, now_ms);
     }
 
     fn launch(&mut self, what: Launch, now_ms: u64, clock: Option<DateTime>) {
@@ -1411,9 +1565,28 @@ impl<D: BlockDevice> Desktop<D> {
             self.slots[i].content_dirty = true;
             return;
         }
-        let slot = self.slots.remove(i);
+        let mut slot = self.slots.remove(i);
         self.logs
             .push(format!("VENTANA_CERRADA {}", name_of(slot.app.kind())));
+        if let Some(a) = self.anims.iter().find(|a| a.id == id) {
+            self.damage.push(a.area());
+        }
+        self.anims.retain(|a| a.id != id);
+        if let Some(win) = self.wm.get(id)
+            && self.config.animations
+            && win.visible()
+            && slot.size == (win.rect.w, win.rect.h)
+        {
+            self.anims.push(Anim {
+                id,
+                kind: AnimKind::Close,
+                from: win.rect,
+                to: shrink(win.rect, 92),
+                start: now_ms,
+                buf: core::mem::take(&mut slot.buf),
+                size: slot.size,
+            });
+        }
         self.wm.close(id);
     }
 
@@ -1577,8 +1750,14 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     fn update_hover(&mut self, x: i32, y: i32) {
-        let n = self.toolbar_items().len();
-        self.toolbar_hover = shell::toolbar_hit(n, x, y);
+        if self.topbar_mode() {
+            self.toolbar_hover = None;
+            self.top_hover = shell::topbar_hit(self.width, self.slots.len(), x, y);
+        } else {
+            let n = self.toolbar_items().len();
+            self.toolbar_hover = shell::toolbar_hit(n, x, y);
+            self.top_hover = None;
+        }
         let hit = self.wm.at(x, y);
         for s in &mut self.slots {
             let hover = match hit {
@@ -1664,7 +1843,13 @@ impl<D: BlockDevice> Desktop<D> {
                 }
                 self.set_overlay(Overlay::None);
                 // Un clic en el ícono de inicio con el menú abierto solo lo cierra.
-                if shell::toolbar_hit(self.toolbar_items().len(), x, y) == Some(0) {
+                let start_icon = if self.topbar_mode() {
+                    shell::topbar_hit(self.width, self.slots.len(), x, y)
+                        == Some(TopHit::Launcher(0))
+                } else {
+                    shell::toolbar_hit(self.toolbar_items().len(), x, y) == Some(0)
+                };
+                if start_icon {
                     return;
                 }
             }
@@ -1695,11 +1880,18 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::None => {}
         }
 
-        // La barra de íconos está siempre encima.
-        let n = self.toolbar_items().len();
-        if let Some(i) = shell::toolbar_hit(n, x, y) {
-            self.toolbar_action(i, now_ms, clock);
-            return;
+        // La barra de íconos (o la de arriba) está siempre encima.
+        if self.topbar_mode() {
+            if let Some(hit) = shell::topbar_hit(self.width, self.slots.len(), x, y) {
+                self.topbar_action(hit, now_ms, clock);
+                return;
+            }
+        } else {
+            let n = self.toolbar_items().len();
+            if let Some(i) = shell::toolbar_hit(n, x, y) {
+                self.toolbar_action(i, now_ms, clock);
+                return;
+            }
         }
 
         if let Some((id, part)) = self.wm.at(x, y) {
@@ -1827,6 +2019,56 @@ impl<D: BlockDevice> Desktop<D> {
         items
     }
 
+    /// ¿Se muestra la barra de arriba? (Hay una ventana maximizada y nada tapa toda la
+    /// pantalla.)
+    pub fn topbar_mode(&self) -> bool {
+        self.wm.any_maximized() && !self.overlay_is_fullscreen()
+    }
+
+    /// Las ventanas abiertas, en el orden en que se abrieron (para la barra de arriba).
+    fn top_windows(&self) -> Vec<TopWindow> {
+        let focused = self.wm.focused();
+        self.slots
+            .iter()
+            .filter_map(|s| {
+                let win = self.wm.get(s.id)?;
+                Some(TopWindow {
+                    icon: s.app.icon(),
+                    title: s.app.title(),
+                    active: focused == Some(s.id),
+                    minimized: !win.visible(),
+                })
+            })
+            .collect()
+    }
+
+    fn topbar_action(&mut self, hit: TopHit, now_ms: u64, clock: Option<DateTime>) {
+        match hit {
+            TopHit::Launcher(i) => self.toolbar_action(i, now_ms, clock),
+            TopHit::Window(i) => {
+                let Some(id) = self.slots.get(i).map(|s| s.id) else {
+                    return;
+                };
+                self.logs.push(format!("BARRA_ARRIBA ventana {i}"));
+                let visible = self.wm.get(id).is_some_and(|w| w.visible());
+                if self.wm.focused() == Some(id) && visible {
+                    self.wm.minimize(id);
+                } else {
+                    self.wm.activate(id);
+                    self.log_focus(id);
+                }
+            }
+            TopHit::Status => {
+                self.logs.push("BARRA_ARRIBA estado".into());
+                self.launch(Launch::App(AppKind::Monitor), now_ms, clock);
+            }
+            TopHit::Clock => {
+                self.logs.push("BARRA_ARRIBA hora".into());
+                self.toggle_overlay(Overlay::Notices);
+            }
+        }
+    }
+
     fn toolbar_action(&mut self, i: usize, now_ms: u64, clock: Option<DateTime>) {
         if let Some(&l) = LAUNCHERS.get(i) {
             self.logs.push(format!("BARRA {}", shell::launcher_name(l)));
@@ -1913,7 +2155,7 @@ impl<D: BlockDevice> Desktop<D> {
             }
         }
         self.process_outbox(now_ms, clock);
-        self.damage_geometry(&before);
+        self.damage_geometry(&before, now_ms);
         let expired = self.toasts.len();
         self.toasts.retain(|t| t.2 > now_ms);
         if self.toasts.len() != expired {
@@ -1931,6 +2173,10 @@ impl<D: BlockDevice> Desktop<D> {
         let message_rect = hud::message_rect(w, h);
         let status_rect = shell::status_rect(w, h);
 
+        let top = self.topbar_mode();
+        if top != self.drawn_top_mode {
+            self.full_redraw = true;
+        }
         let mut dirty = core::mem::take(&mut self.damage);
         let full = self.full_redraw;
         if full {
@@ -1943,7 +2189,9 @@ impl<D: BlockDevice> Desktop<D> {
         }
         let sphere_moves = self.config.animations || self.sphere_settle > 0;
         self.sphere_settle = self.sphere_settle.saturating_sub(1);
-        if !fullscreen_overlay && !self.wm.covers(&sphere) && sphere_moves {
+        // (Durante una transición la esfera puede quedar a la vista aunque las ventanas la tapen.)
+        let covered = self.wm.covers(&sphere) && self.anims.is_empty();
+        if !fullscreen_overlay && !covered && sphere_moves {
             dirty.push(sphere);
         }
         let clock_key = clock.map(|t| (t.year, t.month, t.day, t.hour, t.minute));
@@ -1963,9 +2211,33 @@ impl<D: BlockDevice> Desktop<D> {
             dirty.push(status_rect);
         }
         let toolbar = (self.toolbar_items(), self.toolbar_hover);
-        if self.drawn_toolbar.as_ref() != Some(&toolbar) {
+        let top_key: Option<TopKey> = top.then(|| {
+            (
+                toolbar.0.clone(),
+                self.top_windows(),
+                self.top_hover,
+                shell::clock_text(clock, self.config.clock_24h),
+                self.stats_version,
+            )
+        });
+        if top {
+            if self.drawn_top != top_key {
+                dirty.push(shell::topbar_rect(w));
+            }
+        } else if self.drawn_toolbar.as_ref() != Some(&toolbar) {
             dirty.push(shell::toolbar_area());
         }
+        // Transiciones: toda su zona cambia en cada frame (y una vez más al terminar).
+        for a in &self.anims {
+            dirty.push(a.area());
+            // (Si la ventana se movió mientras tanto, también donde está ahora.)
+            if let Some(win) = self.wm.get(a.id)
+                && win.visible()
+            {
+                dirty.push(win.rect);
+            }
+        }
+        self.anims.retain(|a| !a.done(now_ms));
         let toasts: Vec<(String, bool)> = self.toasts.iter().map(|t| (t.0.clone(), t.1)).collect();
         if toasts != self.drawn_toasts {
             dirty.push(shell::toasts_rect(w, h));
@@ -1994,6 +2266,8 @@ impl<D: BlockDevice> Desktop<D> {
         self.drawn_message = Some(message_key);
         self.drawn_stats = self.stats_version;
         self.drawn_toolbar = Some(toolbar);
+        self.drawn_top = top_key;
+        self.drawn_top_mode = top;
         self.drawn_toasts = toasts;
 
         if core::mem::take(&mut self.screenshot) {
@@ -2160,9 +2434,14 @@ impl<D: BlockDevice> Desktop<D> {
                 .map(|fs| (fs.free_bytes(), fs.total_bytes()));
             shell::draw_status(frame, w, h, &self.stats, &self.history, disk);
         }
-        // Ventanas, de atrás hacia adelante.
+        // Ventanas, de atrás hacia adelante (las que están en transición, escaladas).
         for win in self.wm.windows().iter().filter(|w| w.visible()) {
-            if !dirty.touches(&win.rect) {
+            let anim = self
+                .anims
+                .iter()
+                .find(|a| a.id == win.id)
+                .map(|a| (a.area(), a.frame(now_ms)));
+            if !dirty.touches(&anim.map_or(win.rect, |a| a.0)) {
                 continue;
             }
             let Some(slot) = self.slots.iter_mut().find(|s| s.id == win.id) else {
@@ -2179,10 +2458,60 @@ impl<D: BlockDevice> Desktop<D> {
                 bpp,
                 format,
             ) {
-                frame.blit(&src, win.rect.x, win.rect.y);
+                match anim {
+                    Some((_, (r, alpha))) => frame.blit_scaled_alpha(&src, r, alpha),
+                    None => frame.blit(&src, win.rect.x, win.rect.y),
+                }
             }
         }
-        shell::draw_toolbar(frame, toolbar, self.toolbar_hover);
+        // Las que se cierran o se minimizan, encima de todo.
+        for a in &mut self.anims {
+            if !matches!(a.kind, AnimKind::Close | AnimKind::Hide) || !dirty.touches(&a.area()) {
+                continue;
+            }
+            let (r, alpha) = a.frame(now_ms);
+            let (buf, size) = if a.kind == AnimKind::Close {
+                (&mut a.buf, a.size)
+            } else {
+                match self.slots.iter_mut().find(|s| s.id == a.id) {
+                    Some(s) => (&mut s.buf, s.size),
+                    None => continue,
+                }
+            };
+            if size.0 <= 0 || buf.len() < (size.0 * size.1) as usize * bpp {
+                continue;
+            }
+            if let Some(src) = Canvas::new(
+                buf,
+                size.0 as usize,
+                size.1 as usize,
+                size.0 as usize,
+                bpp,
+                format,
+            ) {
+                frame.blit_scaled_alpha(&src, r, alpha);
+            }
+        }
+        if self.topbar_mode() {
+            let windows = self.top_windows();
+            let clock_s = shell::clock_text(clock, self.config.clock_24h);
+            let disk = self
+                .fs
+                .as_ref()
+                .map(|fs| (fs.free_bytes(), fs.total_bytes()));
+            let bar = shell::TopBar {
+                launchers: toolbar,
+                windows: &windows,
+                hover: self.top_hover,
+                clock: &clock_s,
+                stats: &self.stats,
+                history: &self.history,
+                disk,
+            };
+            shell::draw_topbar(frame, w, &bar);
+        } else {
+            shell::draw_toolbar(frame, toolbar, self.toolbar_hover);
+        }
         if !toasts.is_empty() {
             shell::draw_toasts(frame, w, h, toasts);
         }
