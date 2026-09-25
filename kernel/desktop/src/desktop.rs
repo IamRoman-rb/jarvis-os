@@ -30,7 +30,7 @@ use jarvis_gfx::clock::DateTime;
 use jarvis_gfx::hud;
 use jarvis_gfx::sphere::ParticleCloud;
 use jarvis_gfx::vfont::VectorText;
-use jarvis_gfx::{Canvas, MAX_CLIP, PixelFormat, Rect};
+use jarvis_gfx::{Canvas, Color, MAX_CLIP, PixelFormat, Rect};
 
 use crate::apps::{
     App, Click, Ctx, Pointer, PointerKind, SysView, TaskInfo, brave::Brave, browser::Browser,
@@ -135,6 +135,8 @@ enum Overlay {
         sel: usize,
     },
     Lock,
+    /// Suspendido: pantalla negra, nada se redibuja; una tecla o el mouse despiertan.
+    Sleep,
     /// Win+X y Alt+Espacio.
     Menu(Menu),
     /// Win+A: configuración rápida.
@@ -280,6 +282,8 @@ pub struct Desktop<D: BlockDevice> {
     cursor_drawn: Option<Rect>,
     left_down: bool,
     right_down: bool,
+    /// "Cerrar sesión": la pantalla de bloqueo pasa a ser la de iniciar sesión.
+    session_closed: bool,
     /// Ventana que recibe los movimientos del mouse hasta que se suelte el botón (se apretó
     /// sobre el contenido de una app que los pide).
     pointer_capture: Option<WinId>,
@@ -401,6 +405,7 @@ impl<D: BlockDevice> Desktop<D> {
             cursor_drawn: None,
             left_down: false,
             right_down: false,
+            session_closed: false,
             pointer_capture: None,
             drag: None,
             last_click: None,
@@ -530,6 +535,16 @@ impl<D: BlockDevice> Desktop<D> {
         matches!(self.overlay, Overlay::Lock)
     }
 
+    /// Suspendido: el kernel puede dormir la CPU sin dibujar.
+    pub fn is_sleeping(&self) -> bool {
+        matches!(self.overlay, Overlay::Sleep)
+    }
+
+    /// Se cerró la sesión (la pantalla de bloqueo es la de "iniciar sesión").
+    pub fn session_closed(&self) -> bool {
+        self.session_closed
+    }
+
     /// Nombre del menú o panel abierto encima de todo ("" si no hay).
     pub fn overlay_name(&self) -> &'static str {
         match &self.overlay {
@@ -538,7 +553,9 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Switcher { .. } => "alt-tab",
             Overlay::TaskView { .. } => "tareas",
             Overlay::Power { .. } => "apagado",
+            Overlay::Lock if self.session_closed => "sesion",
             Overlay::Lock => "bloqueo",
+            Overlay::Sleep => "suspendido",
             Overlay::Menu(m) if m.title.starts_with("VENTANA") => "ventana",
             Overlay::Menu(_) => "enlaces",
             Overlay::Quick { .. } => "rapida",
@@ -887,7 +904,7 @@ impl<D: BlockDevice> Desktop<D> {
         // (Menús y paneles chicos no: se dibujan encima de lo que hay.)
         matches!(
             self.overlay,
-            Overlay::TaskView { .. } | Overlay::Power { .. } | Overlay::Lock
+            Overlay::TaskView { .. } | Overlay::Power { .. } | Overlay::Lock | Overlay::Sleep
         )
     }
 
@@ -957,6 +974,10 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     fn on_key(&mut self, key: Key, now_ms: u64, clock: Option<DateTime>) {
+        if self.is_sleeping() {
+            self.wake();
+            return;
+        }
         if matches!(self.overlay, Overlay::Lock) {
             self.lock_key(key);
             return;
@@ -1029,8 +1050,61 @@ impl<D: BlockDevice> Desktop<D> {
     fn unlock(&mut self) {
         self.pin_input.clear();
         self.pin_wrong = false;
-        self.logs.push("ESCRITORIO_DESBLOQUEADO".into());
+        if core::mem::take(&mut self.session_closed) {
+            let user = self.config.user.clone();
+            self.logs.push(format!("SESION_INICIADA {user}"));
+        } else {
+            self.logs.push("ESCRITORIO_DESBLOQUEADO".into());
+        }
         self.set_overlay(Overlay::None);
+    }
+
+    /// Cerrar sesión: se cierran todas las apps (el Editor puede frenarlo si hay cambios sin
+    /// guardar), se guarda la configuración y queda la pantalla de inicio de sesión.
+    fn logout(&mut self, now_ms: u64, clock: Option<DateTime>) {
+        let ids: Vec<WinId> = self.slots.iter().map(|s| s.id).collect();
+        for id in ids {
+            self.close_window(id, now_ms, clock);
+        }
+        if !self.slots.is_empty() {
+            // Alguna app no se dejó cerrar (el Editor pregunta si guardar).
+            self.notify(
+                tr("No se cerró la sesión: hay cambios sin guardar."),
+                true,
+                now_ms,
+            );
+            self.logs.push("SESION_NO_CERRADA".into());
+            return;
+        }
+        self.anims.clear();
+        // (La configuración ya está guardada: se escribe en cada cambio.)
+        self.requests.tone = Some(0);
+        self.session_closed = true;
+        self.pin_input.clear();
+        self.pin_wrong = false;
+        self.logs
+            .push(format!("SESION_CERRADA {}", self.config.user));
+        self.set_overlay(Overlay::Lock);
+    }
+
+    /// Suspender: la pantalla queda negra y no se dibuja nada hasta que llegue una tecla o el
+    /// mouse. (El S3 de ACPI, que apaga casi toda la máquina, llega con el hardware real.)
+    fn suspend(&mut self) {
+        self.requests.tone = Some(0);
+        self.logs.push("SUSPENDIDO".into());
+        self.set_overlay(Overlay::Sleep);
+    }
+
+    fn wake(&mut self) {
+        self.logs.push("DESPIERTO".into());
+        // Con PIN (o si la sesión estaba cerrada) hay que volver a entrar.
+        if self.session_closed || !self.config.pin.is_empty() {
+            self.pin_input.clear();
+            self.pin_wrong = false;
+            self.set_overlay(Overlay::Lock);
+        } else {
+            self.set_overlay(Overlay::None);
+        }
     }
 
     fn lock(&mut self) {
@@ -1221,6 +1295,8 @@ impl<D: BlockDevice> Desktop<D> {
             Action::PowerMenu => self.set_overlay(Overlay::Power { sel: 0 }),
             Action::ShowDesktop => self.wm.toggle_desktop(),
             Action::Lock => self.lock(),
+            Action::Logout => self.logout(now_ms, clock),
+            Action::Sleep => self.suspend(),
             Action::Search => self.toggle_start(),
             Action::NewDesktop => {
                 self.wm.new_desktop();
@@ -1254,6 +1330,13 @@ impl<D: BlockDevice> Desktop<D> {
                 }
             }
         }
+    }
+
+    /// Aplica y guarda una configuración nueva (lo mismo que hace la app Configuración; lo
+    /// usan los tests).
+    pub fn set_config(&mut self, cfg: Config) {
+        let now_ms = self.last_now;
+        self.apply_config(cfg, now_ms);
     }
 
     /// Aplica y guarda una configuración nueva.
@@ -1311,7 +1394,7 @@ impl<D: BlockDevice> Desktop<D> {
     /// Teclas para el menú o panel abierto. `true` si se usó.
     fn overlay_key(&mut self, key: Key, now_ms: u64, clock: Option<DateTime>) -> bool {
         match &mut self.overlay {
-            Overlay::None | Overlay::Lock => false,
+            Overlay::None | Overlay::Lock | Overlay::Sleep => false,
             Overlay::Menu(menu) => {
                 let n = menu.items.len();
                 match key {
@@ -1450,7 +1533,7 @@ impl<D: BlockDevice> Desktop<D> {
                         self.overlay_dirty = true;
                     }
                     Key::Right | Key::Tab => {
-                        *sel = (*sel + 1) % 3;
+                        *sel = (*sel + 1) % shell::POWER_CHOICES;
                         self.overlay_dirty = true;
                     }
                     Key::Enter => {
@@ -1466,9 +1549,12 @@ impl<D: BlockDevice> Desktop<D> {
 
     fn power_choice(&mut self, choice: usize) {
         self.set_overlay(Overlay::None);
+        let (now_ms, clock) = (self.last_now, self.last_clock);
         match choice {
             0 => self.power(Power::Shutdown),
             1 => self.power(Power::Reboot),
+            2 => self.suspend(),
+            3 => self.logout(now_ms, clock),
             _ => {}
         }
     }
@@ -1485,6 +1571,8 @@ impl<D: BlockDevice> Desktop<D> {
             StartItem::App(k) => self.launch(Launch::App(k), now_ms, clock),
             StartItem::Web(text) => self.launch(Launch::Browse(text), now_ms, clock),
             StartItem::Lock => self.set_overlay(Overlay::Lock),
+            StartItem::Logout => self.logout(now_ms, clock),
+            StartItem::Sleep => self.suspend(),
             StartItem::Restart => self.power(Power::Reboot),
             StartItem::Shutdown => self.power(Power::Shutdown),
         }
@@ -1754,6 +1842,14 @@ impl<D: BlockDevice> Desktop<D> {
     // --- mouse --------------------------------------------------------------------------------
 
     fn on_mouse(&mut self, p: MousePacket, now_ms: u64, clock: Option<DateTime>) {
+        if self.is_sleeping() {
+            if p.dx != 0 || p.dy != 0 || p.left || p.right || p.wheel != 0 {
+                self.left_down = p.left;
+                self.right_down = p.right;
+                self.wake();
+            }
+            return;
+        }
         let f = self.config.mouse_factor();
         self.cursor.0 = (self.cursor.0 + p.dx * f / 4).clamp(0, self.width as i32 - 1);
         self.cursor.1 = (self.cursor.1 + p.dy * f / 4).clamp(0, self.height as i32 - 1);
@@ -1908,6 +2004,8 @@ impl<D: BlockDevice> Desktop<D> {
 
         // Menús y paneles encima de todo.
         match &self.overlay {
+            // (Dormido no llega acá: el mouse despierta en on_mouse.)
+            Overlay::Sleep => return,
             Overlay::Lock => {
                 if self.config.pin.is_empty() {
                     self.unlock();
@@ -2190,6 +2288,10 @@ impl<D: BlockDevice> Desktop<D> {
                 self.logs.push("BARRA_ARRIBA hora".into());
                 self.toggle_overlay(Overlay::Notices);
             }
+            TopHit::Power => {
+                self.logs.push("BARRA_ARRIBA energia".into());
+                self.set_overlay(Overlay::Power { sel: 0 });
+            }
         }
     }
 
@@ -2250,6 +2352,14 @@ impl<D: BlockDevice> Desktop<D> {
         self.format = Some((frame.format(), frame.bytes_per_pixel()));
         self.last_now = now_ms;
         self.last_clock = clock;
+        if self.is_sleeping() {
+            let mut dirty = Dirty::default();
+            if core::mem::take(&mut self.full_redraw) | core::mem::take(&mut self.overlay_dirty) {
+                frame.fill(Color::BLACK);
+                dirty.push(Rect::new(0, 0, self.width as i32, self.height as i32));
+            }
+            return dirty;
+        }
         if self.bg_dirty {
             self.draw_background(bg);
             self.full_redraw = true;
@@ -2516,9 +2626,14 @@ impl<D: BlockDevice> Desktop<D> {
             return;
         };
         match &self.overlay {
+            Overlay::Sleep => {
+                frame.fill(Color::BLACK);
+                return;
+            }
             Overlay::Lock => {
                 let pin =
                     (!self.config.pin.is_empty()).then_some((self.pin_input.len(), self.pin_wrong));
+                let user = self.session_closed.then_some(self.config.user.as_str());
                 shell::draw_lock(
                     frame,
                     w,
@@ -2527,6 +2642,7 @@ impl<D: BlockDevice> Desktop<D> {
                     &mut self.lock_font,
                     self.config.clock_24h,
                     pin,
+                    user,
                 );
                 return;
             }

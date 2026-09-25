@@ -16,6 +16,8 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
 | ![Wikipedia](img/k5-wikipedia.png) | ![YouTube](img/k5-youtube.png) |
 | **snap y ufw en la terminal** | **Firewall en la Configuración** |
 | ![snap y ufw](img/k5-snap-ufw.png) | ![Firewall](img/k5-firewall.png) |
+| **Cerrar sesión** | **Monitor con temperatura** |
+| ![Sesión](img/k6-sesion.png) | ![Monitor](img/k6-monitor.png) |
 | **Escritorio** | **Terminal y `apt`** |
 | ![JARVIS](img/k4-escritorio.png) | ![Terminal](img/k4-terminal.png) |
 
@@ -23,6 +25,12 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   anfitrión sin ventana y JARVIS-OS lo muestra en una ventana propia, con pestañas, barra de
   dirección, atrás/adelante, mouse, rueda y teclado. Se instala con `cargo xtask brave
   --instalar`. El navegador propio de K3–K5 queda como "Navegador simple".
+- **Energía**: apagar, reiniciar, **suspender** (pantalla negra, nada se dibuja; una tecla o el
+  mouse despiertan, con PIN si hay) y **cerrar sesión** (cierra las apps; si el Editor tiene
+  cambios sin guardar, no sigue). Desde el menú Inicio, Win+X, Alt+F4 en el escritorio o el botón
+  de la punta derecha de la barra de arriba.
+- **Temperatura** de la CPU en el Monitor, la barra de arriba y el panel de estado, leída del
+  sensor térmico de Intel. En QEMU dice "sin sensor": las máquinas virtuales no lo emulan.
 - **JARVIS**: la esfera gira en tiempo real y late cuando JARVIS habla. El reloj usa una fuente
   vectorial propia (nítida a cualquier tamaño), en 24 o 12 horas.
 - **Ventanas como en Windows**: barra de título con minimizar, maximizar y cerrar; arrastrar para
@@ -319,6 +327,14 @@ firmware UEFI (OVMF en QEMU)
   que dura necesita una cola de salida con tope (si el otro lado no lee, es un error y no se come
   la memoria) y un cierre en dos pasos: en smoltcp, sacar el socket enseguida después de
   `close()` hacía que el FIN no saliera nunca.
+- **Leer un sensor sin romper nada**: la temperatura está en un registro específico del modelo
+  (MSR). Leer uno que no existe es una excepción (#GP) que, sin manejador, cuelga el kernel. Por
+  eso se pregunta antes con `cpuid`: fabricante, sensor presente y, sobre todo, si hay un
+  hipervisor (QEMU a veces copia el bit de la CPU real pero no emula el registro).
+- **Suspender sin ACPI**: el S3 de verdad apaga la CPU y la memoria queda en autorrefresco; volver
+  necesita código que arranque en modo real y un intérprete de AML para saber qué escribir. Por
+  ahora "suspender" es no dibujar nada: el bucle ya duerme en `hlt`, así que la CPU queda casi
+  ociosa, y el primer evento de entrada despierta.
 - **Procesos huérfanos**: si `xtask` se corta con Ctrl+C, su Brave sin ventana queda vivo y con el
   perfil tomado, y el próximo no arranca. Al empezar, el puente cierra solo los Brave que usan
   **su** perfil (nunca el de Roman).

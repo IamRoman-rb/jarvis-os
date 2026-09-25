@@ -177,6 +177,8 @@ pub enum TopHit {
     /// Los gráficos de estado o la IP (abre el Monitor).
     Status,
     Clock,
+    /// El botón de energía.
+    Power,
 }
 
 pub fn topbar_rect(w: usize) -> Rect {
@@ -189,19 +191,42 @@ fn top_launcher_x(i: usize) -> i32 {
 
 /// Ancho de cada gráfico de estado: con el valor al lado si la pantalla es ancha.
 fn top_stat_w(w: usize) -> i32 {
-    if w >= 1200 { 124 } else { 84 }
+    if w >= 1200 { 112 } else { 76 }
+}
+
+/// Cuántos gráficos de estado hay en la barra de arriba.
+const TOP_STATS: i32 = 5;
+
+/// "45°C", o "--" sin sensor.
+pub fn temp_text(t: Option<u8>) -> String {
+    match t {
+        Some(c) => format!("{c}\u{b0}C"),
+        None => String::from("--"),
+    }
+}
+
+/// El botón de energía, en la punta derecha.
+const TOP_POWER: i32 = 32;
+
+fn top_power_rect(w: usize) -> Rect {
+    Rect::new(w as i32 - TOP_POWER, 0, TOP_POWER, TOPBAR_H)
 }
 
 fn top_clock_rect(w: usize) -> Rect {
-    Rect::new(w as i32 - TOP_CLOCK, 0, TOP_CLOCK, TOPBAR_H)
+    Rect::new(w as i32 - TOP_POWER - TOP_CLOCK, 0, TOP_CLOCK, TOPBAR_H)
 }
 
 fn top_ip_rect(w: usize) -> Rect {
-    Rect::new(w as i32 - TOP_CLOCK - TOP_IP, 0, TOP_IP, TOPBAR_H)
+    Rect::new(
+        w as i32 - TOP_POWER - TOP_CLOCK - TOP_IP,
+        0,
+        TOP_IP,
+        TOPBAR_H,
+    )
 }
 
 fn top_stats_rect(w: usize) -> Rect {
-    let sw = top_stat_w(w) * 4;
+    let sw = top_stat_w(w) * TOP_STATS;
     Rect::new(top_ip_rect(w).x - sw, 0, sw, TOPBAR_H)
 }
 
@@ -236,6 +261,9 @@ pub fn topbar_hit(w: usize, windows: usize, x: i32, y: i32) -> Option<TopHit> {
     }
     if top_clock_rect(w).contains(x, y) {
         return Some(TopHit::Clock);
+    }
+    if top_power_rect(w).contains(x, y) {
+        return Some(TopHit::Power);
     }
     None
 }
@@ -355,7 +383,7 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
     let disk_max = h.disk.max().max(64 * 1024);
     let net_max = h.rx.max().max(h.tx.max()).max(1024);
     let rx = h.rx.last().unwrap_or(0) + h.tx.last().unwrap_or(0);
-    let stats: [(&str, &Series<HISTORY>, u32, Color, String); 4] = [
+    let stats: [(&str, &Series<HISTORY>, u32, Color, String); TOP_STATS as usize] = [
         (
             "CPU",
             &h.cpu,
@@ -378,13 +406,20 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
             format!("{disk_pct}%"),
         ),
         (tr("RED"), &h.rx, net_max, theme::CYAN, short_rate(rx)),
+        (
+            "TEMP",
+            &h.temp,
+            100,
+            theme::CRIMSON,
+            temp_text(bar_.stats.temp_c),
+        ),
     ];
     for (i, (name, series, max, color, val)) in stats.iter().enumerate() {
         let x = sr.x + i as i32 * sw;
         line(c, x, 6, x, r.h - 7, theme::PANEL_RIM);
         text::draw(c, x + 8, cy - 8, name, &key);
         let gx = x + 8 + text::width(name, &key) + 6;
-        let gw = if wide { 40 } else { (x + sw - 6 - gx).max(12) };
+        let gw = if wide { 30 } else { (x + sw - 6 - gx).max(12) };
         sparkline(c, Rect::new(gx, 6, gw, r.h - 13), series, *max, *color);
         if wide {
             text::draw_right(c, x + sw - 6, cy - 8, val, &value);
@@ -414,6 +449,16 @@ pub fn draw_topbar(c: &mut Canvas<'_>, w: usize, bar_: &TopBar<'_>) {
     let st = crate::widgets::bold(color);
     let tw = text::width(bar_.clock, &st);
     text::draw(c, cr.x + (cr.w - tw) / 2, cy - 8, bar_.clock, &st);
+
+    // Energía: suspender, cerrar sesión, reiniciar, apagar.
+    let pr = top_power_rect(w);
+    line(c, pr.x, 6, pr.x, r.h - 7, theme::PANEL_RIM);
+    let color = if bar_.hover == Some(TopHit::Power) {
+        theme::CRIMSON
+    } else {
+        theme::TEXT_DIM
+    };
+    icon(c, Icon::Power, pr.x + pr.w / 2, cy - 1, color);
 }
 
 /// "23:05", o "11:05 PM" con el reloj de 12 horas.
@@ -436,7 +481,7 @@ pub fn clock_text(clock: Option<DateTime>, h24: bool) -> String {
 
 const STATUS_W: i32 = 320;
 const STATUS_ROW: i32 = 26;
-const STATUS_ROWS: i32 = 6;
+const STATUS_ROWS: i32 = 7;
 
 fn status_panel_rect(_w: usize, h: usize) -> Rect {
     let ph = 44 + STATUS_ROWS * STATUS_ROW + 8;
@@ -575,12 +620,29 @@ pub fn draw_status(
     };
     text::draw_right(c, right, row(3), &net, &value);
 
-    text::draw(c, p.x + 12, row(4), tr("RENDIMIENTO"), &key);
-    let perf = format!("{} FPS · {} ms", st.fps, st.frame_ms);
-    text::draw_right(c, right, row(4), &perf, &value);
+    text::draw(c, p.x + 12, row(4), tr("TEMPERATURA"), &key);
+    match st.temp_c {
+        Some(t) => {
+            sparkline(
+                c,
+                Rect::new(gx, row(4), gw, 16),
+                &hist.temp,
+                100,
+                theme::CRIMSON,
+            );
+            text::draw_right(c, right, row(4), &temp_text(Some(t)), &value);
+        }
+        None => {
+            text::draw_right(c, right, row(4), tr("sin sensor"), &key);
+        }
+    }
 
-    text::draw(c, p.x + 12, row(5), tr("CEREBRO"), &key);
-    text::draw_right(c, right, row(5), tr("sin conectar"), &light(theme::AMBER));
+    text::draw(c, p.x + 12, row(5), tr("RENDIMIENTO"), &key);
+    let perf = format!("{} FPS · {} ms", st.fps, st.frame_ms);
+    text::draw_right(c, right, row(5), &perf, &value);
+
+    text::draw(c, p.x + 12, row(6), tr("CEREBRO"), &key);
+    text::draw_right(c, right, row(6), tr("sin conectar"), &light(theme::AMBER));
 
     // Píldora "Control de misión" (abre la vista de tareas, como Win+Tab).
     let pill = pill_rect(w, h);
@@ -604,6 +666,8 @@ pub enum StartItem {
     /// Abrir la dirección o buscar el texto en la web.
     Web(String),
     Lock,
+    Logout,
+    Sleep,
     Restart,
     Shutdown,
 }
@@ -662,7 +726,7 @@ impl StartMenu {
 
     pub fn rect(_w: usize, h: usize) -> Rect {
         let top = toolbar_rect(1).y + 46;
-        Rect::new(MARGIN, top, 380, (h as i32 - top - 40).min(470))
+        Rect::new(MARGIN, top, 380, (h as i32 - top - 40).min(520))
     }
 
     fn row(menu: Rect, i: usize) -> Rect {
@@ -674,14 +738,20 @@ impl StartMenu {
         )
     }
 
-    fn power_buttons(menu: Rect) -> [(StartItem, &'static str, Rect); 3] {
-        let y = menu.y + menu.h - 48;
+    /// Dos filas: bloquear, cerrar sesión y suspender; reiniciar y apagar.
+    fn power_buttons(menu: Rect) -> [(StartItem, &'static str, Rect); 5] {
+        let top = menu.y + menu.h - 92;
+        let bottom = menu.y + menu.h - 48;
         let bw = (menu.w - 40) / 3;
-        let at = |i: i32| Rect::new(menu.x + 10 + i * (bw + 10), y, bw, 36);
+        let at = |i: i32| Rect::new(menu.x + 10 + i * (bw + 10), top, bw, 36);
+        let half = (menu.w - 30) / 2;
+        let half_at = |i: i32| Rect::new(menu.x + 10 + i * (half + 10), bottom, half, 36);
         [
             (StartItem::Lock, tr("BLOQUEAR"), at(0)),
-            (StartItem::Restart, tr("REINICIAR"), at(1)),
-            (StartItem::Shutdown, tr("APAGAR"), at(2)),
+            (StartItem::Logout, tr("CERRAR SESIÓN"), at(1)),
+            (StartItem::Sleep, tr("SUSPENDER"), at(2)),
+            (StartItem::Restart, tr("REINICIAR"), half_at(0)),
+            (StartItem::Shutdown, tr("APAGAR"), half_at(1)),
         ]
     }
 
@@ -884,6 +954,7 @@ pub fn task_card(w: usize, h: usize, n: usize, i: usize) -> Rect {
 
 // --- bloqueo y apagado ------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw_lock(
     c: &mut Canvas<'_>,
     w: usize,
@@ -893,6 +964,8 @@ pub fn draw_lock(
     h24: bool,
     // Con PIN: (cuántos dígitos se escribieron, el último estuvo mal).
     pin: Option<(usize, bool)>,
+    // Después de "Cerrar sesión": el usuario que puede entrar.
+    user: Option<&str>,
 ) {
     use core::fmt::Write;
     let (w, h) = (w as i32, h as i32);
@@ -914,14 +987,31 @@ pub fn draw_lock(
     let st = label(theme::CYAN.scale(200));
     let dw = text::width(date.as_str(), &st);
     text::draw(c, (w - dw) / 2, h / 2 + 10, date.as_str(), &st);
-    let hint = match pin {
-        None => tr("JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC"),
-        Some(_) => tr("JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER"),
+    let hint = match (pin, user) {
+        (None, None) => tr("JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC"),
+        (Some(_), None) => tr("JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER"),
+        (None, Some(_)) => tr("SESIÓN CERRADA · TOCÁ UNA TECLA O HACÉ CLIC PARA ENTRAR"),
+        (Some(_), Some(_)) => tr("SESIÓN CERRADA · ESCRIBÍ TU PIN Y APRETÁ ENTER"),
+    };
+    // El usuario, con un círculo con su inicial (como en la pantalla de inicio de Windows).
+    let pin_y = if let Some(name) = user {
+        let (cx, cy) = (w / 2, h / 2 + 70);
+        circle(c, cx, cy, 26, theme::VECTOR_BLUE, true);
+        circle(c, cx, cy, 26, theme::CYAN, false);
+        let initial: String = name.chars().take(1).flat_map(char::to_uppercase).collect();
+        let st = crate::widgets::bold(Color::WHITE);
+        let iw = text::width(&initial, &st);
+        text::draw(c, cx - iw / 2, cy - 9, &initial, &st);
+        let st = s16(theme::TEXT);
+        text::draw(c, cx - text::width(name, &st) / 2, cy + 36, name, &st);
+        h / 2 + 140
+    } else {
+        h / 2 + 60
     };
     let st = label(theme::TEXT_DIM);
     text::draw(c, (w - text::width(hint, &st)) / 2, h - 90, hint, &st);
     if let Some((n, wrong)) = pin {
-        let f = Rect::new((w - 260) / 2, h / 2 + 60, 260, 44);
+        let f = Rect::new((w - 260) / 2, pin_y, 260, 44);
         rounded_rect(c, f.x, f.y, f.w, f.h, 8, FIELD_BG, 255);
         let rim = if wrong { theme::AMBER } else { theme::CYAN };
         rounded_outline(c, f.x, f.y, f.w, f.h, 8, rim);
@@ -941,19 +1031,26 @@ pub fn draw_lock(
 }
 
 pub fn power_rect(w: usize, h: usize) -> Rect {
-    Rect::new((w as i32 - 480) / 2, (h as i32 - 200) / 2, 480, 200)
+    Rect::new((w as i32 - 480) / 2, (h as i32 - 250) / 2, 480, 250)
 }
 
-/// Botones del diálogo de apagado: (apagar, reiniciar, cancelar).
-pub fn power_buttons(w: usize, h: usize) -> [Rect; 3] {
+/// Opciones del diálogo de apagado, en el orden de los botones.
+pub const POWER_CHOICES: usize = 5;
+
+/// Botones del diálogo de apagado: apagar, reiniciar, suspender (arriba); cerrar sesión y
+/// cancelar (abajo).
+pub fn power_buttons(w: usize, h: usize) -> [Rect; POWER_CHOICES] {
     let d = power_rect(w, h);
     let bw = 136;
-    let y = d.y + d.h - 56;
-    [
-        Rect::new(d.x + 20, y, bw, 36),
-        Rect::new(d.x + 20 + bw + 16, y, bw, 36),
-        Rect::new(d.x + d.w - 20 - bw, y, bw, 36),
-    ]
+    let at = |col: i32, row: i32| {
+        Rect::new(
+            d.x + 20 + col * (bw + 16),
+            d.y + d.h - 100 + row * 48,
+            bw,
+            36,
+        )
+    };
+    [at(0, 0), at(1, 0), at(2, 0), at(0, 1), at(2, 1)]
 }
 
 pub fn draw_power(c: &mut Canvas<'_>, w: usize, h: usize, sel: usize) {
@@ -976,11 +1073,18 @@ pub fn draw_power(c: &mut Canvas<'_>, w: usize, h: usize, sel: usize) {
         tr("¿Qué querés que haga la computadora?"),
         &s16(theme::TEXT),
     );
-    let labels = [tr("APAGAR"), tr("REINICIAR"), tr("CANCELAR")];
+    let labels = [
+        tr("APAGAR"),
+        tr("REINICIAR"),
+        tr("SUSPENDER"),
+        tr("CERRAR SESIÓN"),
+        tr("CANCELAR"),
+    ];
     for (i, r) in power_buttons(w, h).into_iter().enumerate() {
         let col = match i {
             0 => theme::CRIMSON,
             1 => theme::AMBER,
+            2 | 3 => theme::CYAN,
             _ => theme::TEXT_DIM,
         };
         button(c, r, labels[i], col, if i == sel { 90 } else { 20 });
