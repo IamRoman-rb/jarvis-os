@@ -14,6 +14,7 @@ pub mod chrome;
 pub mod config;
 pub mod cursor;
 pub mod desktop;
+pub mod display;
 pub mod files;
 pub mod files_view;
 pub mod firewall;

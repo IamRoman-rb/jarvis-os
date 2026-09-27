@@ -20,10 +20,12 @@ extern crate alloc;
 
 mod allocator;
 mod cpu;
+mod display;
 mod gdt;
 mod interrupts;
 mod keyboard;
 mod mouse;
+mod paging;
 mod pci;
 mod pit;
 mod power;
@@ -33,9 +35,10 @@ mod serial;
 mod speaker;
 mod time;
 mod virtio_blk;
+mod virtio_gpu;
 mod virtio_net;
 
-use alloc::vec;
+use alloc::vec::Vec;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
@@ -112,6 +115,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ram / (1024 * 1024),
         heap / (1024 * 1024)
     );
+    paging::init(phys_offset);
     let cpu_name = cpu::brand();
     serial_println!("CPU: {}", cpu_name);
     let thermal = cpu::Thermal::detect();
@@ -147,6 +151,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         serial_println!("red: no hay placa de red virtio");
     }
 
+    // Placa de video con varias salidas (virtio-gpu). Sin ella, la pantalla del firmware.
+    let mut gpu = virtio_gpu::VirtioGpu::init(phys_offset);
+    let mut outputs: Vec<(u32, u32)> = Vec::new();
+    if let Some(g) = gpu.as_mut() {
+        let found = g.outputs();
+        serial_println!("PANTALLAS {}", found.len());
+        for (i, o) in found.iter().enumerate() {
+            serial_println!(
+                "PANTALLA {} {}x{}{}",
+                i + 1,
+                o.width,
+                o.height,
+                if o.enabled { "" } else { " (apagada)" }
+            );
+        }
+        outputs = found.iter().map(|o| (o.width, o.height)).collect();
+    }
+
     let mouse = mouse::init();
     serial_println!(
         "mouse: {}",
@@ -174,26 +196,40 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         info.pixel_format,
         info.bytes_per_pixel
     );
-    let canvas = |buf: &'static mut [u8]| {
-        Canvas::new(
-            buf,
-            info.width,
-            info.height,
-            info.stride,
-            info.bytes_per_pixel,
-            format,
-        )
-        .expect("geometría de framebuffer inválida")
-    };
-    let screen = canvas(fb.buffer_mut());
+    let screen = Canvas::new(
+        fb.buffer_mut(),
+        info.width,
+        info.height,
+        info.stride,
+        info.bytes_per_pixel,
+        format,
+    )
+    .expect("geometría de framebuffer inválida");
+    *SCREEN.lock() = Some(screen);
     // Doble buffer en el heap: `bg` con la capa estática y `frame` donde se compone cada frame.
-    // `leak` los vuelve `'static`: viven mientras corra el kernel.
-    let len = info.stride * info.height * info.bytes_per_pixel;
-    let mut bg = canvas(vec![0u8; len].leak());
-    let mut frame = canvas(vec![0u8; len].leak());
+    // Con placa de video, reservados para el escritorio más grande posible (dos monitores).
+    let firmware = display::Firmware {
+        width: info.width,
+        height: info.height,
+        stride: info.stride,
+        bpp: info.bytes_per_pixel,
+        format,
+    };
+    let capacity = jarvis_desktop::display::max_pixels(&outputs);
+    let mut surfaces = display::Surfaces::new(&firmware, gpu, capacity);
 
     let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
-    desktop.draw_background(&mut bg);
+    if surfaces.has_gpu() {
+        desktop.set_outputs(outputs);
+        if let Some(l) = desktop.take_display()
+            && !surfaces.apply(&l)
+        {
+            serial_println!("pantallas: sigo con la pantalla del firmware");
+        }
+    }
+    if let Some(bg) = surfaces.bg.as_mut() {
+        desktop.draw_background(bg);
+    }
     serial_println!(
         "configuración: zona UTC{:+}, teclado {}",
         desktop.utc_offset(),
@@ -203,7 +239,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "EE. UU."
         }
     );
-    *SCREEN.lock() = Some(screen);
 
     let base = SystemStats {
         cpu_name,
@@ -219,8 +254,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     x86_64::instructions::interrupts::enable();
     run(
         &mut desktop,
-        &mut frame,
-        &mut bg,
+        &mut surfaces,
         &mut net,
         base,
         decoder,
@@ -235,8 +269,7 @@ const SLOW_FRAME_MS: u64 = 300;
 /// escritorio, dibujar y hacer lo que el escritorio pidió.
 fn run(
     desktop: &mut Desktop<Disk>,
-    frame: &mut Canvas<'static>,
-    bg: &mut Canvas<'static>,
+    surfaces: &mut display::Surfaces,
     net: &mut Option<Net<VirtioNet>>,
     mut stats: SystemStats,
     mut mouse_decoder: MouseDecoder,
@@ -299,10 +332,17 @@ fn run(
         let requests = virtio_blk::REQUESTS.load(Ordering::Relaxed);
         let write_requests = virtio_blk::WRITE_REQUESTS.load(Ordering::Relaxed);
         let waited = virtio_blk::WAIT_TSC.load(Ordering::Relaxed);
+        let (Some(frame), Some(bg)) = (surfaces.frame.as_mut(), surfaces.bg.as_mut()) else {
+            continue;
+        };
         let dirty = desktop.render(frame, bg, now, clock);
         let drawn = time::millis();
-        if let Some(screen) = SCREEN.lock().as_mut() {
-            desktop.present(screen, frame, &dirty);
+        let touched = SCREEN
+            .lock()
+            .as_mut()
+            .and_then(|screen| desktop.present(screen, frame, &dirty));
+        if let Some(r) = touched {
+            surfaces.flush(r);
         }
         let took = time::millis() - start;
         render_ms += took;
@@ -345,6 +385,16 @@ fn run(
                     }
                 }
             }
+        }
+        // Otro reparto de los monitores (Win+P, Configuración → Pantallas).
+        if let Some(l) = requests.display
+            && surfaces.apply(&l)
+        {
+            // El escritorio ya dibujó este cuadro con las superficies viejas: todo de nuevo.
+            if let Some(bg) = surfaces.bg.as_mut() {
+                desktop.draw_background(bg);
+            }
+            desktop.invalidate();
         }
         if let Some(hz) = requests.tone {
             speaker::tone(hz);

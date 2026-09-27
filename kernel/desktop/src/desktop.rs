@@ -142,6 +142,10 @@ enum Overlay {
     Layouts {
         sel: usize,
     },
+    /// Win+P: qué hacer con los monitores (índice en `display::Mode::ALL`).
+    Project {
+        sel: usize,
+    },
     /// Win+X y Alt+Espacio.
     Menu(Menu),
     /// Win+A: configuración rápida.
@@ -272,6 +276,9 @@ pub struct Requests {
     /// Frecuencia del parlante (0 = silencio), si cambió.
     pub tone: Option<u32>,
     pub power: Option<Power>,
+    /// Cambió el reparto de los monitores: el kernel tiene que armar la imagen de ese tamaño y
+    /// decirle a la placa qué muestra cada salida.
+    pub display: Option<crate::display::Layout>,
 }
 
 type ClockKey = Option<(u16, u8, u8, u8, u8)>;
@@ -303,6 +310,15 @@ pub struct Desktop<D: BlockDevice> {
     outline: Option<Rect>,
     /// Portapapeles de texto del sistema (Ctrl+C / Ctrl+V entre apps).
     clipboard: String,
+    /// Tamaño de toda la imagen (con varios monitores, más grande que el principal, que es lo
+    /// que dicen `width` y `height`).
+    full_w: usize,
+    full_h: usize,
+    /// Los monitores que tiene la placa (tamaño de cada uno) y cómo están repartidos.
+    outputs: Vec<(u32, u32)>,
+    display_layout: Option<crate::display::Layout>,
+    /// Hasta cuándo se muestra el número de cada monitor.
+    identify_until: Option<u64>,
     /// "Cerrar sesión": la pantalla de bloqueo pasa a ser la de iniciar sesión.
     session_closed: bool,
     /// Ventana que recibe los movimientos del mouse hasta que se suelte el botón (se apretó
@@ -432,6 +448,11 @@ impl<D: BlockDevice> Desktop<D> {
             right_down: false,
             outline: None,
             clipboard: String::new(),
+            full_w: width,
+            full_h: height,
+            outputs: Vec::new(),
+            display_layout: None,
+            identify_until: None,
             session_closed: false,
             pointer_capture: None,
             drag: None,
@@ -474,6 +495,21 @@ impl<D: BlockDevice> Desktop<D> {
     /// La capa de fondo: el HUD, un color o una imagen (según la configuración).
     pub fn draw_background(&mut self, bg: &mut Canvas<'_>) {
         self.bg_dirty = false;
+        let screens: Vec<Rect> = self.wm.screens().to_vec();
+        if screens.len() < 2 {
+            self.draw_wallpaper(bg);
+            return;
+        }
+        // Varios monitores: cada uno con su fondo (lo que queda afuera de todos, negro).
+        bg.fill(Color::BLACK);
+        for s in screens {
+            if let Some(mut view) = bg.sub(s) {
+                self.draw_wallpaper(&mut view);
+            }
+        }
+    }
+
+    fn draw_wallpaper(&mut self, bg: &mut Canvas<'_>) {
         match self.config.wallpaper.clone() {
             Wallpaper::Hud => hud::draw_static(bg),
             Wallpaper::Solid(_) => {
@@ -584,6 +620,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Lock => "bloqueo",
             Overlay::Sleep => "suspendido",
             Overlay::Layouts { .. } => "distribuciones",
+            Overlay::Project { .. } => "proyectar",
             Overlay::Menu(m) if m.title.starts_with("VENTANA") => "ventana",
             Overlay::Menu(_) => "enlaces",
             Overlay::Quick { .. } => "rapida",
@@ -728,6 +765,7 @@ impl<D: BlockDevice> Desktop<D> {
     pub fn set_stats(&mut self, stats: SystemStats) {
         self.history.push(&stats);
         self.stats = stats;
+        self.stats.displays = self.outputs.clone();
         self.stats_version += 1;
         for s in &mut self.slots {
             if s.app.kind() == AppKind::Monitor {
@@ -1208,6 +1246,28 @@ impl<D: BlockDevice> Desktop<D> {
                         self.wm.stretch_vertical(id);
                     }
                 }
+                Key::Char('p' | 'P') => {
+                    if self.outputs.len() < 2 {
+                        self.notify(
+                            tr("Hay un solo monitor: no hay nada que extender o duplicar."),
+                            false,
+                            now_ms,
+                        );
+                    } else {
+                        let sel = crate::display::Mode::ALL
+                            .iter()
+                            .position(|m| *m == self.config.display_mode)
+                            .unwrap_or(2);
+                        self.set_overlay(Overlay::Project { sel });
+                    }
+                }
+                Key::Left | Key::Right if m.shift => {
+                    if let Some(id) = focused
+                        && self.wm.move_to_screen(id, key == Key::Right)
+                    {
+                        self.logs.push("VENTANA_OTRO_MONITOR".into());
+                    }
+                }
                 Key::Char('z' | 'Z') => {
                     if focused.is_some() {
                         self.set_overlay(Overlay::Layouts { sel: 0 });
@@ -1379,6 +1439,84 @@ impl<D: BlockDevice> Desktop<D> {
         }
     }
 
+    /// El kernel encontró una placa con estos monitores (tamaño de cada salida).
+    pub fn set_outputs(&mut self, outputs: Vec<(u32, u32)>) {
+        self.outputs = outputs;
+        self.stats.displays = self.outputs.clone();
+        self.apply_display();
+    }
+
+    pub fn outputs(&self) -> &[(u32, u32)] {
+        &self.outputs
+    }
+
+    /// Tamaño de toda la imagen (todos los monitores).
+    pub fn full_size(&self) -> (usize, usize) {
+        (self.full_w, self.full_h)
+    }
+
+    /// El kernel toma el reparto nuevo de los monitores (una vez).
+    pub fn take_display(&mut self) -> Option<crate::display::Layout> {
+        self.requests.display.take()
+    }
+
+    fn set_display_mode(&mut self, mode: crate::display::Mode) {
+        let mut cfg = self.config.clone();
+        cfg.display_mode = mode;
+        let now_ms = self.last_now;
+        self.apply_config(cfg, now_ms);
+    }
+
+    /// Reparte el escritorio entre los monitores según la configuración.
+    fn apply_display(&mut self) {
+        if self.outputs.is_empty() {
+            return;
+        }
+        let c = &self.config;
+        let l = crate::display::layout(
+            &self.outputs,
+            c.display_mode,
+            c.display_vertical,
+            c.display_primary as usize,
+        );
+        if self.display_layout.as_ref() == Some(&l) {
+            return;
+        }
+        let mode = if self.outputs.len() < 2 {
+            "uno"
+        } else {
+            c.display_mode.code()
+        };
+        self.logs
+            .push(format!("PANTALLAS_MODO {mode} {}x{}", l.size.0, l.size.1));
+        self.resize(l.size.0 as usize, l.size.1 as usize, l.screens.clone());
+        self.requests.display = Some(l.clone());
+        self.display_layout = Some(l);
+    }
+
+    /// Cambia el tamaño del escritorio: `width` × `height` en total, repartido en `screens` (el
+    /// principal primero, en la esquina 0, 0).
+    pub fn resize(&mut self, width: usize, height: usize, screens: Vec<Rect>) {
+        let Some(main) = screens.first().copied() else {
+            return;
+        };
+        self.full_w = width;
+        self.full_h = height;
+        self.width = main.w as usize;
+        self.height = main.h as usize;
+        let work = Rect::new(0, WORK_TOP, main.w, main.h - WORK_TOP);
+        self.wm.set_screens(screens, work);
+        self.cursor.0 = self.cursor.0.min(width as i32 - 1);
+        self.cursor.1 = self.cursor.1.min(height as i32 - 1);
+        self.anims.clear();
+        for s in &mut self.slots {
+            s.chrome_dirty = true;
+            s.content_dirty = true;
+        }
+        self.bg_dirty = true;
+        self.full_redraw = true;
+    }
+
     /// Aplica y guarda una configuración nueva (lo mismo que hace la app Configuración; lo
     /// usan los tests).
     pub fn set_config(&mut self, cfg: Config) {
@@ -1409,6 +1547,15 @@ impl<D: BlockDevice> Desktop<D> {
         }
         crate::look::apply(&self.config);
         self.wm.set_topbar(self.config.topbar);
+        if (old.display_mode, old.display_vertical, old.display_primary)
+            != (
+                self.config.display_mode,
+                self.config.display_vertical,
+                self.config.display_primary,
+            )
+        {
+            self.apply_display();
+        }
         let look_changed = old.theme != self.config.theme
             || old.accent != self.config.accent
             || old.ui_large != self.config.ui_large
@@ -1463,6 +1610,23 @@ impl<D: BlockDevice> Desktop<D> {
     fn overlay_key(&mut self, key: Key, now_ms: u64, clock: Option<DateTime>) -> bool {
         match &mut self.overlay {
             Overlay::None | Overlay::Lock | Overlay::Sleep => false,
+            Overlay::Project { sel } => {
+                let n = crate::display::Mode::ALL.len();
+                match key {
+                    Key::Escape => self.set_overlay(Overlay::None),
+                    Key::Up => *sel = (*sel + n - 1) % n,
+                    Key::Down | Key::Tab => *sel = (*sel + 1) % n,
+                    Key::Enter => {
+                        let mode = crate::display::Mode::ALL[*sel];
+                        self.set_overlay(Overlay::None);
+                        self.set_display_mode(mode);
+                        return true;
+                    }
+                    _ => {}
+                }
+                self.overlay_dirty = true;
+                true
+            }
             Overlay::Layouts { sel } => {
                 let zones = shell::layout_zones(self.width, self.height);
                 let n = zones.len();
@@ -1853,6 +2017,7 @@ impl<D: BlockDevice> Desktop<D> {
                 && out.power.is_none()
                 && out.config.is_none()
                 && !out.lock
+                && !out.identify
                 && !out.close_self
             {
                 self.out = out;
@@ -1878,6 +2043,10 @@ impl<D: BlockDevice> Desktop<D> {
                 self.set_overlay(Overlay::Power { sel: 0 });
             }
             self.screenshot |= out.screenshot;
+            if out.identify {
+                self.identify_until = Some(now_ms + 2500);
+                self.full_redraw = true;
+            }
             for req in out.net {
                 match self.firewall_check(&req) {
                     Ok(()) => self.requests.net.push(req),
@@ -1949,8 +2118,8 @@ impl<D: BlockDevice> Desktop<D> {
             return;
         }
         let f = self.config.mouse_factor();
-        self.cursor.0 = (self.cursor.0 + p.dx * f / 4).clamp(0, self.width as i32 - 1);
-        self.cursor.1 = (self.cursor.1 + p.dy * f / 4).clamp(0, self.height as i32 - 1);
+        self.cursor.0 = (self.cursor.0 + p.dx * f / 4).clamp(0, self.full_w as i32 - 1);
+        self.cursor.1 = (self.cursor.1 + p.dy * f / 4).clamp(0, self.full_h as i32 - 1);
         self.cursor_visible = true;
         let (x, y) = self.cursor;
 
@@ -2084,7 +2253,7 @@ impl<D: BlockDevice> Desktop<D> {
         let Some(focused) = self.wm.focused() else {
             return;
         };
-        let zones = crate::wm::LAYOUTS[t].zones(self.wm.work_area());
+        let zones = crate::wm::LAYOUTS[t].zones(self.wm.work_area_of(focused));
         let others: Vec<WinId> = self
             .wm
             .mru_here()
@@ -2123,10 +2292,16 @@ impl<D: BlockDevice> Desktop<D> {
         if !self.config.snap_edges {
             return;
         }
-        let (w, h) = (self.width as i32, self.height as i32);
+        let (w, h) = (self.full_w as i32, self.full_h as i32);
         // Esquinas: un cuarto (con un margen generoso: acertarle al píxel es difícil).
         const CORNER: i32 = 24;
-        let quarters = crate::wm::Layout::Quarters.zones(self.wm.work_area());
+        let under = self
+            .wm
+            .screens()
+            .iter()
+            .position(|s| s.contains(x, y))
+            .unwrap_or(0);
+        let quarters = crate::wm::Layout::Quarters.zones(self.wm.work_for(under));
         let corner = match (x <= 1, x >= w - 2, y <= CORNER, y >= h - CORNER) {
             (true, _, true, _) => Some(quarters[0]),
             (_, true, true, _) => Some(quarters[1]),
@@ -2205,6 +2380,16 @@ impl<D: BlockDevice> Desktop<D> {
         match &self.overlay {
             // (Dormido no llega acá: el mouse despierta en on_mouse.)
             Overlay::Sleep => return,
+            Overlay::Project { .. } => {
+                match shell::project_hit(self.width, self.height, x, y) {
+                    Some(i) => {
+                        self.set_overlay(Overlay::None);
+                        self.set_display_mode(crate::display::Mode::ALL[i]);
+                    }
+                    None => self.set_overlay(Overlay::None),
+                }
+                return;
+            }
             Overlay::Layouts { .. } => {
                 match shell::layouts_hit(self.width, self.height, x, y) {
                     Some(i) => self.apply_layout(i),
@@ -2571,7 +2756,7 @@ impl<D: BlockDevice> Desktop<D> {
             let mut dirty = Dirty::default();
             if core::mem::take(&mut self.full_redraw) | core::mem::take(&mut self.overlay_dirty) {
                 frame.fill(Color::BLACK);
-                dirty.push(Rect::new(0, 0, self.width as i32, self.height as i32));
+                dirty.push(Rect::new(0, 0, self.full_w as i32, self.full_h as i32));
             }
             return dirty;
         }
@@ -2619,7 +2804,13 @@ impl<D: BlockDevice> Desktop<D> {
         }
 
         let (w, h) = (self.width, self.height);
-        let screen = Rect::new(0, 0, w as i32, h as i32);
+        let screen = Rect::new(0, 0, self.full_w as i32, self.full_h as i32);
+        if let Some(until) = self.identify_until
+            && now_ms >= until
+        {
+            self.identify_until = None;
+            self.full_redraw = true;
+        }
         let anim_ms = if self.config.animations { now_ms } else { 0 };
         let view = hud::sphere_view(w, h, anim_ms);
         let pulse = self.assistant.pulse(now_ms);
@@ -2748,7 +2939,8 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Quick { .. } => panels::quick_rect(w, h).inset(-4),
             Overlay::Notices => panels::notices_rect(w, h).inset(-4),
             Overlay::Layouts { .. } => shell::layouts_rect(w, h).inset(-4),
-            _ => Rect::new(0, 0, w as i32, h as i32),
+            Overlay::Project { .. } => shell::project_rect(w, h).inset(-4),
+            _ => Rect::new(0, 0, self.full_w as i32, self.full_h as i32),
         }
     }
 
@@ -2841,6 +3033,14 @@ impl<D: BlockDevice> Desktop<D> {
         let Some((format, bpp)) = self.format else {
             return;
         };
+        if (self.full_w, self.full_h) != (w, h)
+            && matches!(
+                self.overlay,
+                Overlay::Lock | Overlay::Power { .. } | Overlay::TaskView { .. }
+            )
+        {
+            frame.fill(Color::BLACK);
+        }
         match &self.overlay {
             Overlay::Sleep => {
                 frame.fill(Color::BLACK);
@@ -2883,12 +3083,24 @@ impl<D: BlockDevice> Desktop<D> {
             hud::draw_voice_glow(frame, view, &pulse);
             self.cloud.draw(frame, view, pulse);
         }
-        if dirty.touches(&hud::clock_rect(w, h)) {
-            hud::draw_clock(frame, &mut self.clock_face, clock, self.config.clock_24h);
+        // El reloj y el mensaje se ubican con el ancho del lienzo: con varios monitores se
+        // dibujan sobre una vista del principal (que está en 0, 0 y mide `w` × `h`).
+        let main = Rect::new(0, 0, w as i32, h as i32);
+        if dirty.touches(&hud::clock_rect(w, h))
+            && let Some(mut view) = frame.sub(main)
+        {
+            hud::draw_clock(
+                &mut view,
+                &mut self.clock_face,
+                clock,
+                self.config.clock_24h,
+            );
         }
-        if dirty.touches(&hud::message_rect(w, h)) {
+        if dirty.touches(&hud::message_rect(w, h))
+            && let Some(mut view) = frame.sub(main)
+        {
             let speaking = self.assistant.is_speaking(now_ms);
-            hud::draw_message(frame, self.assistant.visible_text(now_ms), speaking);
+            hud::draw_message(&mut view, self.assistant.visible_text(now_ms), speaking);
         }
         if self.config.status_panel && dirty.touches(&shell::status_rect(w, h)) {
             let disk = self
@@ -3007,7 +3219,16 @@ impl<D: BlockDevice> Desktop<D> {
             }
             Overlay::Notices => panels::draw_notices(frame, w, h, &self.notices, clock),
             Overlay::Layouts { sel } => shell::draw_layouts(frame, w, h, *sel),
+            Overlay::Project { sel } => {
+                shell::draw_project(frame, w, h, *sel, self.config.display_mode)
+            }
             _ => {}
+        }
+        // Configuración → Pantallas → Identificar: el número de cada monitor, grande.
+        if self.identify_until.is_some() {
+            for (i, s) in self.wm.screens().iter().enumerate() {
+                shell::draw_screen_number(frame, *s, i + 1);
+            }
         }
     }
 
@@ -3101,16 +3322,29 @@ impl<D: BlockDevice> Desktop<D> {
         }
     }
 
-    /// Copia a la pantalla lo que cambió y dibuja el cursor encima.
-    pub fn present(&mut self, screen: &mut Canvas<'_>, frame: &Canvas<'_>, dirty: &Dirty) {
+    /// Copia a la pantalla lo que cambió y dibuja el cursor encima. Devuelve la zona que tocó
+    /// (con una placa de video, eso es lo que hay que mandarle).
+    pub fn present(
+        &mut self,
+        screen: &mut Canvas<'_>,
+        frame: &Canvas<'_>,
+        dirty: &Dirty,
+    ) -> Option<Rect> {
+        let mut touched: Option<Rect> = None;
+        let mut add = |r: Rect| touched = Some(touched.map_or(r, |t| t.union(&r)));
         for r in dirty.iter() {
             screen.copy_from(frame, r);
+            add(r);
         }
         if let Some(old) = self.cursor_drawn.take() {
             screen.copy_from(frame, old); // borra el cursor anterior
+            add(old);
         }
         if self.cursor_visible {
-            self.cursor_drawn = Some(cursor::draw(screen, self.cursor.0, self.cursor.1));
+            let r = cursor::draw(screen, self.cursor.0, self.cursor.1);
+            self.cursor_drawn = Some(r);
+            add(r);
         }
+        touched
     }
 }

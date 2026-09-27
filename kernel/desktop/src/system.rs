@@ -44,6 +44,8 @@ pub struct SystemStats {
     /// Temperatura de la CPU en °C, si hay un sensor que el kernel sepa leer (en una máquina
     /// virtual no hay: QEMU no emula el sensor térmico).
     pub temp_c: Option<u8>,
+    /// Tamaño de cada monitor que tiene la placa de video (vacío = solo la pantalla del firmware).
+    pub displays: Vec<(u32, u32)>,
 }
 
 /// Últimos `N` valores (una muestra por segundo), para los gráficos.
@@ -276,6 +278,8 @@ pub struct Outbox {
     pub config: Option<crate::config::Config>,
     /// Bloquear la pantalla.
     pub lock: bool,
+    /// Mostrar el número de cada monitor (Configuración → Pantallas → Identificar).
+    pub identify: bool,
     /// Cerrar la ventana de la app que lo pide (`exit` en la terminal).
     pub close_self: bool,
     /// Número del último pedido de red (los números no se repiten).

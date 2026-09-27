@@ -1241,3 +1241,105 @@ pub fn draw_layouts(c: &mut Canvas<'_>, w: usize, h: usize, sel: usize) {
         r.w - 32,
     );
 }
+
+// --- monitores (Win+P) ------------------------------------------------------------------------
+
+const PROJECT_ROW: i32 = 58;
+
+/// El panel de Win+P, a la derecha del monitor principal (como en Windows).
+pub fn project_rect(w: usize, h: usize) -> Rect {
+    let n = crate::display::Mode::ALL.len() as i32;
+    let ph = 48 + n * PROJECT_ROW + 12;
+    Rect::new(w as i32 - 320 - MARGIN, (h as i32 - ph) / 2, 320, ph)
+}
+
+fn project_row(w: usize, h: usize, i: usize) -> Rect {
+    let r = project_rect(w, h);
+    Rect::new(
+        r.x + 10,
+        r.y + 44 + i as i32 * PROJECT_ROW,
+        r.w - 20,
+        PROJECT_ROW - 8,
+    )
+}
+
+pub fn project_hit(w: usize, h: usize, x: i32, y: i32) -> Option<usize> {
+    (0..crate::display::Mode::ALL.len()).find(|&i| project_row(w, h, i).contains(x, y))
+}
+
+pub fn draw_project(
+    c: &mut Canvas<'_>,
+    w: usize,
+    h: usize,
+    sel: usize,
+    current: crate::display::Mode,
+) {
+    let r = project_rect(w, h);
+    rounded_rect(c, r.x, r.y, r.w, r.h, 12, theme::menu(), 250);
+    rounded_outline(c, r.x, r.y, r.w, r.h, 12, theme::cyan().scale(120));
+    text::draw(
+        c,
+        r.x + 16,
+        r.y + 14,
+        tr("PROYECTAR (WIN+P)"),
+        &label(theme::text_dim()),
+    );
+    for (i, mode) in crate::display::Mode::ALL.iter().enumerate() {
+        let row = project_row(w, h, i);
+        if i == sel {
+            rounded_rect(
+                c,
+                row.x,
+                row.y,
+                row.w,
+                row.h,
+                6,
+                crate::widgets::selected_bg(),
+                255,
+            );
+            c.fill_rect(row.x, row.y + 8, 3, row.h - 16, theme::cyan());
+        }
+        // Dibujito: dos pantallas, llenas según el modo.
+        let (ix, iy) = (row.x + 14, row.y + (row.h - 22) / 2);
+        let on = theme::cyan();
+        let off = theme::panel_rim();
+        let (a, b) = match mode {
+            crate::display::Mode::OnlyFirst => (on, off),
+            crate::display::Mode::OnlySecond => (off, on),
+            _ => (on, on),
+        };
+        rounded_rect(c, ix, iy, 22, 22, 3, a, 200);
+        rounded_rect(c, ix + 26, iy, 22, 22, 3, b, 200);
+        if *mode == crate::display::Mode::Duplicate {
+            text::draw(c, ix + 7, iy + 3, "1", &s16(theme::void()));
+            text::draw(c, ix + 33, iy + 3, "1", &s16(theme::void()));
+        } else if *mode == crate::display::Mode::Extend {
+            text::draw(c, ix + 7, iy + 3, "1", &s16(theme::void()));
+            text::draw(c, ix + 33, iy + 3, "2", &s16(theme::void()));
+        }
+        let col = if *mode == current {
+            theme::cyan()
+        } else {
+            theme::text()
+        };
+        draw_fit(
+            c,
+            ix + 62,
+            row.y + (row.h - 16) / 2,
+            tr(mode.name()),
+            &s16(col),
+            row.w - 80,
+        );
+    }
+}
+
+/// Un número grande en el medio de un monitor (Configuración → Pantallas → Identificar).
+pub fn draw_screen_number(c: &mut Canvas<'_>, screen: Rect, n: usize) {
+    let (cx, cy) = (screen.x + screen.w / 2, screen.y + screen.h / 2);
+    rounded_rect(c, cx - 80, cy - 80, 160, 160, 20, theme::menu(), 235);
+    rounded_outline(c, cx - 80, cy - 80, 160, 160, 20, theme::cyan());
+    let st = text::Style::new(text::Weight::Bold, text::Size::Size32, theme::cyan()).scale(3);
+    let label_ = alloc::format!("{n}");
+    let tw = text::width(&label_, &st);
+    text::draw(c, cx - tw / 2, cy - st.line_height() / 2, &label_, &st);
+}
