@@ -16,6 +16,8 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
 | ![Wikipedia](img/k5-wikipedia.png) | ![YouTube](img/k5-youtube.png) |
 | **snap y ufw en la terminal** | **Firewall en la Configuración** |
 | ![snap y ufw](img/k5-snap-ufw.png) | ![Firewall](img/k5-firewall.png) |
+| **Monitor 1 (extender)** | **Monitor 2, con el Monitor del sistema** |
+| ![Pantalla 1](img/k6-pantalla1.png) | ![Pantalla 2](img/k6-pantalla2.png) |
 | **Tema claro** | **Monitor con temperatura** |
 | ![Tema claro](img/k6-claro.png) | ![Monitor](img/k6-monitor.png) |
 | **Cerrar sesión** | |
@@ -27,6 +29,10 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   anfitrión sin ventana y JARVIS-OS lo muestra en una ventana propia, con pestañas, barra de
   dirección, atrás/adelante, mouse, rueda y teclado. Se instala con `cargo xtask brave
   --instalar`. El navegador propio de K3–K5 queda como "Navegador simple".
+- **Varios monitores**: con la placa virtio-gpu (QEMU la trae con una salida por monitor de la
+  PC), extender, duplicar o usar uno solo (Win+P o Configuración → Pantallas); el segundo a la
+  derecha o abajo, y cuál es el principal. Win+Shift+←/→ lleva una ventana al otro monitor;
+  maximizar, acoplar y las distribuciones usan el monitor de la ventana.
 - **Selección como en Windows**: en Archivos, varios a la vez (Shift+flechas, Ctrl+clic,
   Shift+clic, Ctrl+E) para mover a la Papelera, copiar o cortar; en el Editor, Shift+flechas,
   arrastrar con el mouse, doble clic en una palabra y Ctrl+E, con un portapapeles del sistema.
@@ -97,6 +103,7 @@ cargo xtask test         # sin ventana, de punta a punta (lo usa la CI)
 cargo xtask screenshot   # capturas del escritorio, las apps y los menús (en target/)
 cargo xtask disk --reset # vuelve el disco a su contenido inicial (kernel/rootfs/)
 cargo xtask vdi          # target/jarvis-os.vdi para bootear en VirtualBox (VM con EFI)
+cargo xtask pantallas    # dos monitores: extender, mover una ventana, Win+P, duplicar (capturas)
 cargo xtask brave --instalar           # instala Brave en el anfitrión (winget)
 cargo xtask brave --probar https://…   # prueba el puente de Brave sin QEMU (target/brave-prueba.png)
 cargo test               # tests en el host: FAT32, red, escritorio, terminal y gráficos
@@ -123,6 +130,9 @@ cargo test               # tests en el host: FAT32, red, escritorio, terminal y 
   que QEMU ve como 10.0.2.2:8119). Brave usa su propio perfil (`kernel/target/brave-perfil`:
   cookies y sesiones), separado del Brave que uses en Windows. Para usarlo desde otra máquina:
   `cargo xtask brave --red --token <secreto>` y, en esa máquina, Configuración → Navegador.
+- **Monitores**: `xtask` le pregunta a Windows cuántos monitores hay y le da a QEMU una
+  `virtio-vga` con una salida por monitor (QEMU abre una ventana o pestaña por salida).
+  `JARVIS_MONITORES=2 cargo xtask run` suma uno virtual para probar con una sola pantalla.
 - Los logs del kernel (puerto serie) salen en la terminal donde corriste `cargo xtask run`.
 - En Windows, `xtask` usa la aceleración por hardware (WHPX) si está disponible.
 - Para compilar mientras tenés QEMU abierto (la imagen queda bloqueada), usá otra carpeta de
@@ -143,6 +153,7 @@ cargo test               # tests en el host: FAT32, red, escritorio, terminal y 
 | Win+← / Win+→ · Win+Shift+↑ | acoplar a la mitad izquierda / derecha · estirar a lo alto |
 | Win+Z | distribuciones: mitades, tercios, 2/3 + 1/3, cuartos, grande + dos, columna central (las demás ventanas completan) |
 | Win+Shift+T · Win+Shift+C | mosaico con todas las ventanas · cascada |
+| Win+P · Win+Shift+← / → | monitores: solo 1, duplicar, extender, solo 2 · llevar la ventana al otro monitor |
 | arrastrar contra un borde / esquina | mitad / cuarto (arriba: maximizar) |
 | Win+Ctrl+D · Win+Ctrl+← / → · Win+Ctrl+F4 | escritorio virtual nuevo · cambiar · cerrarlo |
 | Alt+Espacio | menú de la ventana (restaurar, minimizar, maximizar, acoplar, cerrar) |
@@ -347,6 +358,21 @@ firmware UEFI (OVMF en QEMU)
   que dura necesita una cola de salida con tope (si el otro lado no lee, es un error y no se come
   la memoria) y un cierre en dos pasos: en smoltcp, sacar el socket enseguida después de
   `close()` hacía que el FIN no saliera nunca.
+- **virtio moderno**: el disco y la red usan la interfaz vieja (por puertos). La placa de video solo
+  existe en la moderna, con los registros en memoria: su dirección sale de la lista de
+  "capacidades" PCI, y hay que mapearla **sin caché** (`paging.rs`), porque un registro de un
+  dispositivo no se puede leer de una copia. Las tablas de páginas nuevas salen del heap, donde se
+  conoce la dirección física.
+- **Un solo lienzo, varias salidas**: el escritorio sigue dibujando una imagen; cada salida de la
+  placa muestra un rectángulo de ella. Extender es una imagen más ancha, duplicar es que las dos
+  salidas muestren el mismo rectángulo. El principal siempre está en (0, 0): así el HUD, las
+  barras y los menús no cambiaron (solo el reloj y el mensaje, que se ubicaban con el ancho de la
+  imagen y ahora se dibujan sobre una vista del principal, `Canvas::sub`).
+- **El orden importa al cambiar de modo**: el escritorio se redimensiona al procesar la tecla,
+  pero el kernel cambia las superficies después del cuadro. Ese cuadro se dibujaba con la
+  geometría vieja y quedaban restos: después de cambiar, se redibuja todo.
+- **`screendump` de QEMU**: la salida y el dispositivo van *después* del archivo
+  (`screendump archivo video 1`); con `-d`/`-p` antes contesta `invalid char 'p'`.
 - **Selección = ancla + cursor**: lo seleccionado es lo que queda entre donde empezó (el ancla) y
   donde está el cursor, en el orden que sea. Así Shift+flechas, arrastrar con el mouse y
   Shift+clic son lo mismo: mover el cursor sin mover el ancla. En Archivos, además, un conjunto

@@ -24,6 +24,7 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (web/: URL, HTTP, DOM, CSS y estilos, maquetación en cajas, JSON, adaptadores)
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
+                   (virtio_gpu.rs + paging.rs: varios monitores; display.rs: las superficies)
     - xtask/       imagen booteable, disco FAT32, QEMU, puente (puente.rs: HTTPS, paquetes,
                    imágenes y SVG → BMP), puente de Brave (brave.rs: DevTools → mosaicos), tests,
                    capturas
@@ -41,6 +42,7 @@ Kernel (desde kernel/):
 - Punta a punta:    cargo xtask test           (sin ventana: teclado, mouse, ventanas, disco y red)
 - Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
 - Brave:            cargo xtask brave --instalar | --probar URL (el puente sin QEMU → target/brave-prueba.png)
+- Monitores:        cargo xtask pantallas (dos monitores, capturas por salida); JARVIS_MONITORES=N en run/test
 - Captura:          cargo xtask screenshot     (escritorio, apps y menús en target/: miralas si tocás la UI)
 - Vista previa web: JARVIS_URL=https://… cargo test -p jarvis-desktop --test vista_previa -- --ignored
                     (arma una página real sin QEMU, con sus imágenes, y la guarda en

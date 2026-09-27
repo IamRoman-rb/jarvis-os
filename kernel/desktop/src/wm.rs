@@ -196,7 +196,13 @@ pub struct WindowManager {
     work: Rect,
     /// Donde va una ventana maximizada: toda la pantalla menos la barra de arriba.
     full: Rect,
+    /// Todo el escritorio (con varios monitores, la unión de todos).
     screen: Rect,
+    /// Cada monitor, en coordenadas del escritorio. El primero es el principal (el de la barra
+    /// de íconos y JARVIS) y siempre está en (0, 0).
+    screens: Vec<Rect>,
+    /// La barra de arriba aparece al maximizar (en el principal).
+    topbar: bool,
     next_id: WinId,
     /// Ventanas que minimizó "mostrar el escritorio" (Win+D), para volver a mostrarlas.
     peeked: Vec<WinId>,
@@ -215,6 +221,8 @@ impl WindowManager {
             work,
             full: Rect::new(screen.x, screen.y + TOPBAR_H, screen.w, screen.h - TOPBAR_H),
             screen,
+            screens: alloc::vec![screen],
+            topbar: true,
             next_id: 1,
             peeked: Vec::new(),
             cascade: 0,
@@ -223,8 +231,127 @@ impl WindowManager {
         }
     }
 
+    /// La zona de trabajo del monitor principal.
     pub fn work_area(&self) -> Rect {
         self.work
+    }
+
+    pub fn screens(&self) -> &[Rect] {
+        &self.screens
+    }
+
+    /// En qué monitor está un rectángulo (por su centro; si no cae en ninguno, el principal).
+    pub fn screen_index(&self, r: Rect) -> usize {
+        let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
+        self.screens
+            .iter()
+            .position(|s| s.contains(cx, cy))
+            .unwrap_or(0)
+    }
+
+    /// Dónde se acoplan las ventanas en el monitor `i` (en el principal, debajo de la barra).
+    pub fn work_for(&self, i: usize) -> Rect {
+        if i == 0 {
+            self.work
+        } else {
+            self.screens.get(i).copied().unwrap_or(self.work)
+        }
+    }
+
+    /// Hasta dónde llega una ventana maximizada en el monitor `i`.
+    fn full_for(&self, i: usize) -> Rect {
+        if i == 0 {
+            self.full
+        } else {
+            self.screens.get(i).copied().unwrap_or(self.full)
+        }
+    }
+
+    /// La zona de trabajo del monitor donde está la ventana.
+    pub fn work_area_of(&self, id: WinId) -> Rect {
+        let r = self.get(id).map_or(self.work, |w| w.rect);
+        self.work_for(self.screen_index(r))
+    }
+
+    /// Cambian los monitores (se conectó otro, o se pasó de extender a duplicar). Las ventanas
+    /// que quedaron fuera de todos vuelven al principal; las maximizadas se ajustan a su monitor.
+    pub fn set_screens(&mut self, screens: Vec<Rect>, work: Rect) {
+        if screens.is_empty() {
+            return;
+        }
+        self.screen = screens.iter().skip(1).fold(screens[0], |a, b| a.union(b));
+        self.screens = screens;
+        self.work = work;
+        self.full = Rect::new(0, 0, 0, 0); // se recalcula abajo
+        let topbar = self.topbar;
+        self.topbar = !topbar;
+        self.set_topbar(topbar);
+        let ids: Vec<WinId> = self.windows.iter().map(|w| w.id).collect();
+        for id in ids {
+            let Some(w) = self.get(id) else { continue };
+            let (rect, maximized) = (w.rect, w.maximized);
+            let (cx, cy) = (rect.x + rect.w / 2, rect.y + rect.h / 2);
+            let inside = self.screens.iter().any(|s| s.contains(cx, cy));
+            let i = self.screen_index(rect);
+            let target = if maximized {
+                Some(self.full_for(i))
+            } else if !inside {
+                let work = self.work;
+                let (ww, wh) = (rect.w.min(work.w), rect.h.min(work.h));
+                Some(Rect::new(
+                    work.x + (work.w - ww) / 2,
+                    work.y + (work.h - wh) / 2,
+                    ww,
+                    wh,
+                ))
+            } else {
+                None
+            };
+            if let (Some(t), Some(w)) = (target, self.get_mut(id)) {
+                w.rect = t;
+            }
+        }
+    }
+
+    /// Win+Shift+← / →: pasa la ventana al monitor anterior o siguiente, en el mismo lugar
+    /// relativo (y maximizada si lo estaba).
+    pub fn move_to_screen(&mut self, id: WinId, forward: bool) -> bool {
+        let n = self.screens.len();
+        if n < 2 {
+            return false;
+        }
+        let Some(w) = self.get(id) else { return false };
+        let (rect, maximized) = (w.rect, w.maximized);
+        let from = self.screen_index(rect);
+        let to = if forward {
+            (from + 1) % n
+        } else {
+            (from + n - 1) % n
+        };
+        let (a, b) = (self.work_for(from), self.work_for(to));
+        let target = if maximized {
+            self.full_for(to)
+        } else {
+            let (ww, wh) = (rect.w.min(b.w), rect.h.min(b.h));
+            let x = b.x + (rect.x - a.x) * b.w.max(1) / a.w.max(1);
+            let y = b.y + (rect.y - a.y) * b.h.max(1) / a.h.max(1);
+            Rect::new(
+                x.clamp(b.x, b.x + b.w - ww),
+                y.clamp(b.y, b.y + b.h - wh),
+                ww,
+                wh,
+            )
+        };
+        if let Some(w) = self.get_mut(id) {
+            w.rect = target;
+            if let Some(r) = w.restore.as_mut() {
+                // La posición "normal" también pasa al otro monitor.
+                r.x += b.x - a.x;
+                r.y += b.y - a.y;
+            }
+        }
+        self.activate(id);
+        true
     }
 
     /// De atrás hacia adelante.
@@ -323,7 +450,7 @@ impl WindowManager {
 
     /// Win+Shift+↑: estira la ventana de arriba a abajo (mismo ancho).
     pub fn stretch_vertical(&mut self, id: WinId) {
-        let work = self.work;
+        let work = self.work_area_of(id);
         let Some(w) = self.get_mut(id) else { return };
         if w.restore.is_none() {
             w.restore = Some(w.rect);
@@ -435,22 +562,20 @@ impl WindowManager {
     /// Hasta dónde llega una ventana maximizada: toda la pantalla menos la barra de arriba, o
     /// (sin la barra de arriba) la zona de trabajo, debajo de la barra de íconos.
     pub fn set_topbar(&mut self, topbar: bool) {
+        let main = self.screens[0];
         let full = if topbar {
-            Rect::new(
-                self.work.x,
-                TOPBAR_H,
-                self.work.w,
-                self.work.y + self.work.h - TOPBAR_H,
-            )
+            Rect::new(main.x, main.y + TOPBAR_H, main.w, main.h - TOPBAR_H)
         } else {
             self.work
         };
+        self.topbar = topbar;
         if full == self.full {
             return;
         }
+        let old = self.full;
         self.full = full;
         for w in &mut self.windows {
-            if w.maximized {
+            if w.maximized && w.rect == old {
                 w.rect = full;
             }
         }
@@ -462,7 +587,10 @@ impl WindowManager {
     }
 
     pub fn toggle_maximize(&mut self, id: WinId) {
-        let work = self.full;
+        let r = self
+            .get(id)
+            .map_or(self.work, |w| w.restore.unwrap_or(w.rect));
+        let work = self.full_for(self.screen_index(r));
         let Some(w) = self.get_mut(id) else { return };
         if w.maximized {
             w.maximized = false;
@@ -493,7 +621,7 @@ impl WindowManager {
     /// Win+← / Win+→: ocupa la mitad de la pantalla. Si ya estaba acoplada del otro lado,
     /// vuelve a su tamaño (como en Windows).
     pub fn snap(&mut self, id: WinId, side: Side) {
-        let work = self.work;
+        let work = self.work_area_of(id);
         let half = work.w / 2;
         let target = match side {
             Side::Left => Rect::new(work.x, work.y, half, work.h),
@@ -533,8 +661,9 @@ impl WindowManager {
         let Some(rect) = self.get(id).map(|w| w.rect) else {
             return false;
         };
-        let halves = Layout::Halves.zones(self.work);
-        let quarters = Layout::Quarters.zones(self.work);
+        let work = self.work_area_of(id);
+        let halves = Layout::Halves.zones(work);
+        let quarters = Layout::Quarters.zones(work);
         for (side, half) in halves.iter().enumerate() {
             let (top, bottom) = (quarters[side], quarters[side + 2]);
             let target = if rect == *half {
@@ -550,24 +679,29 @@ impl WindowManager {
         false
     }
 
-    /// Las ventanas a la vista en el escritorio actual, de la de atrás a la de adelante.
-    fn shown(&self) -> Vec<WinId> {
-        self.windows
+    /// Las ventanas a la vista en el monitor de la que tiene el foco, de atrás a adelante.
+    fn shown(&self) -> (Vec<WinId>, Rect) {
+        let i = self
+            .focus
+            .and_then(|id| self.get(id))
+            .map_or(0, |w| self.screen_index(w.rect));
+        let ids = self
+            .windows
             .iter()
-            .filter(|w| w.visible())
+            .filter(|w| w.visible() && self.screen_index(w.rect) == i)
             .map(|w| w.id)
-            .collect()
+            .collect();
+        (ids, self.work_for(i))
     }
 
     /// Win+Shift+T: reparte todas las ventanas a la vista en una grilla (mosaico). Devuelve
     /// cuántas acomodó.
     pub fn tile(&mut self) -> usize {
-        let ids = self.shown();
+        let (ids, work) = self.shown();
         let n = ids.len() as i32;
         if n == 0 {
             return 0;
         }
-        let work = self.work;
         let cols = (1..=n).find(|c| c * c >= n).unwrap_or(1);
         let rows = (n + cols - 1) / cols;
         for (i, id) in ids.iter().enumerate() {
@@ -585,8 +719,7 @@ impl WindowManager {
 
     /// Win+Shift+C: en cascada (en escalera, cada una un poco más abajo y a la derecha).
     pub fn cascade(&mut self) -> usize {
-        let ids = self.shown();
-        let work = self.work;
+        let (ids, work) = self.shown();
         let (w, h) = (work.w * 3 / 5, work.h * 3 / 5);
         for (i, id) in ids.iter().enumerate() {
             let step = (i as i32 % 8) * 36;

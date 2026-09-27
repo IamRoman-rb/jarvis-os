@@ -41,6 +41,7 @@ const HEADER_H: i32 = 76;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
     System,
+    Displays,
     Personalization,
     Appearance,
     Typography,
@@ -57,8 +58,9 @@ pub enum Section {
     Firewall,
 }
 
-pub const SECTIONS: [Section; 15] = [
+pub const SECTIONS: [Section; 16] = [
     Section::System,
+    Section::Displays,
     Section::Personalization,
     Section::Appearance,
     Section::Typography,
@@ -79,6 +81,7 @@ impl Section {
     pub fn name(self) -> &'static str {
         match self {
             Section::System => tr("Sistema"),
+            Section::Displays => tr("Pantallas"),
             Section::Personalization => tr("Personalización"),
             Section::Appearance => tr("Apariencia"),
             Section::Typography => tr("Tipografía"),
@@ -99,6 +102,7 @@ impl Section {
     fn icon(self) -> Icon {
         match self {
             Section::System => Icon::Screen,
+            Section::Displays => Icon::Screen,
             Section::Personalization => Icon::Image,
             Section::Appearance => Icon::Screen,
             Section::Typography => Icon::Document,
@@ -145,6 +149,10 @@ pub enum Opt {
     TopStat(u8),
     ClockSeconds,
     CursorBig,
+    DisplayMode,
+    DisplayVertical,
+    DisplayPrimary,
+    Identify,
     Language,
     Zone,
     Clock24,
@@ -326,7 +334,7 @@ impl Settings {
                         Opt::Info,
                         tr("Versión"),
                         tr("Kernel propio en Rust (x86_64, UEFI)"),
-                        Value("JARVIS-OS 0.1 · hito K5".into())
+                        Value("JARVIS-OS 0.1 · hito K6".into())
                     ),
                     Row::new(
                         Opt::Info,
@@ -401,6 +409,61 @@ impl Settings {
                     on(c.status_panel)
                 ),
             ],
+            Section::Displays => {
+                let n = stats.displays.len();
+                let detail = if n == 0 {
+                    tr("La pantalla del firmware (sin placa virtio-gpu: no se pueden sumar monitores)")
+                        .into()
+                } else {
+                    stats
+                        .displays
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (w, h))| format!("{}: {w}×{h}", i + 1))
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                };
+                let mut rows = alloc::vec![Row::new(
+                    Opt::Info,
+                    tr("Monitores"),
+                    detail,
+                    Value(n.max(1).to_string())
+                )];
+                if n >= 2 {
+                    rows.push(Row::new(
+                        Opt::DisplayMode,
+                        tr("Con varios monitores"),
+                        tr("Extender, duplicar o usar uno solo (también Win+P)"),
+                        Choice(tr(c.display_mode.name()).into()),
+                    ));
+                    rows.push(Row::new(
+                        Opt::DisplayVertical,
+                        tr("El segundo monitor va"),
+                        tr("Para pasar el mouse de uno al otro"),
+                        Choice(
+                            if c.display_vertical {
+                                tr("Abajo del principal")
+                            } else {
+                                tr("A la derecha del principal")
+                            }
+                            .into(),
+                        ),
+                    ));
+                    rows.push(Row::new(
+                        Opt::DisplayPrimary,
+                        tr("Monitor principal"),
+                        tr("El de la barra de íconos, JARVIS y la barra de arriba"),
+                        Choice(format!("{} {}", tr("Pantalla"), c.display_primary + 1)),
+                    ));
+                    rows.push(Row::new(
+                        Opt::Identify,
+                        tr("Identificar"),
+                        tr("Muestra el número de cada monitor"),
+                        Button(tr("IDENTIFICAR")),
+                    ));
+                }
+                rows
+            }
             Section::Appearance => alloc::vec![
                 Row::new(
                     Opt::Theme,
@@ -1301,6 +1364,17 @@ impl Settings {
             Opt::TopStat(bit) => c.top_stats ^= bit,
             Opt::ClockSeconds => c.clock_seconds = !c.clock_seconds,
             Opt::CursorBig => c.cursor_big = !c.cursor_big,
+            Opt::DisplayMode => {
+                let all = crate::display::Mode::ALL;
+                let pos = all.iter().position(|m| *m == c.display_mode).unwrap_or(0) as i32;
+                c.display_mode = all[step(pos, all.len() as i32) as usize];
+            }
+            Opt::DisplayVertical => c.display_vertical = !c.display_vertical,
+            Opt::DisplayPrimary => c.display_primary = 1 - c.display_primary.min(1),
+            Opt::Identify => {
+                ctx.out.identify = true;
+                return;
+            }
             Opt::StatusPanel => c.status_panel = !c.status_panel,
             Opt::Zone => c.utc_offset = (step(c.utc_offset as i32 + 12, 27) - 12) as i8,
             Opt::Clock24 => c.clock_24h = !c.clock_24h,

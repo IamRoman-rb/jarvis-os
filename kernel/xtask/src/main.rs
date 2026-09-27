@@ -41,8 +41,9 @@ fn main() -> ExitCode {
             disk_image(reset).map(|d| println!("disco: {}", d.display()))
         }
         "brave" => brave_cmd(),
+        "pantallas" => build().and_then(|img| screens(&img, &fresh_disk("disco-pantallas.img")?)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|screenshot|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|screenshot|pantallas|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -319,6 +320,15 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
             disk.display()
         ))
         .args(["-device", "virtio-blk-pci,drive=disco,disable-modern=on"]);
+    // Placa de video: virtio-vga (una virtio-gpu que arranca como VGA común, así el firmware
+    // tiene dónde dibujar) con una salida por monitor del anfitrión. JARVIS_MONITORES la cambia.
+    let monitors = monitor_count();
+    cmd.args([
+        "-vga",
+        "none",
+        "-device",
+        &format!("virtio-vga,id=video,max_outputs={monitors}"),
+    ]);
     // Placa de red virtio-net con la red "user" de QEMU: DHCP (10.0.2.15), DNS (10.0.2.3) y
     // salida a internet por el anfitrión, que se ve como 10.0.2.2.
     cmd.args([
@@ -331,6 +341,43 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         cmd.args(["-display", "none"]);
     }
     Ok(cmd)
+}
+
+/// Cantidad de monitores forzada por un comando (`pantallas`); 0 = la de siempre.
+static MONITORS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Cuántos monitores tiene el anfitrión (JARVIS_MONITORES manda; si no, se preguntan a Windows).
+fn monitor_count() -> u32 {
+    let forced = MONITORS.load(std::sync::atomic::Ordering::Relaxed);
+    if forced > 0 {
+        return forced;
+    }
+    if let Some(n) = env::var("JARVIS_MONITORES")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+    {
+        return n.clamp(1, 4);
+    }
+    if !cfg!(windows) {
+        return 1;
+    }
+    let out = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens.Count",
+        ])
+        .output();
+    out.ok()
+        .and_then(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .parse::<u32>()
+                .ok()
+        })
+        .unwrap_or(1)
+        .clamp(1, 4)
 }
 
 fn run(image: &Path, disk: &Path) -> Result<()> {
@@ -432,16 +479,42 @@ impl Session {
 
     /// Captura la pantalla de QEMU y la guarda como PNG.
     fn screenshot(&mut self, png: &Path) -> Result<()> {
+        self.screenshot_head(png, None)
+    }
+
+    /// Captura una salida (un monitor) de la placa de video.
+    fn screenshot_head(&mut self, png: &Path, head: Option<u32>) -> Result<()> {
         let ppm = png.with_extension("ppm");
         let _ = fs::remove_file(&ppm);
-        self.monitor(&format!(
-            "screendump {}",
+        // `screendump archivo [dispositivo [salida]]` (el dispositivo es la placa, id "video").
+        let target = match head {
+            Some(h) => format!(" video {h}"),
+            None => String::new(),
+        };
+        let command = format!(
+            "screendump {}{target}",
             ppm.display().to_string().replace('\\', "/")
-        ))?;
+        );
+        writeln!(self.monitor, "{command}").map_err(|e| format!("monitor: {e}"))?;
+        // Lo que contesta el monitor (si falla, dice por qué).
+        let mut reply = Vec::new();
+        let mut buf = [0u8; 4096];
+        let until = Instant::now() + Duration::from_millis(600);
+        while Instant::now() < until {
+            if let Ok(n) = self.monitor.read(&mut buf) {
+                reply.extend_from_slice(&buf[..n]);
+            }
+        }
         let deadline = Instant::now() + Duration::from_secs(10);
         while fs::metadata(&ppm).map(|m| m.len()).unwrap_or(0) == 0 {
             if Instant::now() > deadline {
-                return Err("QEMU no generó la captura".into());
+                // Sin los códigos de terminal del monitor; lo último que dijo.
+                let text: String = String::from_utf8_lossy(&reply)
+                    .split('\u{1b}')
+                    .map(|p| p.trim_start_matches(|c: char| "[0123456789;KDC".contains(c)))
+                    .collect();
+                let tail: String = text.lines().rev().take(4).collect::<Vec<_>>().join(" | ");
+                return Err(format!("QEMU no generó la captura ({command}): {tail}"));
             }
             thread::sleep(Duration::from_millis(100));
         }
@@ -944,6 +1017,8 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     // Configuración: Personalización, con un fondo de pantalla instalado.
     s.monitor("sendkey meta_l-i")?;
     s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
+    // Sistema → Pantallas → Personalización.
+    s.monitor("sendkey pgdn")?;
     s.monitor("sendkey pgdn")?;
     for _ in 0..7 {
         s.monitor("sendkey right")?;
@@ -952,14 +1027,15 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("CONFIG_GUARDADA", STEP)?;
     thread::sleep(Duration::from_millis(800));
     shot(&mut s, "jarvis-os-configuracion.png")?;
-    // La sección Firewall (la última: RePág desde Personalización da la vuelta dos veces).
-    s.monitor("sendkey pgup")?;
-    s.monitor("sendkey pgup")?;
+    // La sección Firewall (la última: RePág desde Personalización, tres veces, da la vuelta).
+    for _ in 0..3 {
+        s.monitor("sendkey pgup")?;
+    }
     thread::sleep(Duration::from_millis(600));
     shot(&mut s, "jarvis-os-firewall.png")?;
-    // Apariencia (Firewall → AvPág da la vuelta: Sistema, Personalización, Apariencia): el
-    // tema claro, y después se vuelve al HUD para las capturas que siguen.
-    for _ in 0..3 {
+    // Apariencia (Firewall → AvPág da la vuelta: Sistema, Pantallas, Personalización,
+    // Apariencia): el tema claro, y después se vuelve al HUD para las capturas que siguen.
+    for _ in 0..4 {
         s.monitor("sendkey pgdn")?;
     }
     s.monitor("sendkey right")?;
@@ -1022,6 +1098,41 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("SESION_CERRADA", STEP)?;
     thread::sleep(Duration::from_millis(500));
     shot(&mut s, "jarvis-os-sesion.png")
+}
+
+/// `cargo xtask pantallas`: dos monitores (virtio-gpu con dos salidas). Extender: el Monitor pasa
+/// a la segunda pantalla (Win+Shift+→) y se captura cada una; después Win+P → Duplicar.
+fn screens(image: &Path, disk: &Path) -> Result<()> {
+    MONITORS.store(2, std::sync::atomic::Ordering::Relaxed);
+    let mut s = Session::start(image, disk)?;
+    s.wait_for("PANTALLAS_LISTAS 2560x800", BOOT_TIMEOUT)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-shift-esc")?;
+    s.wait_for("VENTANA_ABIERTA Monitor", STEP)?;
+    s.monitor("sendkey meta_l-shift-right")?;
+    s.wait_for("VENTANA_OTRO_MONITOR", STEP)?;
+    s.monitor("sendkey meta_l-e")?;
+    s.wait_for("VENTANA_ABIERTA Archivos", STEP)?;
+    thread::sleep(Duration::from_secs(3));
+    let dir = target_dir();
+    s.screenshot_head(&dir.join("jarvis-os-pantalla1.png"), Some(0))?;
+    s.screenshot_head(&dir.join("jarvis-os-pantalla2.png"), Some(1))?;
+    // Win+P: el panel, y "Duplicar" (la segunda opción).
+    s.monitor("sendkey meta_l-p")?;
+    s.wait_for("ESCRITORIO_MENU proyectar", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    s.screenshot_head(&dir.join("jarvis-os-win-p.png"), Some(0))?;
+    // Las opciones: solo la 1, duplicar, extender (la actual), solo la 2.
+    s.monitor("sendkey up")?;
+    s.monitor("sendkey ret")?;
+    // (El kernel arma la imagen nueva antes de anotar el modo en el log.)
+    s.wait_for("PANTALLAS_LISTAS 1280x800", STEP)?;
+    s.wait_for("PANTALLAS_MODO duplicar", STEP)?;
+    thread::sleep(Duration::from_secs(1));
+    s.screenshot_head(&dir.join("jarvis-os-duplicar2.png"), Some(1))?;
+    s.quit();
+    println!("ok: dos monitores (extender, mover una ventana, Win+P y duplicar)");
+    Ok(())
 }
 
 /// Convierte el PPM binario (P6) que genera QEMU a PNG.

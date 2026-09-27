@@ -29,7 +29,7 @@ fn configuracion_cambia_el_fondo_y_queda_guardada() {
     assert_eq!(t.d.focused_app(), Some(AppKind::Settings));
     assert_eq!(settings_section(&t), "Sistema");
     // AvPág: Personalización. La primera fila es el fondo: → pasa al primer color.
-    t.key(Key::PageDown);
+    t.keys(&[Key::PageDown, Key::PageDown]);
     assert_eq!(settings_section(&t), "Personalización");
     t.key(Key::Right);
     t.frame();
@@ -305,7 +305,7 @@ fn el_navegador_guarda_descargas_en_descargas() {
 #[test]
 fn firewall_desde_la_configuracion_bloquea_una_app() {
     let mut t = Driver::new();
-    t.d.open(Launch::Settings(14), t.now, CLOCK);
+    t.d.open(Launch::Settings(15), t.now, CLOCK);
     assert_eq!(settings_section(&t), "Firewall");
     // Fila 5: "Permitir: Navegador web" (se apaga = regla que bloquea al navegador).
     t.keys(&[Key::Down; 5]);

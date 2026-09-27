@@ -212,6 +212,12 @@ pub struct Config {
     pub top_stats: u8,
     pub clock_seconds: bool,
     pub cursor_big: bool,
+    // Pantallas (varios monitores)
+    pub display_mode: crate::display::Mode,
+    /// El segundo monitor va abajo del principal (si no, a la derecha).
+    pub display_vertical: bool,
+    /// Qué salida es la principal (0 o 1).
+    pub display_primary: u8,
     // Fecha y hora
     /// Diferencia con UTC en horas (Argentina: -3).
     pub utc_offset: i8,
@@ -279,6 +285,9 @@ impl Default for Config {
             top_stats: crate::look::STATS_ALL,
             clock_seconds: false,
             cursor_big: false,
+            display_mode: crate::display::Mode::Extend,
+            display_vertical: false,
+            display_primary: 0,
             utc_offset: -3,
             clock_24h: true,
             sounds: true,
@@ -384,6 +393,14 @@ impl Config {
                 "estadisticas" => c.top_stats = parse_stats(v),
                 "reloj_segundos" => c.clock_seconds = yes(v),
                 "cursor_grande" => c.cursor_big = yes(v),
+                "pantallas_modo" => {
+                    c.display_mode = crate::display::Mode::ALL
+                        .into_iter()
+                        .find(|m| m.code() == v)
+                        .unwrap_or(crate::display::Mode::Extend)
+                }
+                "pantallas_vertical" => c.display_vertical = yes(v),
+                "pantalla_principal" => c.display_primary = if v.trim() == "2" { 1 } else { 0 },
                 "zona_utc" => c.utc_offset = v.parse::<i8>().unwrap_or(-3).clamp(-12, 14),
                 "reloj_24h" => c.clock_24h = yes(v),
                 "sonidos" => c.sounds = yes(v),
@@ -460,6 +477,9 @@ impl Config {
             format!("estadisticas={}", stats_text(self.top_stats)),
             format!("reloj_segundos={}", yn(self.clock_seconds)),
             format!("cursor_grande={}", yn(self.cursor_big)),
+            format!("pantallas_modo={}", self.display_mode.code()),
+            format!("pantallas_vertical={}", yn(self.display_vertical)),
+            format!("pantalla_principal={}", self.display_primary + 1),
             format!("zona_utc={}", self.utc_offset),
             format!("reloj_24h={}", yn(self.clock_24h)),
             format!("sonidos={}", yn(self.sounds)),
@@ -609,6 +629,9 @@ mod tests {
             top_stats: crate::look::STAT_CPU | crate::look::STAT_TEMP,
             clock_seconds: true,
             cursor_big: true,
+            display_mode: crate::display::Mode::Duplicate,
+            display_vertical: true,
+            display_primary: 1,
             ..Config::default()
         };
         let mut c = c;

@@ -133,7 +133,7 @@ pub fn quick_links() -> Menu {
                 tr("Aplicaciones instaladas"),
                 "",
                 Some(Icon::Package),
-                Action::Launch(Launch::Settings(11))
+                Action::Launch(Launch::Settings(12))
             ),
             MenuItem::new(
                 tr("Monitor del sistema"),

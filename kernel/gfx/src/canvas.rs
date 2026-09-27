@@ -189,6 +189,44 @@ impl<'a> Canvas<'a> {
         })
     }
 
+    /// Una vista de la zona `r` (misma memoria y mismo `stride`): lo que se dibuja ahí queda en
+    /// este canvas, corrido a la esquina de `r`. Sirve para dibujar el fondo en cada monitor.
+    pub fn sub(&mut self, r: Rect) -> Option<Canvas<'_>> {
+        let r = r.clamp(self.width, self.height);
+        if r.is_empty() {
+            return None;
+        }
+        let start = (r.y as usize * self.stride + r.x as usize) * self.bytes_per_pixel;
+        let need = ((r.h as usize - 1) * self.stride + r.w as usize) * self.bytes_per_pixel;
+        // El recorte sigue valiendo adentro de la vista (corrido a su esquina).
+        let mut clip = [None; MAX_CLIP];
+        let clipped = self.clip[0].is_some();
+        let mut n = 0;
+        for c in self.clip.iter().flatten() {
+            if let Some(i) = c.intersection(&r) {
+                clip[n] = Some(Rect::new(i.x - r.x, i.y - r.y, i.w, i.h));
+                n += 1;
+            }
+        }
+        if clipped && n == 0 {
+            // Todo el recorte cae afuera: una zona vacía para que no se dibuje nada.
+            clip[0] = Some(Rect::new(0, 0, 0, 0));
+        }
+        let buf = self.buf.get_mut(start..)?;
+        if buf.len() < need {
+            return None;
+        }
+        Some(Canvas {
+            buf,
+            width: r.w as usize,
+            height: r.h as usize,
+            stride: self.stride,
+            bytes_per_pixel: self.bytes_per_pixel,
+            format: self.format,
+            clip,
+        })
+    }
+
     /// Limita el dibujo a la unión de `rects` (hasta [`MAX_CLIP`]). Cada píxel se pinta una sola
     /// vez aunque los rectángulos se superpongan, porque el recorte se chequea por píxel.
     pub fn set_clip(&mut self, rects: impl IntoIterator<Item = Rect>) {
@@ -653,5 +691,25 @@ mod tests {
     fn rechaza_buffers_chicos() {
         let mut buf = vec![0u8; 10];
         assert!(Canvas::new(&mut buf, 4, 4, 4, 4, PixelFormat::Rgb).is_none());
+    }
+
+    #[test]
+    fn una_vista_dibuja_en_su_zona() {
+        let mut buf = vec![0u8; 6 * 4 * 4];
+        let mut c = Canvas::new(&mut buf, 6, 4, 6, 4, PixelFormat::Bgr).unwrap();
+        {
+            let mut v = c.sub(Rect::new(3, 1, 3, 3)).unwrap();
+            assert_eq!((v.width(), v.height()), (3, 3));
+            v.fill(Color::WHITE);
+        }
+        assert_eq!(c.get(3, 1), Some(Color::WHITE));
+        assert_eq!(c.get(5, 3), Some(Color::WHITE));
+        assert_eq!(
+            c.get(2, 1),
+            Some(Color::BLACK),
+            "no se sale por la izquierda"
+        );
+        assert_eq!(c.get(3, 0), Some(Color::BLACK), "ni por arriba");
+        assert!(c.sub(Rect::new(10, 10, 2, 2)).is_none());
     }
 }

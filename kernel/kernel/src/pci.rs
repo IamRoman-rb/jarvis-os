@@ -54,6 +54,47 @@ impl Device {
         self.read(0x10 + n * 4)
     }
 
+    pub fn read8(&self, offset: u8) -> u8 {
+        (self.read(offset & !3) >> ((offset & 3) * 8)) as u8
+    }
+
+    /// Dirección física de un BAR de memoria (de 32 o 64 bits). `None` si es de puertos o está
+    /// vacío.
+    pub fn bar_address(&self, n: u8) -> Option<u64> {
+        let lo = self.bar(n);
+        if lo & 1 != 0 {
+            return None; // puertos de E/S
+        }
+        let addr = match (lo >> 1) & 0b11 {
+            // 64 bits: la parte alta está en el BAR siguiente.
+            0b10 => (lo as u64 & !0xF) | ((self.bar(n + 1) as u64) << 32),
+            _ => lo as u64 & !0xF,
+        };
+        (addr != 0).then_some(addr)
+    }
+
+    /// Lista de "capacidades" del dispositivo: (id, desplazamiento en el espacio de
+    /// configuración). virtio moderno describe ahí dónde están sus registros.
+    pub fn capabilities(&self) -> alloc::vec::Vec<(u8, u8)> {
+        let mut out = alloc::vec::Vec::new();
+        // Bit 4 del registro de estado: hay lista de capacidades.
+        if (self.read(0x04) >> 16) & 0x10 == 0 {
+            return out;
+        }
+        let mut ptr = self.read8(0x34) & !3;
+        while ptr != 0 && out.len() < 48 {
+            out.push((self.read8(ptr), ptr));
+            ptr = self.read8(ptr + 1) & !3;
+        }
+        out
+    }
+
+    /// Habilita el acceso a sus registros en memoria (bit 1) y el DMA (bus master, bit 2).
+    pub fn enable_memory_and_dma(&self) {
+        let command = self.read(0x04) & 0xFFFF;
+        write32(self.bus, self.slot, self.function, 0x04, command | 0b110);
+    }
+
     /// Habilita el acceso por puertos de E/S (bit 0) y que el dispositivo lea/escriba la memoria
     /// por su cuenta, sin pasar por la CPU (bus master, bit 2): eso es DMA.
     pub fn enable_io_and_dma(&self) {
