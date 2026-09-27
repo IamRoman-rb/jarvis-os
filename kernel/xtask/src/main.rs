@@ -322,13 +322,16 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         .args(["-device", "virtio-blk-pci,drive=disco,disable-modern=on"]);
     // Placa de video: virtio-vga (una virtio-gpu que arranca como VGA común, así el firmware
     // tiene dónde dibujar) con una salida por monitor del anfitrión. JARVIS_MONITORES la cambia.
+    // Con ventana, cada salida arranca del tamaño del monitor del anfitrión (sin esto, QEMU
+    // informa el de su ventana al arrancar: 640×480). JARVIS_RESOLUCION=1920x1080 lo cambia.
     let monitors = monitor_count();
-    cmd.args([
-        "-vga",
-        "none",
-        "-device",
-        &format!("virtio-vga,id=video,max_outputs={monitors}"),
-    ]);
+    let mut video = format!("virtio-vga,id=video,max_outputs={monitors}");
+    if !headless && let Some((w, h)) = host_resolution() {
+        video.push_str(&format!(",xres={w},yres={h}"));
+        // La ventana se ajusta a la pantalla (Ctrl+Alt+F: pantalla completa).
+        cmd.args(["-display", "gtk,zoom-to-fit=on"]);
+    }
+    cmd.args(["-vga", "none", "-device", &video]);
     // Placa de red virtio-net con la red "user" de QEMU: DHCP (10.0.2.15), DNS (10.0.2.3) y
     // salida a internet por el anfitrión, que se ve como 10.0.2.2.
     cmd.args([
@@ -347,6 +350,33 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
 static MONITORS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Cuántos monitores tiene el anfitrión (JARVIS_MONITORES manda; si no, se preguntan a Windows).
+/// La resolución del monitor del anfitrión, o `JARVIS_RESOLUCION` (`ANCHOxALTO`).
+fn host_resolution() -> Option<(u32, u32)> {
+    let parse = |v: &str| {
+        let (w, h) = v.trim().split_once(['x', 'X'])?;
+        let (w, h) = (w.trim().parse::<u32>().ok()?, h.trim().parse::<u32>().ok()?);
+        (640..=7680).contains(&w).then_some(())?;
+        (480..=4320).contains(&h).then_some((w, h))
+    };
+    if let Ok(v) = env::var("JARVIS_RESOLUCION") {
+        return parse(&v);
+    }
+    if !cfg!(windows) {
+        return None;
+    }
+    let out = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            // La resolución real (la de Forms viene dividida por la escala de Windows).
+            "$v = Get-CimInstance Win32_VideoController | ? CurrentHorizontalResolution | select -First 1; \"$($v.CurrentHorizontalResolution)x$($v.CurrentVerticalResolution)\"",
+        ])
+        .output()
+        .ok()?;
+    parse(&String::from_utf8_lossy(&out.stdout))
+}
+
 fn monitor_count() -> u32 {
     let forced = MONITORS.load(std::sync::atomic::Ordering::Relaxed);
     if forced > 0 {
