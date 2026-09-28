@@ -236,9 +236,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         // anfitrión pasó la resolución de su monitor, manda esa.
         if let Some((w, h)) = fw_cfg::resolution() {
             serial_println!("PANTALLA resolución del anfitrión {w}x{h}");
-            for o in &mut outputs {
-                *o = (w, h);
-            }
+            outputs.fill((w, h));
         }
     }
 
