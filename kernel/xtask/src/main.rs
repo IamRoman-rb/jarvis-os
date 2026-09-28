@@ -846,6 +846,21 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
         s.monitor("sendkey esc")?;
         s.wait_for("CEREBRO_CONFIRMACION 2 no", STEP)?;
         s.wait_for("CEREBRO_RESPUESTA No lo hice", STEP)?;
+        // Un proyecto: se permite abrirlo (nivel 2, con el teclado), se abre la ventana Proyecto
+        // y la edición que pide el agente se rechaza.
+        s.monitor("sendkey meta_l-r")?;
+        thread::sleep(Duration::from_millis(500));
+        s.type_text("abri el proyecto demo")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("CEREBRO_CONFIRMAR 2 Abrir el proyecto demo", STEP)?;
+        s.monitor("sendkey left")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("PROYECTO_INICIO demo", STEP)?;
+        s.wait_for("CEREBRO_CONFIRMAR 2 [demo] Edit README.md", STEP)?;
+        s.monitor("sendkey esc")?;
+        s.wait_for("PROYECTO_FIN demo", STEP)?;
+        thread::sleep(Duration::from_millis(500));
+        s.screenshot_head(&target_dir().join("jarvis-os-proyecto.png"), None)?;
     }
     s.quit();
     drop(s);

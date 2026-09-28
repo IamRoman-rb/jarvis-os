@@ -250,3 +250,26 @@ fn abrir_con_una_frase_va_al_cerebro() {
     b.ask("abrí el navegador y buscá rust");
     assert!(b.sent.contains("\"t\":\"pedido\""), "{}", b.sent);
 }
+
+#[test]
+fn un_proyecto_abre_su_ventana_y_esc_lo_detiene() {
+    let mut b = connected();
+    b.reply(r#"{"t":"proyecto","nombre":"jarvis-os","ev":"inicio","texto":"jarvis-os: Seguí con lo que estábamos trabajando."}"#);
+    assert_eq!(b.t.d.focused_app(), Some(AppKind::Project));
+    b.reply(r#"{"t":"proyecto","nombre":"jarvis-os","ev":"texto","texto":"Leo dónde habíamos quedado."}"#);
+    b.reply(r#"{"t":"proyecto","nombre":"jarvis-os","ev":"herramienta","texto":"Read CLAUDE.md"}"#);
+    let text = match b.t.d.app(AppKind::Project) {
+        Some(App::Project(p)) => p.text(),
+        _ => panic!("sin ventana Proyecto"),
+    };
+    assert!(
+        text.contains("Leo dónde habíamos quedado.\n  · Read CLAUDE.md"),
+        "{text}"
+    );
+    b.sent.clear();
+    b.t.key(Key::Escape);
+    b.collect();
+    assert_eq!(b.sent, "{\"t\":\"proyecto_detener\"}\n");
+    b.reply(r#"{"t":"proyecto","nombre":"jarvis-os","ev":"fin","texto":"Detenido."}"#);
+    assert!(b.t.logs().iter().any(|l| l == "PROYECTO_FIN jarvis-os"));
+}

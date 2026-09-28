@@ -61,7 +61,10 @@ pub fn start(port: u16, simulated: bool) -> Option<Brain> {
         .env("JARVIS_CEREBRO_TOKEN", &token)
         .stdin(Stdio::null());
     if simulated {
-        cmd.arg("--simulado");
+        // Proyectos de mentira: el simulado no toca los de verdad.
+        let demo = crate::target_dir().join("proyectos-prueba");
+        let _ = std::fs::create_dir_all(demo.join("demo"));
+        cmd.arg("--simulado").arg("--proyectos").arg(demo);
     }
     match cmd.spawn() {
         Ok(child) => {

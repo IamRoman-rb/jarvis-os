@@ -128,6 +128,11 @@ SCRIPT: list[tuple[str, str]] = [
 
 # Pedidos con acción del cerebro simulado: (patrón, tool, argumentos a partir del match).
 ACTIONS: list[tuple[str, str, Any]] = [
+    (
+        r"abr[ií] (?:el )?proyecto (\S+)",
+        "abrir_proyecto",
+        lambda m: {"nombre": m[1], "seguir": True, "pedido": ""},
+    ),
     (r"abr[ií] el navegador y busc[aá] (.+)", "buscar_web", lambda m: {"consulta": m[1]}),
     (r"abr[ií] (?:el |la )?(\w+)$", "abrir_app", lambda m: {"app": m[1]}),
     (r"cre[aá] (\S+) con (.+)", "escribir_archivo", lambda m: {"ruta": m[1], "contenido": m[2]}),

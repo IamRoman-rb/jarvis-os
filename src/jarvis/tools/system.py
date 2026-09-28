@@ -50,6 +50,14 @@ SPECS: list[tuple[str, str, dict[str, type]]] = [
     ("mover", "Mueve un archivo o carpeta a otra carpeta.", {"origen": str, "destino": str}),
     ("cerrar_ventana", "Cierra la ventana de una app.", {"app": str}),
     ("a_papelera", "Mueve un archivo o carpeta a la Papelera (nunca borra).", {"ruta": str}),
+    ("listar_proyectos", "Los proyectos de código de Roman (carpetas en su PC).", {}),
+    (
+        "abrir_proyecto",
+        "Abre un proyecto de código con un agente que trabaja en él (se ve en la ventana "
+        "Proyecto). seguir=true retoma la última conversación de Claude Code en esa carpeta; "
+        "pedido es qué hacer (vacío = seguir con lo que estaban).",
+        {"nombre": str, "seguir": bool, "pedido": str},
+    ),
     (
         "ejecutar_comando",
         "Ejecuta un comando en la terminal de JARVIS-OS (jsh: ls, apt install, snap…).",
@@ -74,6 +82,9 @@ def describe(tool: str, args: dict[str, Any]) -> str:
             return f"Copiar {a.get('origen', '?')} a {a.get('destino', '?')}."
         case "mover":
             return f"Mover {a.get('origen', '?')} a {a.get('destino', '?')}."
+        case "abrir_proyecto":
+            what = a.get("pedido") or "seguir con lo que estaban trabajando"
+            return f"Abrir el proyecto {a.get('nombre', '?')} y {what}."
         case "cerrar_ventana":
             return f"Cerrar la ventana de {a.get('app', '?')}."
         case "a_papelera":

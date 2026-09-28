@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from pathlib import Path
 
 import typer
 
@@ -22,6 +23,7 @@ def version() -> None:
 def serve(
     puerto: int = typer.Option(0, help="Puerto en 127.0.0.1 (0 = el de config.toml, 8121)."),
     simulado: bool = typer.Option(False, help="Respuestas fijas, sin Claude (para los tests)."),
+    proyectos: str = typer.Option("", help="Carpeta de proyectos (vacío = la de config.toml)."),
 ) -> None:
     """El cerebro para el kernel de JARVIS-OS (lo levanta `cargo xtask run`).
 
@@ -30,7 +32,8 @@ def serve(
     """
     from jarvis.agent.brain import Brain, ClaudeBrain, ScriptedBrain
     from jarvis.config import Config
-    from jarvis.service.server import Session
+    from jarvis.projects import ClaudeProject, ProjectRunner, ScriptedProject
+    from jarvis.service.server import Host, Session
     from jarvis.service.server import serve as run_server
 
     token = os.environ.get("JARVIS_CEREBRO_TOKEN", "")
@@ -43,8 +46,15 @@ def serve(
     def make_brain(session: Session) -> Brain:
         return ScriptedBrain(session) if simulado else ClaudeBrain(config, session)
 
+    def make_project(path: Path, request: str, keep_going: bool) -> ProjectRunner:
+        if simulado:
+            return ScriptedProject(path, request, keep_going)
+        return ClaudeProject(path, request, keep_going, config)
+
+    root = Path(proyectos) if proyectos else config.proyectos
+    host = Host(projects=root, make_project=make_project)
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_server(puerto or config.puerto, token, make_brain))
+        asyncio.run(run_server(puerto or config.puerto, token, make_brain, host))
 
 
 @app.callback()

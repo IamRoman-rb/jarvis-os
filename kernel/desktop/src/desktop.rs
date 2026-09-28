@@ -1958,6 +1958,19 @@ impl<D: BlockDevice> Desktop<D> {
                     self.say(&first, now_ms);
                 }
                 BrainEvent::Error(_) | BrainEvent::Confirm { .. } => {}
+                BrainEvent::Project { name, ev, text } => {
+                    // La ventana Proyecto se abre sola al empezar.
+                    if ev == "inicio" && self.window_of(AppKind::Project).is_none() {
+                        let clock = self.last_clock;
+                        self.open(Launch::App(AppKind::Project), now_ms, clock);
+                    }
+                    for s in &mut self.slots {
+                        if let crate::apps::App::Project(p) = &mut s.app {
+                            p.event(name, ev, text);
+                            s.content_dirty = true;
+                        }
+                    }
+                }
                 BrainEvent::Action { call, tool, args } => {
                     let (ok, datos) = self.run_action(tool, args, now_ms);
                     self.brain.result(*call, ok, &datos, &mut self.out);
@@ -2060,6 +2073,7 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::Folder(p) => App::Files(FilesWindow::new(&p, &mut ctx)),
             Launch::App(AppKind::Monitor) => App::Monitor(Monitor::new()),
             Launch::App(AppKind::Console) => App::Console(Console::new()),
+            Launch::App(AppKind::Project) => App::Project(crate::apps::project::Project::new()),
             Launch::App(AppKind::Music) => App::Music(Music::new()),
             Launch::App(AppKind::Editor) => App::Editor(Editor::new()),
             Launch::Edit(p) => App::Editor(Editor::open(&p, &mut ctx)),
