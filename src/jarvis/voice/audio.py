@@ -166,3 +166,45 @@ def jarvis_effect(pcm: bytes, rate: int) -> bytes:
     for i in range(d, len(a)):
         out[i] = max(-32768, min(32767, int(a[i] * 0.75 + a[i - d] * 0.35)))
     return out.tobytes()
+
+
+#: Lo que Whisper "oye" en el ruido o el silencio (lo aprendió de subtítulos de videos).
+HALLUCINATIONS = (
+    "suscribete",
+    "suscribanse",
+    "gracias por ver",
+    "gracias por mirar",
+    "gracias por su atencion",
+    "subtitulos realizados",
+    "subtitulado por",
+    "amara org",
+    "no olvides suscribirte",
+    "dale like",
+)
+
+
+def is_noise(text: str) -> bool:
+    """Una transcripción que no es un pedido: vacía, solo signos, o una alucinación típica."""
+    plain = " ".join(_plain(text).split())
+    if sum(c.isalpha() for c in plain) < 2:
+        return True
+    if plain in ("musica", "aplausos", "risas", "silencio", "gracias"):
+        return True
+    return any(h in plain for h in HALLUCINATIONS)
+
+
+def for_speech(text: str) -> str:
+    """El texto como para decirlo: sin markdown, sin emojis ni símbolos, las direcciones como
+    "el enlace" y los saltos de línea como pausas."""
+    import re
+
+    t = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)  # [texto](url) → texto
+    t = re.sub(r"https?://\S+", "el enlace", t)
+    t = re.sub(r"[*_`#>|~]+", "", t)
+    t = re.sub(r"^\s*[-•]\s+", "", t, flags=re.MULTILINE)
+    # Solo letras, números y la puntuación que Piper sabe leer (fuera emojis y símbolos).
+    t = "".join(c if c.isalnum() or c.isspace() or c in ".,;:!?¡¿()'\"-/%$°" else " " for c in t)
+    t = re.sub(r"\s*\n\s*", ". ", t.strip())
+    t = re.sub(r"\.(\s*\.)+", ".", t)
+    return re.sub(r"[ \t]+", " ", t).strip()

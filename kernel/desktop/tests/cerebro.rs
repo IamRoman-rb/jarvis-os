@@ -310,3 +310,68 @@ fn lo_que_se_oye_se_trata_como_escrito() {
     b.collect();
     assert_eq!(b.sent, "{\"t\":\"escuchar\"}\n");
 }
+
+#[test]
+fn abrir_un_archivo_y_leer_la_terminal() {
+    let mut b = connected();
+    b.reply(r#"{"t":"accion","llamada":1,"tool":"escribir_archivo","args":{"ruta":"/Descargas/file.txt","contenido":"Hola Mundo"}}"#);
+    b.reply(
+        r#"{"t":"accion","llamada":2,"tool":"abrir_archivo","args":{"ruta":"Descargas/file.txt"}}"#,
+    );
+    assert_eq!(b.t.d.focused_app(), Some(AppKind::Editor));
+    assert!(
+        last_line(&b).contains("en el editor de texto"),
+        "{}",
+        last_line(&b)
+    );
+    b.reply(r#"{"t":"accion","llamada":3,"tool":"abrir_archivo","args":{"ruta":"/Descargas"}}"#);
+    assert_eq!(b.t.d.focused_app(), Some(AppKind::Files));
+    b.reply(
+        r#"{"t":"accion","llamada":4,"tool":"abrir_archivo","args":{"ruta":"/no/existe.txt"}}"#,
+    );
+    assert!(last_line(&b).contains(r#""ok":false"#));
+    // La salida del comando vuelve a Claude.
+    b.reply(r#"{"t":"accion","llamada":5,"tool":"ejecutar_comando","args":{"comando":"echo hola desde jsh"}}"#);
+    assert!(
+        last_line(&b).contains("hola desde jsh\n") || last_line(&b).ends_with("hola desde jsh\"}"),
+        "{}",
+        last_line(&b)
+    );
+    b.reply(r#"{"t":"accion","llamada":6,"tool":"leer_terminal","args":{}}"#);
+    assert!(
+        last_line(&b).contains("hola desde jsh"),
+        "{}",
+        last_line(&b)
+    );
+}
+
+#[test]
+fn iniciar_sesion_con_google_desde_configuracion() {
+    let mut b = connected();
+    b.reply(r#"{"t":"cuenta","sesion":false,"email":"","plan":"","estado":""}"#);
+    assert!(b.t.logs().iter().any(|l| l == "CEREBRO_CUENTA no "));
+    // Configuración → Asistente (IA): la última sección.
+    b.t.combo(Mods::WIN, Key::Char('i'));
+    b.t.key(Key::PageUp);
+    let Some(App::Settings(st)) = b.t.d.app(AppKind::Settings) else {
+        panic!("no se abrió Configuración");
+    };
+    assert_eq!(st.section.name(), "Asistente (IA)");
+    // Filas: Cerebro, Cuenta (solo lectura), Iniciar sesión con Google.
+    b.t.key(Key::Down);
+    b.t.key(Key::Down);
+    b.t.key(Key::Enter);
+    b.collect();
+    assert!(
+        b.sent
+            .contains(r#"{"t":"iniciar_sesion","metodo":"google"}"#),
+        "{}",
+        b.sent
+    );
+    b.reply(r#"{"t":"cuenta","sesion":true,"email":"roman@example.com","plan":"pro","estado":"Listo: entraste."}"#);
+    assert!(
+        b.t.logs()
+            .iter()
+            .any(|l| l == "CEREBRO_CUENTA si Listo: entraste.")
+    );
+}

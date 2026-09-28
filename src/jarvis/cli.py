@@ -50,7 +50,9 @@ def serve(
     setup_logging(config)
 
     def make_brain(session: Session) -> Brain:
-        return ScriptedBrain(session) if simulado else ClaudeBrain(config, session)
+        if simulado:
+            return ScriptedBrain(session)
+        return ClaudeBrain(config, session, voice=host.voice is not None)
 
     def make_project(path: Path, request: str, keep_going: bool) -> ProjectRunner:
         if simulado:
@@ -59,6 +61,11 @@ def serve(
 
     root = Path(proyectos) if proyectos else config.proyectos
     host = Host(projects=root, make_project=make_project)
+    if not simulado:
+        from jarvis import account
+
+        host.account_status = account.status
+        host.account_login = account.login
 
     async def main() -> None:
         # Si muere el programa que lo lanzó (`cargo xtask run`), el cerebro también: si no,

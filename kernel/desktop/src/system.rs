@@ -54,6 +54,8 @@ pub struct SystemStats {
     pub brain_online: bool,
     /// El cerebro tiene voz (micrófono y parlantes del anfitrión).
     pub brain_voice: bool,
+    /// La cuenta de Claude del anfitrión (Configuración → Asistente).
+    pub brain_account: crate::brain::Account,
     /// El micrófono de JARVIS-OS (virtio-sound), si el kernel encontró uno.
     pub mic: Option<crate::audio::MicInfo>,
 }

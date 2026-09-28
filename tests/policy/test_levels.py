@@ -7,7 +7,14 @@ from typing import Any
 import pytest
 
 from jarvis.policy import audit as audit_mod
-from jarvis.policy.levels import LEVELS, MCP_PREFIX, UnknownToolError, auto_approved, level_of
+from jarvis.policy.levels import (
+    BUILTIN_LEVELS,
+    LEVELS,
+    MCP_PREFIX,
+    UnknownToolError,
+    auto_approved,
+    level_of,
+)
 from jarvis.tools.system import SPECS, Gate, describe
 
 
@@ -37,15 +44,20 @@ def audit_file(tmp_path: Path) -> Path:
 def test_cada_tool_tiene_nivel_y_la_tabla_de_permisos_la_lista() -> None:
     assert {s[0] for s in SPECS} == set(LEVELS)
     table = Path("docs/permisos.md").read_text(encoding="utf-8")
-    for name, level in LEVELS.items():
+    for name, level in {**LEVELS, **BUILTIN_LEVELS}.items():
         assert f"| `{name}` | {level} |" in table, name
 
 
 def test_solo_el_nivel_1_se_aprueba_solo() -> None:
-    assert set(auto_approved()) == {MCP_PREFIX + n for n, lvl in LEVELS.items() if lvl == 1}
+    assert set(auto_approved()) == {MCP_PREFIX + n for n, lvl in LEVELS.items() if lvl == 1} | {
+        n for n, lvl in BUILTIN_LEVELS.items() if lvl == 1
+    }
     assert MCP_PREFIX + "a_papelera" not in auto_approved()
     with pytest.raises(UnknownToolError):
         level_of("Bash")
+    # De Claude Code, solo leer la web: nada que escriba ni ejecute.
+    assert set(BUILTIN_LEVELS) == {"WebSearch", "WebFetch"}
+    assert level_of("WebFetch") == 1
 
 
 async def test_nivel_1_no_pregunta() -> None:

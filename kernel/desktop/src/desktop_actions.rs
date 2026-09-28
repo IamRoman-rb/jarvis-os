@@ -16,6 +16,21 @@ use crate::system::Launch;
 /// Lo más que se le devuelve a Claude de un archivo.
 const MAX_READ: usize = 64 * 1024;
 const MAX_FOUND: usize = 50;
+/// Cuánto de la terminal se le devuelve a Claude (lo último).
+const MAX_TERM: usize = 4 * 1024;
+
+/// Las últimas `max` letras de `text` (sin cortar un carácter por la mitad).
+fn tail(text: &str, max: usize) -> &str {
+    let text = text.trim_end();
+    if text.len() <= max {
+        return text;
+    }
+    let mut start = text.len() - max;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
+}
 
 /// Una ruta absoluta y sin `..` (las de Claude pueden venir sin la barra inicial).
 fn clean(path: &str) -> Option<String> {
@@ -134,13 +149,91 @@ impl<D: BlockDevice> Desktop<D> {
             "ejecutar_comando" => {
                 let cmd = arg("comando");
                 self.open(Launch::Terminal(Some(cmd.clone())), now_ms, clock);
-                (
-                    true,
-                    format!("Lo ejecuté en una terminal (la salida se ve en su ventana): {cmd}"),
-                )
+                // Los comandos locales terminan al momento: la salida va en la respuesta. Los que
+                // esperan la red (apt, wget...) siguen: Claude la lee después con leer_terminal.
+                match self.terminal_text() {
+                    Some((text, false)) => (
+                        true,
+                        format!(
+                            "Ejecuté: {cmd}
+Lo último de la terminal:
+{text}"
+                        ),
+                    ),
+                    Some((text, true)) => (
+                        true,
+                        format!(
+                            "Ejecuté: {cmd}
+Todavía está corriendo (usá leer_terminal para ver cómo termina). Por ahora:
+{text}"
+                        ),
+                    ),
+                    None => (true, format!("Lo mandé a la terminal: {cmd}")),
+                }
             }
+            "leer_terminal" => match self.terminal_text() {
+                Some((text, running)) => (
+                    true,
+                    format!(
+                        "{}
+{text}",
+                        if running {
+                            "(el comando sigue corriendo)"
+                        } else {
+                            "(la terminal espera otro comando)"
+                        }
+                    ),
+                ),
+                None => (false, "No hay ninguna terminal abierta.".into()),
+            },
+            "abrir_archivo" => self.open_file(&arg("ruta"), now_ms, clock),
             _ => self.file_action(tool, &arg, now, bad_path),
         }
+    }
+
+    /// Lo último que muestra la terminal, y si el comando sigue corriendo.
+    fn terminal_text(&self) -> Option<(String, bool)> {
+        self.slots.iter().rev().find_map(|s| match &s.app {
+            crate::apps::App::Terminal(t) => {
+                Some((tail(&t.text(), MAX_TERM).to_string(), t.shell.waiting()))
+            }
+            _ => None,
+        })
+    }
+
+    /// Abre un archivo con su app (como el doble clic en Archivos): carpetas en Archivos,
+    /// imágenes en el visor, páginas en el navegador y el resto en el editor.
+    fn open_file(
+        &mut self,
+        path: &str,
+        now_ms: u64,
+        clock: Option<jarvis_gfx::clock::DateTime>,
+    ) -> (bool, String) {
+        let Some(p) = clean(path) else {
+            return (false, format!("Ruta inválida: {path}"));
+        };
+        let Some(fs) = self.fs.as_mut() else {
+            return (false, "JARVIS-OS no tiene disco.".into());
+        };
+        let st = match fs.stat(&p) {
+            Ok(st) => st,
+            Err(e) => return (false, format!("No pude abrir {p}: {e}")),
+        };
+        let lower = p.to_lowercase();
+        let image = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg"]
+            .iter()
+            .any(|e| lower.ends_with(e));
+        let (launch, app) = if st.is_dir || p == "/" {
+            (Launch::Folder(p.clone()), "Archivos")
+        } else if image {
+            (Launch::View(p.clone()), "el visor de imágenes")
+        } else if lower.ends_with(".html") || lower.ends_with(".htm") {
+            (Launch::Browse(format!("file://{p}")), "el navegador")
+        } else {
+            (Launch::Edit(p.clone()), "el editor de texto")
+        };
+        self.open(launch, now_ms, clock);
+        (true, format!("Abrí {p} en {app}."))
     }
 
     fn file_action(

@@ -830,6 +830,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.sync_counts = (self.sync.sent, self.sync.received);
         self.stats.brain_online = self.brain.online();
         self.stats.brain_voice = self.brain.voice;
+        self.stats.brain_account = self.brain.account.clone();
         self.stats_version += 1;
         for s in &mut self.slots {
             if s.app.kind() == AppKind::Monitor {
@@ -1970,6 +1971,7 @@ impl<D: BlockDevice> Desktop<D> {
         use crate::brain::BrainEvent;
         self.stats.brain_online = self.brain.online();
         self.stats.brain_voice = self.brain.voice;
+        self.stats.brain_account = self.brain.account.clone();
         self.logs.append(&mut self.brain.logs);
         for ev in events {
             match &ev {
@@ -1982,6 +1984,16 @@ impl<D: BlockDevice> Desktop<D> {
                     self.say(&first, now_ms);
                 }
                 BrainEvent::Error(_) | BrainEvent::Confirm { .. } => {}
+                BrainEvent::Account => {
+                    for s in &mut self.slots {
+                        if let crate::apps::App::Settings(st) = &mut s.app
+                            && st.section == crate::apps::settings::Section::Assistant
+                        {
+                            st.dirty = true;
+                            s.content_dirty = true;
+                        }
+                    }
+                }
                 BrainEvent::VoiceLevel(n) => self.assistant.set_audio_level(*n, now_ms),
                 BrainEvent::Listening(true) => self.say(tr("Te escucho."), now_ms),
                 BrainEvent::Listening(false) => {}

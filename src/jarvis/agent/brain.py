@@ -1,7 +1,8 @@
 """El cerebro: recibe un pedido en texto y devuelve la respuesta de a pedazos.
 
 - `ClaudeBrain`: Claude por el Agent SDK, con el login de Claude Code de la PC (sin API key).
-  Sin herramientas propias de Claude Code (Bash, Edit…): solo puede actuar con las de JARVIS.
+  De las herramientas de Claude Code solo tiene WebSearch y WebFetch (leer la web); actúa sobre
+  JARVIS-OS solo con las de JARVIS.
 - `ScriptedBrain`: respuestas fijas, sin red ni API, para los tests (`jarvis serve --simulado`).
 """
 
@@ -12,10 +13,10 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
-from jarvis.agent.prompts import JARVIS_SYSTEM_PROMPT
+from jarvis.agent.prompts import build_prompt
 from jarvis.config import Config
 from jarvis.policy.audit import audit
-from jarvis.policy.levels import auto_approved, bare
+from jarvis.policy.levels import auto_approved, bare, builtin_tools
 from jarvis.tools.system import Gate, Kernel, build_server
 
 
@@ -36,8 +37,9 @@ class Brain(Protocol):
 
 
 class ClaudeBrain:
-    def __init__(self, config: Config, kernel: Kernel) -> None:
+    def __init__(self, config: Config, kernel: Kernel, voice: bool = False) -> None:
         self._config = config
+        self._voice = voice
         self._kernel = kernel
         self._gate = Gate(kernel)
         self._client: Any = None
@@ -58,10 +60,10 @@ class ClaudeBrain:
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
         return ClaudeAgentOptions(
-            system_prompt=JARVIS_SYSTEM_PROMPT,
+            system_prompt=build_prompt(self._voice),
             model=self._config.modelo,
-            # Sin las herramientas de Claude Code: JARVIS actúa solo con las suyas (§12.2).
-            tools=[],
+            # De Claude Code, solo leer la web (policy/levels.py): JARVIS actúa con las suyas.
+            tools=builtin_tools(),
             mcp_servers={"jarvis": build_server(self._kernel)},
             # Solo las de nivel 1 se aprueban solas; las de 2 y 3 caen en can_use_tool.
             allowed_tools=auto_approved(),
@@ -138,6 +140,7 @@ ACTIONS: list[tuple[str, str, Any]] = [
     (r"cre[aá] (\S+) con (.+)", "escribir_archivo", lambda m: {"ruta": m[1], "contenido": m[2]}),
     (r"(?:borr[aá]|tir[aá]) (\S+)", "a_papelera", lambda m: {"ruta": m[1]}),
     (r"le[eé] (\S+)", "leer_archivo", lambda m: {"ruta": m[1]}),
+    (r"mostr[aá]me (\S+)", "abrir_archivo", lambda m: {"ruta": m[1]}),
 ]
 
 

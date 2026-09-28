@@ -12,11 +12,12 @@ import asyncio
 import hmac
 import itertools
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from jarvis import account
 from jarvis.agent.brain import Brain, BrainError
 from jarvis.projects import ProjectError, ProjectRunner, list_projects, resolve_project
 from jarvis.protocol import MAX_LINE, Message, ProtocolError, decode, encode
@@ -34,6 +35,7 @@ CONFIRM_TIMEOUT = 120.0
 HOST_TOOLS = {"listar_proyectos", "abrir_proyecto"}
 
 MakeProject = Callable[[Path, str, bool], ProjectRunner]
+AccountCall = Callable[[], Awaitable[account.Account]]
 
 
 @dataclass
@@ -44,6 +46,9 @@ class Host:
     make_project: MakeProject | None = None
     #: La voz del anfitrión (None = sin micrófono ni parlantes).
     voice: VoiceHub | None = None
+    #: La cuenta de Claude (Configuración → Asistente). None = no se pregunta (tests).
+    account_status: AccountCall | None = None
+    account_login: AccountCall | None = None
 
 
 class Session:
@@ -64,6 +69,7 @@ class Session:
         self.current_id: int | None = None
         self._calls = itertools.count(1)
         self._pending: dict[int, asyncio.Future[Any]] = {}
+        self._login: asyncio.Task[None] | None = None
 
     async def _ask(self, msg: dict[str, Any], wait: float) -> Any:
         call = next(self._calls)
@@ -132,6 +138,39 @@ class Session:
             log.exception("el agente del proyecto falló")
             await emit("error", str(e))
 
+    def _spawn(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+        task = asyncio.create_task(coro)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        return task
+
+    async def send_account(self, call: AccountCall | None, doing: str = "") -> None:
+        """Pregunta la cuenta (o inicia sesión) y se la manda al kernel como `cuenta`."""
+        if call is None:
+            await self.send({"t": "cuenta", "estado": "Este cerebro no maneja cuentas."})
+            return
+        if doing:
+            await self.send({"t": "cuenta", "estado": doing})
+        try:
+            acc = await call()
+        except account.AccountError as e:
+            await self.send({"t": "cuenta", "estado": str(e)})
+            return
+        except Exception as e:  # el kernel tiene que enterarse de cualquier falla
+            log.exception("falló la cuenta")
+            await self.send({"t": "cuenta", "estado": f"falla: {e}"})
+            return
+        estado = ("Listo: entraste." if doing else "") if acc.logged_in else ""
+        await self.send(
+            {
+                "t": "cuenta",
+                "sesion": acc.logged_in,
+                "email": acc.email,
+                "plan": acc.plan,
+                "estado": estado,
+            }
+        )
+
     async def stop_project(self) -> None:
         if self.project_task is not None and not self.project_task.done():
             if self.project is not None:
@@ -172,6 +211,10 @@ class Session:
             log.exception("el cerebro falló")
             await self.send({"t": "error", "id": req_id, "msg": f"falla del cerebro: {e}"})
 
+    def _hush(self) -> None:
+        if self.host is not None and self.host.voice is not None:
+            self.host.voice.hush()
+
     async def cancel(self) -> None:
         if self.current is not None and not self.current.done():
             if self.brain is not None:
@@ -185,10 +228,12 @@ class Session:
             if not isinstance(req_id, int) or not isinstance(text, str) or not text.strip():
                 raise ProtocolError("pedido sin id o sin texto")
             await self.cancel()
+            self._hush()
             self.current_id = req_id
             by_voice = msg.get("origen") == "voz"
             self.current = asyncio.create_task(self.answer(req_id, text, by_voice))
         elif t == "cancelar":
+            self._hush()
             if msg.get("id") == self.current_id:
                 await self.cancel()
         elif t == "resultado":
@@ -205,6 +250,18 @@ class Session:
                 task = asyncio.create_task(voice.speak(text))
                 self._background.add(task)
                 task.add_done_callback(self._background.discard)
+        elif t == "cuenta":
+            self._spawn(self.send_account(self.host.account_status if self.host else None))
+        elif t == "iniciar_sesion":
+            if self._login is not None and not self._login.done():
+                await self.send({"t": "cuenta", "estado": "Ya hay un inicio de sesión en curso."})
+                return
+            self._login = self._spawn(
+                self.send_account(
+                    self.host.account_login if self.host else None,
+                    'Seguí en el navegador de la PC: elegí "Continuar con Google".',
+                )
+            )
         elif t == "escuchar":
             if self.host is not None and self.host.voice is not None:
                 self.host.voice.listen_now()
@@ -237,6 +294,8 @@ async def serve_connection(
         if host is not None and host.voice is not None:
             host.voice.session = session
         await session.send({"t": "listo", "voz": host is not None and host.voice is not None})
+        if host is not None and host.account_status is not None:
+            session._spawn(session.send_account(host.account_status))
         while True:
             line = await reader.readline()
             if not line:

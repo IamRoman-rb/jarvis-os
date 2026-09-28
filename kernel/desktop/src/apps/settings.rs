@@ -58,9 +58,10 @@ pub enum Section {
     Firewall,
     Sync,
     Microphone,
+    Assistant,
 }
 
-pub const SECTIONS: [Section; 18] = [
+pub const SECTIONS: [Section; 19] = [
     Section::System,
     Section::Displays,
     Section::Personalization,
@@ -79,6 +80,7 @@ pub const SECTIONS: [Section; 18] = [
     Section::Firewall,
     Section::Sync,
     Section::Microphone,
+    Section::Assistant,
 ];
 
 impl Section {
@@ -102,6 +104,7 @@ impl Section {
             Section::Firewall => tr("Firewall"),
             Section::Sync => tr("Sincronización"),
             Section::Microphone => tr("Micrófono"),
+            Section::Assistant => tr("Asistente (IA)"),
         }
     }
 
@@ -125,6 +128,7 @@ impl Section {
             Section::Firewall => Icon::Globe,
             Section::Sync => Icon::Folder,
             Section::Microphone => Icon::Mic,
+            Section::Assistant => Icon::Chat,
         }
     }
 }
@@ -169,6 +173,9 @@ pub enum Opt {
     BraveServer,
     SyncNewCode,
     MicListen,
+    /// Iniciar sesión en Claude con Google (en el navegador del anfitrión).
+    AiLogin,
+    AiRefresh,
     SyncCode,
     SyncRelay,
     BraveToken,
@@ -763,6 +770,68 @@ impl Settings {
                     Button(tr("ESCUCHAR")),
                 ));
                 rows
+            }
+            Section::Assistant => {
+                let a = &stats.brain_account;
+                let (detail, value) = match a.logged_in {
+                    _ if !stats.brain_online => (
+                        tr("Se conecta cuando arrancás JARVIS con cargo xtask run").into(),
+                        tr("sin cerebro"),
+                    ),
+                    Some(true) => {
+                        let plan = if a.plan.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · {} {}", tr("plan"), a.plan)
+                        };
+                        (format!("{}{plan}", a.email), tr("con sesión"))
+                    }
+                    Some(false) => (
+                        tr("Sin sesión: JARVIS no puede usar Claude hasta que entres").into(),
+                        tr("sin sesión"),
+                    ),
+                    None => (tr("Preguntando al anfitrión...").into(), "?"),
+                };
+                let login = if a.login.is_empty() {
+                    String::from(tr(
+                        "Abre el navegador de la PC en claude.ai: elegí \"Continuar con Google\"",
+                    ))
+                } else {
+                    a.login.clone()
+                };
+                alloc::vec![
+                    Row::new(
+                        Opt::Info,
+                        tr("Cerebro"),
+                        tr("Claude, por el Agent SDK en el anfitrión"),
+                        Value(
+                            if stats.brain_online {
+                                tr("conectado")
+                            } else {
+                                tr("sin conectar")
+                            }
+                            .into()
+                        )
+                    ),
+                    Row::new(
+                        Opt::Info,
+                        tr("Cuenta de Claude"),
+                        detail,
+                        Value(value.into())
+                    ),
+                    Row::new(
+                        Opt::AiLogin,
+                        tr("Iniciar sesión con Google"),
+                        login,
+                        Button(tr("GOOGLE"))
+                    ),
+                    Row::new(
+                        Opt::AiRefresh,
+                        tr("Estado de la cuenta"),
+                        tr("Volver a preguntarle al anfitrión"),
+                        Button(tr("ACTUALIZAR"))
+                    ),
+                ]
             }
             Section::Sync => {
                 use crate::sync::Status;
@@ -1593,6 +1662,14 @@ impl Settings {
             }
             Opt::MicListen => {
                 ctx.out.brain.push(crate::brain::BrainOp::Listen);
+                return;
+            }
+            Opt::AiLogin => {
+                ctx.out.brain.push(crate::brain::BrainOp::Login);
+                return;
+            }
+            Opt::AiRefresh => {
+                ctx.out.brain.push(crate::brain::BrainOp::AccountStatus);
                 return;
             }
             Opt::SyncNewCode => {

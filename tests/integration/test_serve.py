@@ -128,10 +128,14 @@ class FakeVoice:
     def __init__(self) -> None:
         self.spoken: list[str] = []
         self.listening = False
+        self.hushed = False
         self.on_heard = lambda text: None
 
     def listen_now(self) -> None:
         self.listening = True
+
+    def hush(self) -> None:
+        self.hushed = True
 
     def speak(self, text, on_level) -> None:  # type: ignore[no-untyped-def]
         self.spoken.append(text)
@@ -169,4 +173,59 @@ async def test_la_voz_manda_lo_oido_y_dice_la_respuesta(tmp_path) -> None:  # ty
     assert await read(reader) == {"t": "voz", "nivel": 0}
     assert voice.spoken == ["Hola, Roman. Sistema en línea y cerebro conectado."]
     assert voice.listening, "Win+J pide escuchar sin la palabra de activación"
+    writer.close()
+
+
+async def test_un_pedido_nuevo_calla_la_voz(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from jarvis.service.server import Host
+    from jarvis.service.voicehub import VoiceHub
+
+    voice = FakeVoice()
+    host = Host(projects=tmp_path, voice=VoiceHub(voice, asyncio.get_running_loop()))
+    server = await start(0, TOKEN, lambda s: ScriptedBrain(s, delay=0.0), host)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(encode({"t": "hola", "token": TOKEN}))
+    await read(reader)
+    writer.write(encode({"t": "pedido", "id": 1, "texto": "hola", "origen": "voz"}))
+    while (await read(reader))["t"] != "fin":
+        pass
+    assert voice.hushed
+    writer.close()
+
+
+async def test_la_cuenta_y_el_inicio_de_sesion(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from jarvis.account import Account
+    from jarvis.service.server import Host
+
+    logins: list[bool] = []
+
+    async def status() -> Account:
+        return Account(logged_in=bool(logins), email="roman@example.com", plan="pro")
+
+    async def login() -> Account:
+        logins.append(True)
+        return await status()
+
+    host = Host(projects=tmp_path, account_status=status, account_login=login)
+    server = await start(0, TOKEN, lambda s: ScriptedBrain(s, delay=0.0), host)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(encode({"t": "hola", "token": TOKEN}))
+    assert (await read(reader))["t"] == "listo"
+    # Al conectarse, el kernel se entera de la cuenta.
+    first = await read(reader)
+    assert first["t"] == "cuenta" and first["sesion"] is False
+    writer.write(encode({"t": "iniciar_sesion", "metodo": "google"}))
+    doing = await read(reader)
+    assert doing["t"] == "cuenta" and "Google" in str(doing["estado"])
+    done = await read(reader)
+    assert done == {
+        "t": "cuenta",
+        "sesion": True,
+        "email": "roman@example.com",
+        "plan": "pro",
+        "estado": "Listo: entraste.",
+    }
+    assert logins == [True]
     writer.close()

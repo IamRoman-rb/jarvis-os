@@ -449,6 +449,7 @@ impl Console {
             BrainEvent::Confirm { .. }
             | BrainEvent::Project { .. }
             | BrainEvent::Heard(_)
+            | BrainEvent::Account
             | BrainEvent::Listening(_)
             | BrainEvent::VoiceLevel(_) => {}
             BrainEvent::End => {

@@ -76,8 +76,10 @@ fn la_configuracion_se_lee_al_arrancar() {
 fn pin_de_bloqueo() {
     let mut t = Driver::new();
     t.combo(Mods::WIN, Key::Char('i'));
-    // Micrófono es la última sección (RePág desde Sistema da la vuelta); antes están
-    // Sincronización, Firewall y Privacidad y seguridad.
+    // Asistente (IA) es la última sección (RePág desde Sistema da la vuelta); antes están
+    // Micrófono, Sincronización, Firewall y Privacidad y seguridad.
+    t.key(Key::PageUp);
+    assert_eq!(settings_section(&t), "Asistente (IA)");
     t.key(Key::PageUp);
     assert_eq!(settings_section(&t), "Micrófono");
     t.key(Key::PageUp);
