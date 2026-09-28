@@ -22,6 +22,8 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (config.rs), aspecto no cromático (look.rs: tamaños, botones, gráficos de la barra), firewall (firewall.rs), idiomas (i18n.rs), teclado latino
                    (keymap.rs), apps (apps/), shell, apt, snap y winget (term/), web sin red
                    (web/: URL, HTTP, DOM, CSS y estilos, maquetación en cajas, JSON, adaptadores)
+    - task/        multitarea (K9): el planificador (prioridades, turnos, esperas por evento o plazo);
+                   no_std y sin hardware (el cambio de contexto está en kernel/task.rs)
     - mem/         memoria (K8): allocator de marcos físicos, tablas de páginas de 4 niveles y
                    segmentos del ELF del kernel (W^X); no_std, sobre un trait PhysMem
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
@@ -30,7 +32,9 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (desktop/src/sync.rs lo une con el FAT32 y las conexiones largas)
     - relay/       el relé (std): reenvía marcos cifrados entre las máquinas de un grupo
     - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
-                   (paging.rs: tablas de páginas propias con jarvis-mem y map_mmio;
+                   (task.rs: tareas y cambio de contexto; nettask.rs: la tarea de la red;
+                   irqlock.rs: el lock de lo compartido entre tareas;
+                   paging.rs: tablas de páginas propias con jarvis-mem, map_mmio y pilas con guarda;
                    virtio_gpu.rs: varios monitores; display.rs: las superficies)
     - xtask/       imagen booteable, disco FAT32, QEMU, puente (puente.rs: HTTPS, paquetes,
                    imágenes y SVG → BMP), puente de Brave (brave.rs: DevTools → mosaicos), tests,
@@ -80,8 +84,10 @@ Cerebro (desde la raíz):
 5. El punto flotante es por software (target x86_64-unknown-none). En lo que corre por frame o por
    píxel, usar punto fijo Q14 y la tabla de senos de gfx/src/trig.rs; `f32` solo en inicialización.
 6. El tiempo se mide con `time::millis()` (TSC calibrado), nunca contando interrupciones.
-7. Los manejadores de interrupción hacen lo mínimo y no toman locks que use el bucle principal
-   (usar colas sin locks, como keyboard.rs).
+7. Los manejadores de interrupción hacen lo mínimo y no toman locks que las tareas tomen con las
+   interrupciones habilitadas (usar colas sin locks, como keyboard.rs, o `IrqMutex`). Hay
+   desalojo (K9): todo dato que compartan dos tareas va en un `IrqMutex` con secciones cortas, y
+   el planificador no pide memoria. Una tarea nueva: `task::spawn` con nombre y prioridad.
 8. Si tocás el HUD, corré `cargo xtask screenshot` y mirá el resultado antes de dar el cambio por bueno.
 9. El toolchain está fijado en kernel/rust-toolchain.toml. Actualizarlo es un cambio aparte.
 10. Si QEMU está abierto, la imagen de target/ queda bloqueada: compilá con

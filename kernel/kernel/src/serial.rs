@@ -73,11 +73,15 @@ pub fn init() {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments<'_>) {
-    // Si el puerto está tomado (un panic mientras se escribía), se descarta el mensaje
-    // antes que colgar el kernel esperando un lock que nunca se libera.
-    if let Some(mut port) = SERIAL.try_lock() {
-        let _ = port.write_fmt(args);
-    }
+    // Sin interrupciones mientras se escribe (K9): si el timer desalojara a esta tarea con el
+    // puerto tomado, las líneas de las demás tareas se perderían (y los tests las esperan).
+    // Si igual está tomado (un panic mientras se escribía), se descarta el mensaje antes que
+    // colgar el kernel esperando un lock que nunca se libera.
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        if let Some(mut port) = SERIAL.try_lock() {
+            let _ = port.write_fmt(args);
+        }
+    });
 }
 
 #[macro_export]

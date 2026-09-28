@@ -498,6 +498,8 @@ struct Session {
     child: Child,
     lines: mpsc::Receiver<String>,
     monitor: TcpStream,
+    /// Todo lo que llegó por el puerto serie (para `saw_or_wait`).
+    history: Vec<String>,
 }
 
 impl Session {
@@ -545,6 +547,7 @@ impl Session {
             child,
             lines,
             monitor,
+            history: Vec::new(),
         })
     }
 
@@ -556,16 +559,28 @@ impl Session {
             match self.lines.recv_timeout(left) {
                 Ok(line) => {
                     println!("[serie] {line}");
-                    if line.contains(marker) {
+                    let found = line.contains(marker);
+                    let panic = line.contains("PANIC");
+                    self.history.push(line);
+                    if found {
                         return Ok(());
                     }
-                    if line.contains("PANIC") {
+                    if panic {
                         return Err("el kernel entró en panic".into());
                     }
                 }
                 Err(_) => return Err(format!("no llegó {marker} en {} s", timeout.as_secs())),
             }
         }
+    }
+
+    /// Como `wait_for`, pero la línea puede haber llegado antes (desde K9 hay tareas que
+    /// corren a la vez: la red puede tener IP antes de que el escritorio dibuje su primer cuadro).
+    fn saw_or_wait(&mut self, marker: &str, timeout: Duration) -> Result<()> {
+        if self.history.iter().any(|l| l.contains(marker)) {
+            return Ok(());
+        }
+        self.wait_for(marker, timeout)
     }
 
     fn monitor(&mut self, command: &str) -> Result<()> {
@@ -720,8 +735,12 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     let mut s = Session::start(image, disk)?;
     // K8: el kernel cambió a sus propias tablas de páginas (con W^X) y siguió andando.
     s.wait_for("segmentos con W^X", BOOT_TIMEOUT)?;
+    // K9: el escritorio, la red y la ociosa son tareas aparte.
+    s.wait_for("MULTITAREA 3 tareas", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
-    s.wait_for("RED_IP 10.0.2.15", STEP)?;
+    s.saw_or_wait("RED_IP 10.0.2.15", STEP)?;
+    // La tarea de la red se despierta con la interrupción de la placa, no dando vueltas.
+    s.saw_or_wait("RED_POR_INTERRUPCION", STEP)?;
     if brain.is_some() {
         s.wait_for("CEREBRO_CONECTADO", STEP)?;
     }
@@ -733,6 +752,8 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.type_text("prueba")?;
     s.monitor("sendkey ret")?;
     s.wait_for("ARCHIVOS_CREADO /prueba", STEP)?;
+    // Escribir en el disco durmió a la tarea hasta la interrupción del disco (K9).
+    s.saw_or_wait("DISCO_POR_INTERRUPCION", STEP)?;
     // El cursor arranca en el centro (640, 400); ahí hay una fila de la lista de Archivos.
     s.monitor("mouse_move -40 -50")?;
     thread::sleep(Duration::from_millis(200));

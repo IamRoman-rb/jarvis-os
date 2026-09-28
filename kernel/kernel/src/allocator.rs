@@ -9,11 +9,31 @@
 //! `offset + p`; desde K8 ese mapeo lo arma el kernel (paging.rs), igual que el del bootloader. Los
 //! buffers de DMA salen de acá: su dirección física es `virtual − offset`. Referencia: <https://os.phil-opp.com/heap-allocation/>.
 
+use core::alloc::{GlobalAlloc, Layout};
+
 use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use linked_list_allocator::LockedHeap;
+use x86_64::instructions::interrupts::without_interrupts;
+
+/// El heap con su lock, pero sin interrupciones mientras se usa (K9): si el timer desalojara a
+/// una tarea en medio de `alloc`, las demás darían vueltas esperando el lock (ver irqlock.rs).
+struct IrqSafeHeap(LockedHeap);
+
+// SAFETY: delega en `LockedHeap`, que ya es un allocator correcto; solo agrega que no haya
+// interrupciones (ni cambios de tarea) mientras tiene el lock.
+unsafe impl GlobalAlloc for IrqSafeHeap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: mismo contrato que el llamador cumple para `GlobalAlloc::alloc`.
+        without_interrupts(|| unsafe { self.0.alloc(layout) })
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: mismo contrato que el llamador cumple para `GlobalAlloc::dealloc`.
+        without_interrupts(|| unsafe { self.0.dealloc(ptr, layout) })
+    }
+}
 
 #[global_allocator]
-static ALLOCATOR: LockedHeap = LockedHeap::empty();
+static ALLOCATOR: IrqSafeHeap = IrqSafeHeap(LockedHeap::empty());
 
 /// Tope del heap: los buffers de pantalla, uno por ventana, las páginas web y la pila de red.
 const MAX_HEAP: u64 = 256 * 1024 * 1024;
@@ -29,14 +49,14 @@ pub fn init(regions: &MemoryRegions, physical_memory_offset: u64) -> Option<(u64
     let start = (physical_memory_offset + region.start) as *mut u8;
     // SAFETY: la región es RAM libre según el bootloader (no la usa nadie más), está mapeada en
     // `physical_memory_offset + físico`, y el allocator se inicializa una sola vez.
-    unsafe { ALLOCATOR.lock().init(start, size as usize) };
+    unsafe { ALLOCATOR.0.lock().init(start, size as usize) };
     Some((region.start, size))
 }
 
 /// (usados, total) del heap en bytes.
 pub fn usage() -> (u64, u64) {
     // `try_lock`: si justo lo tiene tomado otra parte del kernel, se informa 0 en vez de esperar.
-    match ALLOCATOR.try_lock() {
+    match ALLOCATOR.0.try_lock() {
         Some(heap) => (heap.used() as u64, heap.size() as u64),
         None => (0, 0),
     }

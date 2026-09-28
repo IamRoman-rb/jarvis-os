@@ -1,4 +1,4 @@
-//! Kernel de JARVIS-OS — hito K8: paginación propia.
+//! Kernel de JARVIS-OS — hito K9: multitarea.
 //!
 //! No hay sistema operativo debajo: este código corre directamente sobre el hardware (o QEMU).
 //! El crate `bootloader` se encarga de lo previo: pasar la CPU a modo 64 bits, armar las tablas
@@ -9,8 +9,12 @@
 //! de red, parlante, pantalla) y le pasa todo al escritorio (`jarvis-desktop`), que tiene la
 //! lógica de la interfaz. La pila TCP/IP y las descargas están en `jarvis-net`.
 //!
-//! Orden de arranque: serie → GDT → IDT/PIC → PIT → TSC → heap → tablas de páginas propias → disco → red → mouse →
-//! pantalla → interrupciones → bucle.
+//! Desde K9 hay varias **tareas** (task.rs): la del arranque sigue como la del escritorio, la
+//! red tiene la suya (nettask.rs) y la ociosa duerme la CPU cuando nadie más puede correr. El
+//! disco y la red avisan por interrupción en vez de esperarlos dando vueltas.
+//!
+//! Orden de arranque: serie → GDT → IDT/PIC → PIT → TSC → heap → tablas de páginas propias →
+//! tareas → disco → red → mouse → pantalla → interrupciones → bucle del escritorio.
 
 #![no_std]
 #![no_main]
@@ -24,8 +28,10 @@ mod display;
 mod fw_cfg;
 mod gdt;
 mod interrupts;
+mod irqlock;
 mod keyboard;
 mod mouse;
+mod nettask;
 mod paging;
 mod pci;
 mod pit;
@@ -34,6 +40,7 @@ mod queue;
 mod rtc;
 mod serial;
 mod speaker;
+mod task;
 mod time;
 mod virtio_blk;
 mod virtio_gpu;
@@ -191,6 +198,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             " (sin W^X: no se pudo leer el ELF)"
         }
     );
+    // K9: desde acá hay tareas (y el timer puede cambiar de una a otra, una vez habilitadas las
+    // interrupciones). Hace falta la paginación propia: las pilas se mapean con página de guarda.
+    task::init("escritorio");
     let cpu_name = cpu::brand();
     serial_println!("CPU: {}", cpu_name);
     let thermal = cpu::Thermal::detect();
@@ -200,7 +210,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
 
     // Disco: virtio-blk + caché de sectores + FAT32. Si no hay disco, el sistema arranca igual.
-    let disk = VirtioBlk::init(phys_offset).and_then(|blk| {
+    let disk = VirtioBlk::init(phys_offset).and_then(|mut blk| {
+        // Que avise por interrupción (se usa recién con las tareas andando; el montaje de acá
+        // abajo todavía espera dando vueltas).
+        if let Some((line, isr)) = blk.irq()
+            && interrupts::enable_pci_irq(line, isr, task::EV_DISK)
+        {
+            blk.use_irq();
+            serial_println!("virtio-blk: avisa por la IRQ {line}");
+        }
         match FileSystem::mount(Disk::Virtio(BlockCache::new(blk, DISK_CACHE_SECTORS))) {
             Ok(fs) => Some(fs),
             Err(e) => {
@@ -225,12 +243,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         );
     }
 
-    // Red: virtio-net + smoltcp. La dirección se pide por DHCP en el bucle.
-    let mut net = VirtioNet::init(phys_offset).map(|dev| {
-        let mac = dev.mac();
-        Net::new(dev, mac, time::rdtsc(), time::millis())
-    });
-    if net.is_none() {
+    // Red: virtio-net + smoltcp, en su propia tarea (K9). La dirección se pide por DHCP.
+    let has_net = match VirtioNet::init(phys_offset) {
+        Some(dev) => {
+            let mac = dev.mac();
+            if let Some((line, isr)) = dev.irq()
+                && interrupts::enable_pci_irq(line, isr, task::EV_NET)
+            {
+                serial_println!("virtio-net: avisa por la IRQ {line}");
+            }
+            nettask::start(Net::new(dev, mac, time::rdtsc(), time::millis()))
+        }
+        None => false,
+    };
+    if !has_net {
         serial_println!("red: no hay placa de red virtio");
     }
 
@@ -351,27 +377,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     } else {
         MouseDecoder::new()
     };
+    let (tasks, _) = task::snapshot();
+    let names: Vec<&str> = tasks.iter().map(|t| t.name.as_str()).collect();
+    serial_println!("MULTITAREA {} tareas: {}", tasks.len(), names.join(", "));
     x86_64::instructions::interrupts::enable();
-    run(
-        &mut desktop,
-        &mut surfaces,
-        &mut net,
-        base,
-        decoder,
-        thermal,
-        mic,
-    )
+    run(&mut desktop, &mut surfaces, base, decoder, thermal, mic)
 }
 
 /// Un frame que tarda más que esto se anota en el log.
 const SLOW_FRAME_MS: u64 = 300;
 
-/// Bucle principal: dormir hasta el próximo tick, atender la red, pasarle la entrada al
-/// escritorio, dibujar y hacer lo que el escritorio pidió.
+/// La tarea del escritorio (la del arranque): dormir hasta el próximo cuadro, pasarle al
+/// escritorio la entrada y lo que contestó la red, dibujar y hacer lo que pidió. La red corre en
+/// su propia tarea (nettask.rs); cuando no hay nada que hacer, la CPU queda en la tarea ociosa.
 fn run(
     desktop: &mut Desktop<Disk>,
     surfaces: &mut display::Surfaces,
-    net: &mut Option<Net<VirtioNet>>,
     mut stats: SystemStats,
     mut mouse_decoder: MouseDecoder,
     thermal: Option<cpu::Thermal>,
@@ -385,18 +406,27 @@ fn run(
     let mut first = true;
     let (mut frames, mut render_ms) = (0u64, 0u64);
     let (mut last_stats, mut last_report) = (0u64, 0u64);
-    let (mut idle_ticks, mut stats_tsc) = (0u64, time::rdtsc());
-    let mut last_ip = None;
+    let (mut stats_tsc, mut idle_before) = (time::rdtsc(), 0u64);
+    let has_net = nettask::present();
 
     desktop.start(time::millis());
     loop {
-        let sleep = time::rdtsc();
-        x86_64::instructions::hlt(); // duerme hasta la próxima interrupción (≤ 4 ms)
-        idle_ticks += time::rdtsc() - sleep;
+        // Dormir hasta el próximo cuadro (~60 por segundo): mientras tanto corren la red o la
+        // tarea ociosa (K9). Antes esto era un `hlt` que despertaba cada 4 ms.
+        task::sleep_until(next_frame);
         let now = time::millis();
+        next_frame = now + FRAME_MS;
 
-        // El micrófono también (sus buffers son de 20 ms); el nivel va al escritorio 10 veces
-        // por segundo (el medidor de Configuración → Micrófono).
+        // Lo que contestó la red desde el cuadro anterior.
+        for answer in nettask::take_answers() {
+            match answer {
+                nettask::Answer::Response(id, result) => desktop.net_response(id, result),
+                nettask::Answer::Stream(id, event) => desktop.stream_event(id, event),
+            }
+        }
+
+        // El micrófono (buffers de 20 ms, cuatro en la cola: alcanza con mirarlo por cuadro); el
+        // nivel va al escritorio 10 veces por segundo (el medidor de Configuración → Micrófono).
         if let Some(m) = mic.as_mut() {
             m.poll();
             if now - last_mic >= 100 {
@@ -404,27 +434,6 @@ fn run(
                 desktop.set_mic(Some(m.info.clone()));
             }
         }
-
-        // La red se atiende en cada vuelta (cada ≤ 4 ms), no solo en cada frame.
-        if let Some(n) = net.as_mut() {
-            for (id, result) in n.poll(now) {
-                desktop.net_response(id, result);
-            }
-            for (id, event) in n.take_stream_events() {
-                desktop.stream_event(id, event);
-            }
-            if n.info().ip != last_ip {
-                last_ip = n.info().ip;
-                match last_ip {
-                    Some(ip) => serial_println!("RED_IP {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]),
-                    None => serial_println!("RED_SIN_IP"),
-                }
-            }
-        }
-        if now < next_frame {
-            continue;
-        }
-        next_frame = now + FRAME_MS;
         if now - last_rtc >= 1000 {
             clock = local_time(desktop.utc_offset());
             last_rtc = now;
@@ -477,28 +486,24 @@ fn run(
         let requests = desktop.take_requests();
         for req in requests.net {
             serial_println!("RED_PEDIDO {}", req.url);
-            match net.as_mut() {
-                Some(n) => {
-                    if let Some((id, result)) = n.fetch(req, now) {
-                        desktop.net_response(id, result);
-                    }
-                }
-                None => desktop.net_response(req.id, Err("no hay placa de red".into())),
+            if has_net {
+                nettask::fetch(req);
+            } else {
+                desktop.net_response(req.id, Err("no hay placa de red".into()));
             }
         }
         for op in requests.streams {
-            match net.as_mut() {
-                Some(n) => n.stream(op, now),
-                None => {
-                    if let jarvis_desktop::StreamOp::Connect(r) = op {
-                        desktop.stream_event(
-                            r.id,
-                            jarvis_desktop::StreamEvent::Closed(Some("no hay placa de red".into())),
-                        );
-                    }
-                }
+            if has_net {
+                nettask::stream(op);
+            } else if let jarvis_desktop::StreamOp::Connect(r) = op {
+                desktop.stream_event(
+                    r.id,
+                    jarvis_desktop::StreamEvent::Closed(Some("no hay placa de red".into())),
+                );
             }
         }
+        // Un solo aviso por cuadro a la tarea de la red (si hubo pedidos).
+        nettask::kick();
         // Otro reparto de los monitores (Win+P, Configuración → Pantallas).
         if let Some(l) = requests.display
             && surfaces.apply(&l)
@@ -527,10 +532,15 @@ fn run(
         if now - last_stats >= STATS_MS {
             let tsc_now = time::rdtsc();
             let elapsed = (tsc_now - stats_tsc).max(1);
-            let busy = elapsed.saturating_sub(idle_ticks);
+            let (tasks, switches) = task::snapshot();
+            // La CPU estuvo ocupada todo el tiempo que no corrió la tarea ociosa.
+            let idle_ms: u64 = tasks.iter().filter(|t| t.idle).map(|t| t.cpu_ms).sum();
+            let idle = idle_ms.saturating_sub(idle_before);
+            idle_before = idle_ms;
+            let elapsed_ms = (time::tsc_to_us(elapsed) / 1000).max(1);
             let secs = (now - last_stats).max(1);
             let (heap_used, heap_total) = allocator::usage();
-            stats.cpu_pct = (busy * 100 / elapsed).min(100) as u8;
+            stats.cpu_pct = (100 - (idle * 100 / elapsed_ms).min(100)) as u8;
             stats.heap_used = heap_used;
             stats.heap_total = heap_total;
             if let Some((free, tables)) = paging::usage() {
@@ -544,20 +554,23 @@ fn run(
             stats.disk_written = virtio_blk::WRITTEN_BYTES.load(Ordering::Relaxed);
             stats.net_rx = virtio_net::RX_BYTES.load(Ordering::Relaxed);
             stats.net_tx = virtio_net::TX_BYTES.load(Ordering::Relaxed);
-            stats.net = net.as_ref().map(|n| n.info().clone()).unwrap_or_default();
+            stats.net = nettask::info();
             stats.temp_c = thermal.as_ref().and_then(cpu::Thermal::read);
+            stats.kernel_tasks = tasks;
+            stats.context_switches = switches;
             desktop.set_stats(stats.clone());
             if now - last_report >= REPORT_MS {
                 serial_println!(
-                    "rendimiento: {} fps, {} ms por frame, CPU {} %, heap {} MiB",
+                    "rendimiento: {} fps, {} ms por frame, CPU {} %, heap {} MiB, {} cambios de contexto",
                     stats.fps,
                     stats.frame_ms,
                     stats.cpu_pct,
-                    heap_used / (1024 * 1024)
+                    heap_used / (1024 * 1024),
+                    switches
                 );
                 last_report = now;
             }
-            (frames, render_ms, idle_ticks, stats_tsc, last_stats) = (0, 0, 0, tsc_now, now);
+            (frames, render_ms, stats_tsc, last_stats) = (0, 0, tsc_now, now);
         }
     }
 }

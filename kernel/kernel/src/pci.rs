@@ -10,6 +10,8 @@ use x86_64::instructions::port::Port;
 
 const CONFIG_ADDRESS: u16 = 0xCF8;
 const CONFIG_DATA: u16 = 0xCFC;
+/// Bit 10 del registro de comando: el dispositivo no usa su línea de interrupción (INTx).
+const INTX_DISABLE: u32 = 1 << 10;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Device {
@@ -89,17 +91,40 @@ impl Device {
         out
     }
 
-    /// Habilita el acceso a sus registros en memoria (bit 1) y el DMA (bus master, bit 2).
+    /// Habilita el acceso a sus registros en memoria (bit 1) y el DMA (bus master, bit 2). Estos
+    /// dispositivos (video, micrófono) se atienden por polling: se les apaga la interrupción
+    /// INTx (bit 10), porque pueden compartir la línea con el disco o la red y una interrupción
+    /// "por nivel" que nadie atiende se repetiría sin fin.
     pub fn enable_memory_and_dma(&self) {
         let command = self.read(0x04) & 0xFFFF;
-        write32(self.bus, self.slot, self.function, 0x04, command | 0b110);
+        write32(
+            self.bus,
+            self.slot,
+            self.function,
+            0x04,
+            command | 0b110 | INTX_DISABLE,
+        );
     }
 
     /// Habilita el acceso por puertos de E/S (bit 0) y que el dispositivo lea/escriba la memoria
-    /// por su cuenta, sin pasar por la CPU (bus master, bit 2): eso es DMA.
+    /// por su cuenta, sin pasar por la CPU (bus master, bit 2): eso es DMA. Deja la interrupción
+    /// INTx encendida (disco y red avisan por ahí, K9).
     pub fn enable_io_and_dma(&self) {
         let command = self.read(0x04) & 0xFFFF;
-        write32(self.bus, self.slot, self.function, 0x04, command | 0b101);
+        write32(
+            self.bus,
+            self.slot,
+            self.function,
+            0x04,
+            (command | 0b101) & !INTX_DISABLE,
+        );
+    }
+
+    /// La línea del PIC por la que avisa (la anotó el firmware en el registro 0x3C). `None` si
+    /// no tiene (0xFF) o no es una línea que el kernel pueda compartir.
+    pub fn interrupt_line(&self) -> Option<u8> {
+        let line = self.read8(0x3C);
+        (line < 16).then_some(line)
     }
 }
 

@@ -21,6 +21,30 @@ pub struct NetInfo {
     pub dns: Option<[u8; 4]>,
 }
 
+/// En qué anda una tarea del kernel (K9).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TaskState {
+    Running,
+    #[default]
+    Ready,
+    /// Esperando un evento (el disco, un paquete) o un plazo, sin usar la CPU.
+    Waiting,
+}
+
+/// Una tarea del kernel (K9): el escritorio, la red, la ociosa.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct KernelTask {
+    pub pid: u32,
+    pub name: String,
+    pub state: TaskState,
+    /// La tarea ociosa (la CPU "dormida").
+    pub idle: bool,
+    /// Tiempo de CPU usado desde el arranque.
+    pub cpu_ms: u64,
+    /// Veces que le tocó la CPU.
+    pub runs: u64,
+}
+
 /// Una foto del estado de la máquina.
 #[derive(Clone, Debug, Default)]
 pub struct SystemStats {
@@ -62,6 +86,9 @@ pub struct SystemStats {
     pub brain_account: crate::brain::Account,
     /// El micrófono de JARVIS-OS (virtio-sound), si el kernel encontró uno.
     pub mic: Option<crate::audio::MicInfo>,
+    /// Las tareas del kernel (K9) y los cambios de contexto desde el arranque.
+    pub kernel_tasks: Vec<KernelTask>,
+    pub context_switches: u64,
 }
 
 /// Últimos `N` valores (una muestra por segundo), para los gráficos.

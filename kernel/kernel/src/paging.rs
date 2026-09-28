@@ -240,3 +240,52 @@ pub fn usage() -> Option<(usize, usize)> {
     let p = guard.as_ref()?;
     Some((p.frames.free_frames(), p.table.tables(&OffsetMem(p.offset))))
 }
+
+/// Zona virtual de las pilas de las tareas (K9), lejos de todo lo demás (una entrada de la PML4
+/// que el bootloader no usa; `map_stack` lo verifica página por página).
+const STACKS_BASE: u64 = 0xFFFF_E000_0000_0000;
+/// Cada tarea tiene una ventana de 2 MiB: su pila ocupa el final y lo de abajo queda **sin
+/// mapear**. Una pila crece hacia abajo, así que si se desborda toca esa zona y la CPU da un
+/// fallo de página en vez de pisar en silencio la memoria de otro (la "página de guarda").
+const STACK_WINDOW: u64 = 2 * 1024 * 1024;
+
+/// Mapea una pila de `bytes` (redondeado a páginas) para la tarea `slot`, con marcos del
+/// allocator. Devuelve la dirección de su tope (donde empieza, porque crece hacia abajo).
+pub fn map_stack(slot: usize, bytes: usize) -> Option<u64> {
+    let bytes = (bytes as u64).div_ceil(4096) * 4096;
+    if bytes == 0 || bytes > STACK_WINDOW - 4096 || slot >= jarvis_task::MAX_TASKS {
+        return None;
+    }
+    let mut guard = PAGING.lock();
+    let p = guard.as_mut()?;
+    let mut mem = OffsetMem(p.offset);
+    let top = STACKS_BASE + (slot as u64 + 1) * STACK_WINDOW;
+    let mut virt = top - bytes;
+    while virt < top {
+        if p.table.leaf(&mem, virt).is_some() {
+            return None; // la zona no estaba libre: mejor no pisar nada
+        }
+        let frame = p.frames.alloc()?;
+        p.table
+            .map(
+                &mut mem,
+                &mut p.frames,
+                virt,
+                frame,
+                Size::Small,
+                flags::WRITABLE | flags::NO_EXECUTE,
+            )
+            .ok()?;
+        virt += 4096;
+    }
+    Some(top)
+}
+
+/// Si `addr` cae en la ventana de pila de una tarea (y dio un fallo), esa tarea desbordó su
+/// pila: devuelve su número.
+pub fn stack_overflow(addr: u64) -> Option<usize> {
+    let end = STACKS_BASE + jarvis_task::MAX_TASKS as u64 * STACK_WINDOW;
+    (STACKS_BASE..end)
+        .contains(&addr)
+        .then(|| ((addr - STACKS_BASE) / STACK_WINDOW) as usize)
+}

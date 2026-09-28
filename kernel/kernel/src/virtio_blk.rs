@@ -11,8 +11,12 @@
 //!
 //! Un pedido son 3 descriptores encadenados: cabecera (leer o escribir, qué sector), datos y un
 //! byte de estado que completa el dispositivo. El kernel lo publica en el anillo disponible,
-//! "toca el timbre" (queue notify) y espera a que aparezca en el anillo usado. En este hito se
-//! espera por *polling* (sin interrupciones): el kernel hace un pedido por vez.
+//! "toca el timbre" (queue notify) y espera a que aparezca en el anillo usado. Un pedido por vez.
+//!
+//! Esperar (K9): con multitarea, la tarea que pidió el sector **se duerme** hasta que el disco
+//! avisa por su interrupción (el dispositivo sube su línea PCI al completar el pedido; ver
+//! interrupts.rs) y mientras tanto corren las demás. Durante el arranque, antes de que haya
+//! tareas, se espera dando vueltas (polling) como antes.
 //!
 //! El dispositivo accede a la memoria por **DMA** con direcciones **físicas**. Por eso la cola y
 //! un buffer intermedio viven en el heap, donde física = virtual − `physical_memory_offset`.
@@ -26,7 +30,7 @@ use core::sync::atomic::{AtomicU64, Ordering, fence};
 use jarvis_fs::{BlockDevice, IoError, SECTOR_SIZE};
 use x86_64::instructions::port::Port;
 
-use crate::{pci, serial_println};
+use crate::{pci, serial_println, task, time};
 
 const VENDOR_VIRTIO: u16 = 0x1AF4;
 /// virtio-blk "transitional" (con interfaz legacy).
@@ -39,6 +43,8 @@ const REG_QUEUE_SIZE: u16 = 0x0C;
 const REG_QUEUE_SELECT: u16 = 0x0E;
 const REG_QUEUE_NOTIFY: u16 = 0x10;
 const REG_STATUS: u16 = 0x12;
+/// Registro ISR: qué pasó (bit 0: se usó una cola). Leerlo lo borra y baja la interrupción.
+pub const REG_ISR: u16 = 0x13;
 const REG_CAPACITY: u16 = 0x14;
 
 const STATUS_ACKNOWLEDGE: u8 = 1;
@@ -63,6 +69,12 @@ pub static WAIT_TSC: AtomicU64 = AtomicU64::new(0);
 const BOUNCE_SECTORS: usize = 128; // 64 KiB
 /// Vueltas de espera antes de dar el pedido por perdido.
 const POLL_LIMIT: u64 = 500_000_000;
+/// Con interrupciones: plazo total de un pedido, y cada cuánto se revisa el anillo por si la
+/// interrupción no llegó.
+const IRQ_TIMEOUT_MS: u64 = 10_000;
+const IRQ_RECHECK_MS: u64 = 20;
+/// Pedidos que terminaron despertando a la tarea por la interrupción (para el log).
+pub static IRQ_WAKEUPS: AtomicU64 = AtomicU64::new(0);
 
 #[repr(C)]
 struct Descriptor {
@@ -93,10 +105,14 @@ pub struct VirtioBlk {
     bounce: *mut u8,
     capacity: u64,
     physical_memory_offset: u64,
+    /// Línea PCI por la que avisa (la eligió el firmware).
+    irq_line: Option<u8>,
+    /// Ya está anotado en su línea: se puede dormir esperándolo.
+    use_irq: bool,
 }
 
-// SAFETY: los punteros apuntan a memoria del heap que solo usa este driver. El kernel tiene un
-// solo hilo de ejecución y el driver no se toca desde interrupciones.
+// SAFETY: los punteros apuntan a memoria del heap que solo usa este driver, y lo usa una sola
+// tarea (la del escritorio, dueña del disco). La interrupción solo lee el registro ISR.
 unsafe impl Send for VirtioBlk {}
 
 fn align_up(v: usize, align: usize) -> usize {
@@ -134,6 +150,8 @@ impl VirtioBlk {
             bounce: core::ptr::null_mut(),
             capacity: 0,
             physical_memory_offset,
+            irq_line: dev.interrupt_line(),
+            use_irq: false,
         };
         // Secuencia de arranque de un dispositivo virtio: reset → "te vi" → "tengo driver".
         blk.out8(REG_STATUS, 0);
@@ -176,6 +194,16 @@ impl VirtioBlk {
             size
         );
         Some(blk)
+    }
+
+    /// (línea, puerto del registro ISR), para anotarlo en interrupts.rs.
+    pub fn irq(&self) -> Option<(u8, u16)> {
+        Some((self.irq_line?, self.io_base + REG_ISR))
+    }
+
+    /// Ya está anotado en su línea: desde ahora, esperar al disco es dormir.
+    pub fn use_irq(&mut self) {
+        self.use_irq = true;
     }
 
     fn phys(&self, virt: *const u8) -> u64 {
@@ -268,10 +296,25 @@ impl VirtioBlk {
             if kind == REQUEST_OUT {
                 WRITE_REQUESTS.fetch_add(1, Ordering::Relaxed);
             }
-            let waiting = crate::time::rdtsc();
+            let waiting = time::rdtsc();
             let used_idx = self.queue.add(self.used_offset + 2) as *const u16;
             let mut spins = 0u64;
+            let since = time::millis();
             while read_volatile(used_idx) == self.last_used {
+                if self.use_irq && task::can_block() {
+                    // Dormir hasta la interrupción (o un rato, por si se perdió) y revisar.
+                    let now = time::millis();
+                    if now - since > IRQ_TIMEOUT_MS {
+                        serial_println!("virtio-blk: el disco no respondió (sector {})", lba);
+                        return Err(IoError);
+                    }
+                    if task::wait(task::EV_DISK, Some(now + IRQ_RECHECK_MS)) & task::EV_DISK != 0
+                        && IRQ_WAKEUPS.fetch_add(1, Ordering::Relaxed) == 0
+                    {
+                        serial_println!("DISCO_POR_INTERRUPCION");
+                    }
+                    continue;
+                }
                 spins += 1;
                 if spins > POLL_LIMIT {
                     serial_println!("virtio-blk: el disco no respondió (sector {})", lba);
@@ -279,7 +322,7 @@ impl VirtioBlk {
                 }
                 core::hint::spin_loop();
             }
-            WAIT_TSC.fetch_add(crate::time::rdtsc() - waiting, Ordering::Relaxed);
+            WAIT_TSC.fetch_add(time::rdtsc() - waiting, Ordering::Relaxed);
             self.last_used = self.last_used.wrapping_add(1);
             fence(Ordering::SeqCst);
             let status = read_volatile(core::ptr::addr_of!((*self.header).status));

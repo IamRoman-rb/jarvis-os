@@ -375,3 +375,38 @@ fn winget_baja_instaladores_de_windows_del_repositorio_oficial() {
             .any(|l| l.contains("WINGET_DESCARGADO 7zip.7zip"))
     );
 }
+
+#[test]
+fn ps_muestra_las_tareas_del_kernel() {
+    use jarvis_desktop::{KernelTask, SystemStats, TaskState};
+    let mut t = Driver::new();
+    let task = |pid: u32, name: &str, cpu_ms: u64| KernelTask {
+        pid,
+        name: name.into(),
+        state: TaskState::Waiting,
+        idle: name == "ociosa",
+        cpu_ms,
+        runs: 1,
+    };
+    t.d.set_stats(SystemStats {
+        kernel_tasks: vec![
+            task(1, "escritorio", 83_000),
+            task(2, "ociosa", 1_000),
+            task(3, "red", 500),
+        ],
+        ..Default::default()
+    });
+    open_terminal(&mut t);
+    let out = run(&mut t, "ps");
+    assert!(
+        out.contains("    1 ?        00:01:23 [escritorio]"),
+        "{out}"
+    );
+    assert!(out.contains("    3 ?        00:00:00 [red]"), "{out}");
+    // La terminal misma es una ventana: PID 100 en adelante.
+    assert!(out.contains("tty1"), "{out}");
+    // Las tareas del kernel no se cierran con kill.
+    let out = run(&mut t, "kill 3");
+    assert!(out.contains("es una tarea del kernel"), "{out}");
+    assert!(run(&mut t, "kill 77").contains("no existe ese proceso"));
+}

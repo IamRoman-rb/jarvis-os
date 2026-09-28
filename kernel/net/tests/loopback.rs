@@ -236,3 +236,17 @@ fn conexion_larga_rechazada_y_cierre_propio() {
         "el servidor recibió el FIN"
     );
 }
+
+#[test]
+fn poll_delay_dice_hasta_cuando_se_puede_dormir() {
+    // Con el DHCP pidiendo dirección hay un reintento programado: la tarea de la red (K9)
+    // duerme hasta entonces en vez de dar vueltas.
+    let mut n = Net::new(Loopback::new(Medium::Ethernet), MAC, 1, 0);
+    n.poll(0);
+    let d = n.poll_delay(0).expect("el DHCP reintenta");
+    assert!(d > 0 && d <= 60_000, "{d}");
+    // Con IP fija y sin conexiones no hay nada programado.
+    let mut n = net();
+    n.poll(0);
+    assert_eq!(n.poll_delay(0), None);
+}

@@ -1,0 +1,12 @@
+[package]
+name = "jarvis-task"
+description = "Multitarea de JARVIS-OS: el planificador de tareas del kernel. no_std y testeable en el host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

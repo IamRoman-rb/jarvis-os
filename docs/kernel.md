@@ -47,6 +47,12 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   verificado en cada arranque); la RAM se mapea con páginas de 2 MiB (o de 1 GiB si la CPU las
   tiene): 29 tablas en vez de las ~1050 del bootloader. El Monitor muestra la RAM física libre
   ([captura](img/k8-monitor.png)).
+- **Multitarea** (K9, `task.rs` + crate `jarvis-task`): el kernel tiene **tareas** con su propia
+  pila y un planificador con prioridades y desalojo. El escritorio, la red y la tarea ociosa
+  corren por separado: la pila TCP/IP ya no espera a que termine un cuadro, y cuando nadie tiene
+  nada que hacer la CPU duerme. El **disco y la red avisan por interrupción** (su línea PCI): la
+  tarea que espera un sector se duerme hasta que llega, en vez de dar vueltas. `ps` en la
+  Terminal muestra las tareas del kernel con su tiempo de CPU.
 - **Micrófono** (driver `virtio_sound.rs`, sobre `virtio_modern.rs`): QEMU agrega una placa
   virtio-sound conectada al micrófono del anfitrión; el kernel configura su entrada (PCM de 16 bits
   a 16 kHz) y recibe audio en buffers de 20 ms. Configuración → **Micrófono** muestra si se
@@ -341,8 +347,12 @@ firmware UEFI (OVMF en QEMU)
        └─ kernel_main (kernel/kernel/src/main.rs) — solo hardware
             ├─ serial.rs      COM1: logs al host
             ├─ gdt.rs         GDT + TSS (stack de emergencia para el doble fallo)
-            ├─ interrupts.rs  IDT: excepciones, timer (IRQ0), teclado (IRQ1), mouse (IRQ12)
-            ├─ pit.rs         PIT: despierta al bucle (250 Hz) y calibra el TSC
+            ├─ interrupts.rs  IDT: excepciones, timer (IRQ0), teclado (IRQ1), mouse (IRQ12),
+            │                 líneas PCI del disco y la red (compartibles)
+            ├─ pit.rs         PIT: el tick del planificador (250 Hz) y calibra el TSC
+            ├─ task.rs        tareas (K9): cambio de contexto, pilas con guarda, esperas, desalojo
+            ├─ irqlock.rs     lock sin interrupciones para lo que comparten las tareas
+            ├─ nettask.rs     la tarea de la red: colas de pedidos y respuestas con el escritorio
             ├─ time.rs        reloj en ms con el TSC
             ├─ queue.rs       cola de bytes sin locks (interrupción → bucle)
             ├─ keyboard.rs    teclado PS/2 → teclas y modificadores (Alt, Ctrl, Win, AltGr),
@@ -351,14 +361,17 @@ firmware UEFI (OVMF en QEMU)
             ├─ allocator.rs   heap de 256 MiB (alloc: Vec, String)
             ├─ paging.rs      tablas de páginas propias (jarvis-mem), W^X, map_mmio
             ├─ pci.rs         enumeración del bus PCI
-            ├─ virtio_blk.rs  driver de disco virtio-blk (DMA, virtqueue, polling)
-            ├─ virtio_net.rs  driver de placa de red virtio-net (dos virtqueues, polling)
+            ├─ virtio_blk.rs  driver de disco virtio-blk (DMA, virtqueue, interrupción)
+            ├─ virtio_net.rs  driver de placa de red virtio-net (dos virtqueues, interrupción)
             ├─ speaker.rs     parlante de la PC (canal 2 del PIT)
             ├─ power.rs       apagar (ACPI de QEMU) y reiniciar (8042)
             ├─ cpu.rs         nombre de la CPU (cpuid)
             ├─ rtc.rs         reloj CMOS → fecha y hora
-            └─ bucle          hlt → red → eventos → render → present → pedidos → estadísticas
-                 ├─ jarvis-net      TCP/IP (smoltcp), DHCP, DNS, descargas HTTP
+            ├─ tarea "red"    (prioridad alta) interrupción o pedido → smoltcp → respuestas
+            │    └─ jarvis-net      TCP/IP (smoltcp), DHCP, DNS, descargas HTTP
+            ├─ tarea "ociosa" hlt cuando nadie más puede correr
+            └─ tarea "escritorio" (la del arranque): dormir hasta el cuadro → eventos → render →
+                 │               present → pedidos a la red → estadísticas
                  └─ jarvis-desktop  ventanas, atajos, apps, barra, panel, menús, configuración,
                     │               firewall, idiomas, terminal (jsh, apt, snap, winget, ufw),
                     │               web (DOM, CSS, estilos, maquetación en cajas, HTTP)
@@ -372,12 +385,56 @@ firmware UEFI (OVMF en QEMU)
 | `gfx` (`jarvis-gfx`) | Dibujo: canvas con recorte (anidado) y `blit`, paleta, texto, **fuente vectorial**, **fuente proporcional de las páginas** (DejaVu, cualquier tamaño), figuras, íconos, trigonometría en punto fijo, esfera, asistente, HUD. | `cargo test`: 39 tests |
 | `fs` (`jarvis-fs`) | FAT32 propio: montaje, FAT (dos copias), nombres largos, lectura, escritura, carpetas, renombrar, mover, **copiar**, borrar, **caché de sectores**. Sobre un trait `BlockDevice`. | 22 tests, 14 de ellos **cruzados contra `fatfs`**: cada uno lee lo que escribe el otro, y el espacio libre se cuenta sobre la FAT cruda |
 | `desktop` (`jarvis-desktop`) | Escritorio: gestor de ventanas (con escritorios virtuales), atajos, barra, panel de estado, menús y paneles, configuración, firewall, idiomas, composición; apps (Archivos, Terminal, Configuración, Monitor, Consola, Editor, Música, Visor, Navegador); shell `jsh`, `apt`, `snap`, `winget`, `ufw`, formatos PE/ELF/squashfs; web: URL, HTTP, DOM, selectores y cascada, maquetación en cajas (flujo, flotantes, flex, grid, tablas), JSON, adaptador de YouTube; teclado latinoamericano. | 116 tests: el escritorio manejado con teclas y clics sobre un disco en memoria, verificado con `fatfs`; la terminal, `apt`, `snap` y `winget` contra el repositorio real y respuestas grabadas; el firewall; la maquetación sobre HTML de prueba; incluye "render incremental == redibujar todo". Más `vista_previa` (a mano): arma una página real, con imágenes, y la guarda en BMP |
-| `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente, conexiones TCP largas. | 5 tests de punta a punta en memoria (placa "loopback" + servidores de juguete) |
+| `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente, conexiones TCP largas. | 6 tests de punta a punta en memoria (placa "loopback" + servidores de juguete), incluido `poll_delay` |
 | `mem` (`jarvis-mem`) | Memoria: allocator de marcos físicos (mapa de bits), tablas de páginas de 4 niveles (mapear, traducir, desmapear, recorrer; páginas de 4 KiB, 2 MiB y 1 GiB) y segmentos del ELF del kernel para W^X. Sobre un trait `PhysMem`. | 8 tests sobre una RAM de mentira (copiar una jerarquía da las mismas traducciones) y `cargo xtask test` (el kernel arranca con sus tablas y verifica W^X) |
+| `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K9: multitarea
+- **Una tarea es una pila y un `rsp` guardado**. Cambiar de tarea (`jarvis_switch`, 14
+  instrucciones en `task.rs`) apila solo los registros que la convención de llamadas obliga a
+  preservar (rbx, rbp, r12–r15), guarda `rsp`, carga el de la otra y hace `ret`: vuelve a donde
+  *esa* tarea había llamado al cambio. Los demás registros ya los guardó el compilador en quien
+  llamó. Como el kernel no usa SSE (punto flotante por software), no hay estado de FPU que
+  guardar. Una tarea nueva arranca con una pila armada a mano cuyo `ret` cae en un trampolín.
+- **Desalojo desde el timer**: el manejador de IRQ0 avisa "fin de interrupción" al PIC *antes* de
+  cambiar de tarea. Si no, el PIC no manda otra interrupción del timer hasta que ese manejador
+  termine, y eso pasa recién cuando la tarea interrumpida vuelve a correr. Cada tarea retoma
+  dentro de su propio manejador y sale con `iretq` como si nada.
+- **Locks y desalojo no se llevan bien**. Con un solo núcleo, si una tarea tiene un spinlock y
+  el timer le saca la CPU, la siguiente que lo pida gira todo su turno; si lo pide una
+  interrupción, se traba para siempre. Por eso el heap, el puerto serie, las colas entre
+  tareas (`IrqMutex`) y el planificador mismo se toman **con las interrupciones
+  deshabilitadas**: nadie puede desalojar a quien tiene el lock. El planificador usa una tabla
+  fija, no `Vec`: corre dentro de la interrupción del timer y no puede pedir memoria.
+- **El aviso que llega antes de esperar** ("lost wakeup"): el disco puede terminar entre que la
+  tarea mira el anillo (todavía no) y se pone a esperar. Si el aviso se perdiera, la tarea
+  dormiría para siempre. El planificador **anota** los eventos que nadie esperaba y la próxima
+  espera vuelve enseguida. Además, toda espera de un driver tiene plazo y revisa el anillo: una
+  interrupción perdida cuesta 20 ms, no un cuelgue.
+- **Interrupciones PCI compartidas y "por nivel"**: el firmware eligió la línea de cada
+  dispositivo (registro 0x3C: en QEMU, 11 para el disco y 10 para la red). Una línea puede ser de
+  varios, así que el manejador le pregunta a cada uno leyendo su registro ISR, que además baja
+  la línea: si no se lee, la interrupción vuelve apenas se avisa el fin. El video y el
+  micrófono (virtio moderno, por polling) tienen apagada su interrupción (bit 10 del comando PCI)
+  para que no disparen una línea que nadie atiende.
+- **Paso de mensajes entre tareas**: el escritorio no toca la pila de red ni al revés. Se dejan
+  pedidos y respuestas en dos colas y se despiertan con un evento. La red es **más prioritaria**
+  (poco trabajo, urgente) pero cede la CPU si lleva varias vueltas sin dormir, para no dejar al
+  escritorio sin cuadros durante una ráfaga.
+- **Páginas de guarda**: cada pila vive en su propia ventana de 2 MiB y lo de abajo queda sin
+  mapear. Un desborde da fallo de página → doble fallo (no hay pila para el marco) → el stack de
+  emergencia de la TSS, y el mensaje dice qué tarea fue. Sin guarda, una pila desbordada pisa en
+  silencio lo que tenga abajo.
+- **Qué se ganó**: la CPU% ahora es el tiempo que *no* corrió la tarea ociosa; el bucle del
+  escritorio duerme hasta cada cuadro en vez de despertar cada 4 ms; la red atiende paquetes
+  aunque el escritorio esté en medio de un cuadro largo (maquetar una página pesada tarda ~1 s).
+- **Qué queda para más adelante**: un solo núcleo (SMP necesita el APIC y locks de verdad) y
+  tareas que no terminan (sus pilas no se liberan). Con el espacio de usuario (K11), cada proceso
+  va a ser una tarea con su propia PML4.
 
 ### K8: paginación propia
 - **Cambiar de tablas en caliente**: al cargar una PML4 nueva en CR3, la instrucción siguiente ya
@@ -620,7 +677,7 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K8 terminados; sigue K9 (multitarea). Son 9 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
+**Dónde estamos:** K0–K9 terminados; sigue K10 (TLS en el kernel). Son 10 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
 K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los anteriores juntos.
 
 | Hito | Qué se logra | Qué se aprende |
@@ -634,7 +691,7 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K6** ✅ | **Brave y sistema**: conexiones TCP largas ✅, Brave remoto (DevTools + mosaicos) ✅, temperatura, cerrar sesión y suspender ✅, personalización en capas ✅, selección múltiple y distribuciones de ventanas ✅, varios monitores (virtio-gpu) ✅, sincronización de carpetas entre máquinas (relé + ChaCha20-Poly1305) ✅ e ISO con modo en vivo ✅ | Protocolos binarios, control de flujo, relojes lógicos, criptografía autenticada, El Torito |
 | **K7** ✅ | **JARVIS con Claude** (ADR 0008): la consola le habla a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code) y la esfera pulsa con la respuesta ✅; acciones en JARVIS-OS con 3 niveles de permiso ✅; "abrí tal proyecto y seguí" ✅; **voz** con el micrófono y los parlantes del anfitrión (adelantada de K12) ✅; micrófono virtio-sound ✅; cuenta de Claude e inicio de sesión con Google desde Configuración ✅ | Protocolos, agentes, permisos, voz |
 | **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
-| K9 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
+| **K9** ✅ | Multitarea: planificador con prioridades y desalojo, tareas del kernel con pila propia (escritorio, red, ociosa), disco y red por interrupciones | Cambio de contexto, sincronización |
 | K10 | **TLS en el kernel** (sin puente) y decodificadores PNG/JPEG | Criptografía, certificados, compresión |
 | K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |

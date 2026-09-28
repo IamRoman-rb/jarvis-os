@@ -9,8 +9,10 @@
 //! descarga de checksums ni segmentación). El resto es una trama Ethernet que arma y entiende la
 //! pila TCP/IP (smoltcp): este driver implementa su trait `Device`.
 //!
-//! Todo por *polling*, sin interrupciones. Los buffers viven en el heap (DMA: física = virtual −
-//! offset). Referencia: especificación virtio 1.x, "Network Device" e "Legacy Interface".
+//! Cuando llega un paquete, el dispositivo sube su línea PCI y la interrupción despierta a la
+//! tarea de la red (K9, nettask.rs). Las transmisiones terminadas no interrumpen (no hace falta:
+//! los buffers se recuperan al mandar el próximo). Los buffers viven en el heap (DMA: física =
+//! virtual − offset). Referencia: especificación virtio 1.x, "Network Device" e "Legacy Interface".
 
 use alloc::alloc::{Layout, alloc_zeroed};
 use alloc::vec::Vec;
@@ -34,6 +36,10 @@ const REG_QUEUE_SIZE: u16 = 0x0C;
 const REG_QUEUE_SELECT: u16 = 0x0E;
 const REG_QUEUE_NOTIFY: u16 = 0x10;
 const REG_STATUS: u16 = 0x12;
+/// Registro ISR: leerlo dice si la placa avisó y baja la interrupción.
+const REG_ISR: u16 = 0x13;
+/// En el anillo disponible: "no me interrumpas cuando uses esto".
+const AVAIL_NO_INTERRUPT: u16 = 1;
 /// Configuración del dispositivo: acá empieza la MAC.
 const REG_MAC: u16 = 0x14;
 
@@ -137,10 +143,12 @@ pub struct VirtioNet {
     tx_in_flight: usize,
     mac: [u8; 6],
     physical_memory_offset: u64,
+    /// Línea PCI por la que avisa (la eligió el firmware).
+    irq_line: Option<u8>,
 }
 
-// SAFETY: los punteros son memoria del heap que solo usa este driver; el kernel tiene un solo
-// hilo y el driver no se toca desde interrupciones.
+// SAFETY: los punteros son memoria del heap que solo usa este driver, y lo usa una sola tarea
+// (la de la red, K9). La interrupción solo lee el registro ISR.
 unsafe impl Send for VirtioNet {}
 
 impl VirtioNet {
@@ -161,6 +169,7 @@ impl VirtioNet {
             tx_in_flight: 0,
             mac: [0; 6],
             physical_memory_offset,
+            irq_line: dev.interrupt_line(),
         };
         net.out8(REG_STATUS, 0);
         net.out8(REG_STATUS, STATUS_ACKNOWLEDGE);
@@ -170,6 +179,8 @@ impl VirtioNet {
 
         net.rx = net.setup_queue(0)?;
         net.tx = net.setup_queue(1)?;
+        // SAFETY: el primer u16 del anillo disponible son sus flags (la cola es propia).
+        unsafe { write_volatile(net.tx.avail(), AVAIL_NO_INTERRUPT) };
         // Todos los buffers de recepción quedan a disposición del dispositivo.
         for i in 0..net.rx.size {
             let addr = net.phys(net.rx.buffer(i));
@@ -213,6 +224,11 @@ impl VirtioNet {
 
     pub fn mac(&self) -> [u8; 6] {
         self.mac
+    }
+
+    /// (línea, puerto del registro ISR), para anotarlo en interrupts.rs.
+    pub fn irq(&self) -> Option<(u8, u16)> {
+        Some((self.irq_line?, self.io_base + REG_ISR))
     }
 
     fn setup_queue(&mut self, index: u16) -> Option<Queue> {

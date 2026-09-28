@@ -61,7 +61,7 @@ pub const NAMES: &[(&str, &str)] = &[
     ("open", "abre con la app que corresponde (xdg-open)"),
     ("ping", "prueba si responde un sitio (por HTTP)"),
     ("printf", "escribe con formato"),
-    ("ps", "procesos (ventanas abiertas)"),
+    ("ps", "procesos: tareas del kernel y ventanas"),
     ("pwd", "carpeta actual"),
     ("reboot", "reinicia"),
     ("rev", "da vuelta cada línea"),
@@ -954,8 +954,22 @@ impl Shell {
             }
             "ps" => {
                 o.push_str("  PID TTY      TIEMPO   CMD\n");
-                o.push_str("    1 ?        00:00:00 kernel\n");
-                o.push_str("    2 ?        00:00:00 escritorio\n");
+                // Las tareas del kernel (K9), entre corchetes como los hilos del kernel en Linux.
+                let kernel = &ctx.stats.kernel_tasks;
+                if kernel.is_empty() {
+                    o.push_str("    1 ?        00:00:00 [kernel]\n");
+                }
+                for t in kernel {
+                    let secs = t.cpu_ms / 1000;
+                    o.push_str(&format!(
+                        "{:>5} ?        {:02}:{:02}:{:02} [{}]\n",
+                        t.pid,
+                        secs / 3600,
+                        secs / 60 % 60,
+                        secs % 60,
+                        t.name
+                    ));
+                }
                 for t in ctx.tasks {
                     o.push_str(&format!(
                         "{:>5} tty1     00:00:00 {}{}\n",
@@ -977,9 +991,15 @@ impl Shell {
                     });
                     match target {
                         Some(id) => ctx.out.close.push(id),
-                        None if a == "1" || a == "2" => {
+                        None if a == "1"
+                            || ctx
+                                .stats
+                                .kernel_tasks
+                                .iter()
+                                .any(|t| t.pid.to_string() == *a) =>
+                        {
                             e.push_str(&format!(
-                                "kill: ({a}): el kernel y el escritorio no se pueden cerrar\n"
+                                "kill: ({a}): es una tarea del kernel, no se puede cerrar\n"
                             ));
                             code = 1;
                         }

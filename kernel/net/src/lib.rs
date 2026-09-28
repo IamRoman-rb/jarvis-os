@@ -11,7 +11,8 @@
 //!   conexión TCP, se manda el pedido HTTP, se junta la respuesta y se siguen las redirecciones
 //!   (`jarvis_desktop::web::http::Fetch`).
 //!
-//! Todo es por *polling*: el bucle principal del kernel llama a [`Net::poll`] en cada vuelta.
+//! Una sola tarea del kernel (la de la red, K9) llama a [`Net::poll`] cuando llega un paquete
+//! (interrupción), cuando el escritorio pide algo o cuando vence [`Net::poll_delay`].
 //! La placa de red es cualquier `smoltcp::phy::Device`: en el kernel, el driver virtio-net; en
 //! los tests, un dispositivo "loopback" en memoria.
 
@@ -190,6 +191,14 @@ impl<D: Device> Net<D> {
     #[doc(hidden)]
     pub fn sockets_mut(&mut self) -> &mut SocketSet<'static> {
         &mut self.sockets
+    }
+
+    /// En cuántos ms la pila tiene algo que hacer aunque no llegue nada (un reenvío de TCP, el
+    /// DHCP, el DNS): hasta entonces se puede dormir (K9). `None`: nada programado.
+    pub fn poll_delay(&mut self, now_ms: u64) -> Option<u64> {
+        self.iface
+            .poll_delay(instant(now_ms), &self.sockets)
+            .map(|d| d.total_millis())
     }
 
     /// Hay descargas en curso.
