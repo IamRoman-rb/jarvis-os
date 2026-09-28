@@ -353,6 +353,7 @@ firmware UEFI (OVMF en QEMU)
             ├─ task.rs        tareas (K9): cambio de contexto, pilas con guarda, esperas, desalojo
             ├─ irqlock.rs     lock sin interrupciones para lo que comparten las tareas
             ├─ nettask.rs     la tarea de la red: colas de pedidos y respuestas con el escritorio
+            ├─ entropy.rs     entropía (K10): RDSEED/RDRAND y variación del TSC → generador global
             ├─ time.rs        reloj en ms con el TSC
             ├─ queue.rs       cola de bytes sin locks (interrupción → bucle)
             ├─ keyboard.rs    teclado PS/2 → teclas y modificadores (Alt, Ctrl, Win, AltGr),
@@ -392,6 +393,23 @@ firmware UEFI (OVMF en QEMU)
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K10: TLS en el kernel (en curso)
+
+- **Primero, el azar.** TLS entero se apoya en claves efímeras impredecibles: si el generador es
+  malo, el cifrado más fuerte no sirve (le pasó a Debian con OpenSSL en 2008). `jarvis_tls::rng`
+  separa dos cosas: un **acumulador** (`Pool`, SHA-256) que junta entropía y cuenta los bits que se
+  le acreditan, y un **generador** (`Rng`, ChaCha20) que estira la semilla. El generador usa
+  *borrado rápido de la clave*: cada pedido genera 32 bytes de más que reemplazan la clave, así
+  que quien lea la memoria después no puede reconstruir lo que ya salió.
+- **Las fuentes** (`entropy.rs`): RDSEED y RDRAND si la CPU los tiene (se les cree la mitad y un
+  cuarto: nunca se depende solo de la CPU) y la **variación del TSC** al repetir un trabajo corto.
+  QEMU (`qemu64`) no tiene RDRAND, así que la variación del TSC tiene que alcanzar sola; se
+  acredita como mucho 1 bit por medición, y solo si ni la medición ni su variación repiten la
+  anterior (el "stuck test" de jitterentropy, de Linux). Con WHPX alcanza en dos vueltas (~270
+  bits). En QEMU sin aceleración (TCG) casi todo se repite: ahí el log dice
+  `ENTROPIA_INSUFICIENTE` y TLS no se va a usar. Pendiente: un driver virtio-rng (QEMU le pasa
+  entropía del anfitrión) como fuente más.
 
 ### K9: multitarea
 - **Una tarea es una pila y un `rsp` guardado**. Cambiar de tarea (`jarvis_switch`, 14
@@ -692,7 +710,7 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K7** ✅ | **JARVIS con Claude** (ADR 0008): la consola le habla a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code) y la esfera pulsa con la respuesta ✅; acciones en JARVIS-OS con 3 niveles de permiso ✅; "abrí tal proyecto y seguí" ✅; **voz** con el micrófono y los parlantes del anfitrión (adelantada de K12) ✅; micrófono virtio-sound ✅; cuenta de Claude e inicio de sesión con Google desde Configuración ✅ | Protocolos, agentes, permisos, voz |
 | **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
 | **K9** ✅ | Multitarea: planificador con prioridades y desalojo, tareas del kernel con pila propia (escritorio, red, ociosa), disco y red por interrupciones | Cambio de contexto, sincronización |
-| K10 | **TLS en el kernel** (sin puente) y decodificadores PNG/JPEG | Criptografía, certificados, compresión |
+| K10 | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS (rustls `no_std`); HTTPS directo; decodificadores PNG (propio) y JPEG (`zune-jpeg`) | Criptografía, certificados, compresión |
 | K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
 | K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |

@@ -5,7 +5,7 @@ con el asistente JARVIS en el centro y un escritorio con ventanas al estilo Wind
 de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va a hablar por la
 red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
-idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008). Roadmap y arquitectura del kernel:
+idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -26,6 +26,8 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    no_std y sin hardware (el cambio de contexto está en kernel/task.rs)
     - mem/         memoria (K8): allocator de marcos físicos, tablas de páginas de 4 niveles y
                    segmentos del ELF del kernel (W^X); no_std, sobre un trait PhysMem
+    - tls/         TLS (K10, ADR 0009): generador al azar (acumulador SHA-256 + ChaCha20 con borrado
+                   de clave); no_std (las fuentes de entropía están en kernel/entropy.rs)
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - sync/        sincronización de /Sincronizado: emparejado (HKDF), cifrado (ChaCha20-Poly1305),
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red
@@ -104,7 +106,7 @@ Cerebro (desde la raíz):
     kernel/paquetes/), convierte imágenes y SVG a BMP (ADR 0005) y pasa solo dos cabeceras más
     (las de la API de snaps, ADR 0006). Cambiar eso (otros métodos, otra interfaz, otras
     carpetas, otras cabeceras) requiere un ADR. El HTTPS y la conversión se van con TLS y
-    decodificadores en el kernel (roadmap K10). El puente de Brave (xtask/src/brave.rs, puerto
+    decodificadores en el kernel (roadmap K10, ADR 0009 propuesto). El puente de Brave (xtask/src/brave.rs, puerto
     8119) y el relé de sincronización (puerto 8120) son servicios aparte con protocolo propio
     (ADR 0007): el de Brave escucha fuera de 127.0.0.1 solo con `--red` y un token; el relé
     nunca ve contenido sin cifrar. Las conexiones largas (`Outbox::connect`) pasan por el

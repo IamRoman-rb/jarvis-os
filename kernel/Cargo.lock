@@ -700,6 +700,7 @@ dependencies = [
  "jarvis-mem",
  "jarvis-net",
  "jarvis-task",
+ "jarvis-tls",
  "linked_list_allocator",
  "pc-keyboard",
  "pic8259",
@@ -736,6 +737,14 @@ dependencies = [
 [[package]]
 name = "jarvis-task"
 version = "0.1.0"
+
+[[package]]
+name = "jarvis-tls"
+version = "0.1.0"
+dependencies = [
+ "chacha20",
+ "sha2",
+]
 
 [[package]]
 name = "js-sys"

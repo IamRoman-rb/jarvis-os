@@ -25,6 +25,7 @@ extern crate alloc;
 mod allocator;
 mod cpu;
 mod display;
+mod entropy;
 mod fw_cfg;
 mod gdt;
 mod interrupts;
@@ -197,6 +198,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         } else {
             " (sin W^X: no se pudo leer el ELF)"
         }
+    );
+    // K10: entropía para las claves de TLS (RDSEED/RDRAND si hay, y la variación del TSC).
+    let e = entropy::init();
+    serial_println!(
+        "{} {} bits (rdseed: {}, rdrand: {}, variación del TSC: {} bits)",
+        if e.ready {
+            "ENTROPIA_LISTA"
+        } else {
+            "ENTROPIA_INSUFICIENTE"
+        },
+        e.bits,
+        if e.rdseed { "sí" } else { "no" },
+        if e.rdrand { "sí" } else { "no" },
+        e.jitter_bits
     );
     // K9: desde acá hay tareas (y el timer puede cambiar de una a otra, una vez habilitadas las
     // interrupciones). Hace falta la paginación propia: las pilas se mapean con página de guarda.
