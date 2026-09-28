@@ -737,6 +737,8 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("segmentos con W^X", BOOT_TIMEOUT)?;
     // K10: hubo entropía suficiente para generar claves.
     s.wait_for("ENTROPIA_LISTA", BOOT_TIMEOUT)?;
+    // K10: el cliente TLS arma las claves efímeras y el ClientHello dentro del kernel.
+    s.wait_for("TLS_LISTO", BOOT_TIMEOUT)?;
     // K9: el escritorio, la red y la ociosa son tareas aparte.
     s.wait_for("MULTITAREA 3 tareas", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;

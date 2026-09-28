@@ -26,8 +26,10 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    no_std y sin hardware (el cambio de contexto está en kernel/task.rs)
     - mem/         memoria (K8): allocator de marcos físicos, tablas de páginas de 4 niveles y
                    segmentos del ELF del kernel (W^X); no_std, sobre un trait PhysMem
-    - tls/         TLS (K10, ADR 0009): generador al azar (acumulador SHA-256 + ChaCha20 con borrado
-                   de clave); no_std (las fuentes de entropía están en kernel/entropy.rs)
+    - tls/         TLS (K10, ADR 0009): generador al azar (rng.rs), cliente TLS 1.3/1.2 sans-I/O
+                   (client.rs, rustls unbuffered) y el proveedor de criptografía propio sobre
+                   RustCrypto (provider/); no_std. Tests contra rustls+ring con certificados de
+                   tests/datos/ (generar.sh). kernel/entropy.rs y kernel/tls.rs ponen azar y hora
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - sync/        sincronización de /Sincronizado: emparejado (HKDF), cifrado (ChaCha20-Poly1305),
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red

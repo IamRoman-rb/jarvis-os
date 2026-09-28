@@ -1,14 +1,38 @@
 [package]
 name = "jarvis-tls"
-description = "TLS de JARVIS-OS (K10): generador de números al azar y, en las etapas siguientes, el cliente TLS. no_std, testeable en el host."
+description = "TLS de JARVIS-OS (K10): generador de números al azar y cliente TLS (rustls con un proveedor propio sobre RustCrypto). no_std, testeable en el host."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# El generador (etapa 1).
 chacha20 = { version = "0.9", default-features = false }
 sha2 = { version = "0.10", default-features = false }
+# El cliente TLS (etapa 2): rustls sin std ni proveedor (el proveedor es nuestro, en provider/).
+rustls = { version = "0.23.45", default-features = false, features = ["tls12"] }
+# >= 0.103.13: trae el arreglo de RUSTSEC-2026-0104 (no usamos CRL, pero igual).
+webpki = { package = "rustls-webpki", version = "0.103.13", default-features = false, features = ["alloc"] }
+webpki-roots = "1"
+# Primitivas de RustCrypto para el proveedor.
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+hmac = { version = "0.12", default-features = false }
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "ecdh"] }
+p384 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+rsa = { version = "0.9", default-features = false, features = ["sha2", "u64_digit"] }
+
+[dev-dependencies]
+# Solo para los tests (en el host): un servidor TLS de referencia, con otra criptografía (ring),
+# para verificar que el cliente habla con una implementación que no es la suya.
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+
+# En el kernel (sin SSE), SHA-2 por software: la versión con SHA-NI no compila para ese target.
+[target.'cfg(target_os = "none")'.dependencies]
+sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }
 
 [lints]
 workspace = true

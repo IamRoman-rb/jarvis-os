@@ -86,13 +86,11 @@ pub fn init() -> Report {
 static READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// ¿Hubo entropía suficiente para generar claves?
-#[allow(dead_code)] // lo usa TLS (siguiente etapa de K10)
 pub fn ready() -> bool {
     READY.load(core::sync::atomic::Ordering::Relaxed)
 }
 
 /// Llena `out` con bytes al azar. Falso si todavía no hay generador.
-#[allow(dead_code)] // lo usa TLS (siguiente etapa de K10)
 pub fn fill(out: &mut [u8]) -> bool {
     RNG.with(|r| match r {
         Some(rng) => {

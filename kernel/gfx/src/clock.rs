@@ -127,6 +127,25 @@ impl DateTime {
             as usize
     }
 
+    /// Segundos desde el 1/1/1970 UTC (tiempo Unix); `None` antes de 1970. TLS lo usa para ver si
+    /// un certificado está vigente. Cuenta los días con el algoritmo `days_from_civil` de Howard
+    /// Hinnant: corre el año para que empiece en marzo, así el 29 de febrero queda al final.
+    pub fn unix_seconds(&self) -> Option<u64> {
+        if self.year < 1970 {
+            return None;
+        }
+        let y = self.year as i64 - if self.month <= 2 { 1 } else { 0 };
+        let era = y / 400;
+        let yoe = y - era * 400;
+        let m = self.month as i64;
+        let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + self.day as i64 - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        let days = era * 146_097 + doe - 719_468;
+        let secs =
+            days * 86_400 + self.hour as i64 * 3600 + self.minute as i64 * 60 + self.second as i64;
+        u64::try_from(secs).ok()
+    }
+
     /// Corre la hora `hours` horas (puede cambiar el día, el mes y el año).
     /// Se usa para pasar de UTC (lo que guarda el reloj del hardware) a hora local.
     pub fn offset_hours(mut self, hours: i8) -> DateTime {
@@ -292,6 +311,37 @@ mod tests {
             }
             .is_valid()
         );
+    }
+
+    #[test]
+    fn tiempo_unix() {
+        // `dt` pone el minuto en 25; acá hace falta en punto.
+        let dt = |y, m, d, h| DateTime {
+            minute: 0,
+            ..dt(y, m, d, h)
+        };
+        assert_eq!(dt(1970, 1, 1, 0).unix_seconds(), Some(0));
+        assert_eq!(dt(1969, 12, 31, 23).unix_seconds(), None);
+        // Valores conocidos (date -u -d ... +%s).
+        assert_eq!(dt(2000, 3, 1, 0).unix_seconds(), Some(951_868_800));
+        assert_eq!(dt(2027, 1, 1, 0).unix_seconds(), Some(1_798_761_600));
+        let t = DateTime {
+            minute: 34,
+            second: 56,
+            ..dt(2028, 2, 29, 12)
+        };
+        assert_eq!(t.unix_seconds(), Some(1_835_440_496));
+        // Cada día suma 86400, también al cruzar un 29 de febrero.
+        for (a, b) in [
+            (dt(2028, 2, 28, 0), dt(2028, 2, 29, 0)),
+            (dt(2028, 2, 29, 0), dt(2028, 3, 1, 0)),
+            (dt(2026, 12, 31, 0), dt(2027, 1, 1, 0)),
+        ] {
+            assert_eq!(
+                b.unix_seconds().unwrap() - a.unix_seconds().unwrap(),
+                86_400
+            );
+        }
     }
 
     #[test]

@@ -16,8 +16,12 @@ API de Anthropic directamente (ADR 0008).
 ## Decisión
 
 1. **TLS con `rustls` en modo `no_std`**, en una crate nueva `kernel/tls` (testeable en el host),
-   con un proveedor de criptografía de RustCrypto y las raíces de confianza de `webpki-roots`
-   compiladas adentro. Soporta TLS 1.2 y 1.3 y valida la cadena de certificados X.509.
+   con las raíces de confianza de `webpki-roots` compiladas adentro. Soporta TLS 1.2 y 1.3 y
+   valida la cadena de certificados X.509. La criptografía la pone un **proveedor propio**
+   (`tls/src/provider/`) sobre las primitivas de RustCrypto: los de rustls (aws-lc-rs, ring)
+   traen C y ensamblador que no compilan para el kernel, y `rustls-rustcrypto` sigue en alfa
+   (0.0.2-alpha). Solo suites AEAD con ECDHE (nada de CBC ni de RSA sin
+   ECDHE), X25519 y P-256, y firmas ECDSA P-256/P-384 y RSA (PKCS#1 v1.5 y PSS, 2048–8192 bits).
    - **Por qué no un TLS propio:** es el lugar donde un error chico (un MAC mal comparado, una
      extensión mal parseada) rompe la seguridad sin que se note. Lo que se aprende va en
      `docs/kernel.md`: el handshake, el intercambio de claves, X.509 y la cadena de confianza.

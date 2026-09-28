@@ -354,6 +354,7 @@ firmware UEFI (OVMF en QEMU)
             ├─ irqlock.rs     lock sin interrupciones para lo que comparten las tareas
             ├─ nettask.rs     la tarea de la red: colas de pedidos y respuestas con el escritorio
             ├─ entropy.rs     entropía (K10): RDSEED/RDRAND y variación del TSC → generador global
+            ├─ tls.rs         TLS (K10): une jarvis-tls con la entropía y la hora; prueba al arrancar
             ├─ time.rs        reloj en ms con el TSC
             ├─ queue.rs       cola de bytes sin locks (interrupción → bucle)
             ├─ keyboard.rs    teclado PS/2 → teclas y modificadores (Alt, Ctrl, Win, AltGr),
@@ -410,6 +411,29 @@ firmware UEFI (OVMF en QEMU)
   bits). En QEMU sin aceleración (TCG) casi todo se repite: ahí el log dice
   `ENTROPIA_INSUFICIENTE` y TLS no se va a usar. Pendiente: un driver virtio-rng (QEMU le pasa
   entropía del anfitrión) como fuente más.
+- **El cliente TLS** (`jarvis_tls::client`) no hace entrada/salida: recibe los bytes que llegan
+  por TCP y devuelve los que hay que mandar ("sans-I/O"). Así los tests lo hacen hablar con un
+  servidor de referencia (rustls con *ring*, otra implementación de la criptografía) en memoria,
+  y en el kernel se va a sentar sobre un socket de smoltcp. Por dentro usa la API *unbuffered*
+  de rustls, la única sin `std`: rustls dice en qué estado está (hay que mandar algo, llegaron
+  datos, se puede escribir, falta leer) y el cliente reacciona hasta que no queda nada por hacer.
+- **El proveedor propio** (`tls/src/provider/`): rustls hace el protocolo y le pide la matemática
+  a un `CryptoProvider`. Lo más delicado fue AES-GCM en TLS 1.2: el nonce son 4 bytes fijos (del
+  bloque de claves) + 8 que viajan al principio de cada registro; en TLS 1.3 y con ChaCha20 no
+  viaja nada (IV XOR número de secuencia). La verificación de firmas se prueba con un
+  certificado "impostor": su emisor tiene el mismo nombre que la autoridad de confianza pero
+  otra clave, así que solo la firma lo delata (y el test falla si la verificación de ECDSA
+  acepta cualquier cosa: se probó rompiéndola a propósito).
+- **Sin SSE**: el kernel compila para un target sin SSE ni AVX, y los backends rápidos de AES
+  (AES-NI), GCM, SHA-2 (SHA-NI) y curve25519 no compilan ahí (LLVM falla). Se fuerzan las
+  versiones por software con `--cfg` en `.cargo/config.toml` y, para SHA-2, un feature solo
+  para ese target. Todo por software y aun así el ClientHello (dos pares de claves efímeras) sale
+  en menos de 1 ms. El kernel creció ~0,9 MB (RSA, las curvas y las 121 raíces de Mozilla).
+- **La hora**: un certificado se valida contra la fecha actual. El RTC se lee una vez al
+  arrancar (`DateTime::unix_seconds`, el algoritmo *days_from_civil*) y después se suma el TSC:
+  así la tarea de la red no toca los puertos del CMOS a la vez que el reloj del escritorio. Sin
+  hora válida o sin entropía suficiente, TLS no arranca: es preferible a aceptar certificados
+  vencidos o usar claves adivinables.
 
 ### K9: multitarea
 - **Una tarea es una pila y un `rsp` guardado**. Cambiar de tarea (`jarvis_switch`, 14
@@ -710,7 +734,7 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K7** ✅ | **JARVIS con Claude** (ADR 0008): la consola le habla a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code) y la esfera pulsa con la respuesta ✅; acciones en JARVIS-OS con 3 niveles de permiso ✅; "abrí tal proyecto y seguí" ✅; **voz** con el micrófono y los parlantes del anfitrión (adelantada de K12) ✅; micrófono virtio-sound ✅; cuenta de Claude e inicio de sesión con Google desde Configuración ✅ | Protocolos, agentes, permisos, voz |
 | **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
 | **K9** ✅ | Multitarea: planificador con prioridades y desalojo, tareas del kernel con pila propia (escritorio, red, ociosa), disco y red por interrupciones | Cambio de contexto, sincronización |
-| K10 | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS (rustls `no_std`); HTTPS directo; decodificadores PNG (propio) y JPEG (`zune-jpeg`) | Criptografía, certificados, compresión |
+| K10 | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo; decodificadores PNG (propio) y JPEG (`zune-jpeg`) | Criptografía, certificados, compresión |
 | K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
 | K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |

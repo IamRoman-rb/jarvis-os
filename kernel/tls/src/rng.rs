@@ -87,6 +87,13 @@ pub struct Rng {
     key: [u8; 32],
 }
 
+impl core::fmt::Debug for Rng {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Nunca la clave: un log no puede revelar el estado del generador.
+        f.write_str("Rng { .. }")
+    }
+}
+
 /// Cuánto se genera por vuelta: 32 bytes de clave nueva + hasta 224 de salida (4 bloques de
 /// ChaCha20). Los pedidos más largos se parten, y cada parte rota la clave.
 const CHUNK: usize = 224;

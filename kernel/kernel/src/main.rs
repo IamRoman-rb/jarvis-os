@@ -43,6 +43,7 @@ mod serial;
 mod speaker;
 mod task;
 mod time;
+mod tls;
 mod virtio_blk;
 mod virtio_gpu;
 mod virtio_modern;
@@ -213,6 +214,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if e.rdrand { "sí" } else { "no" },
         e.jitter_bits
     );
+    // K10: el cliente TLS (rustls con nuestro proveedor) y una prueba sin red: las claves
+    // efímeras y el primer mensaje del handshake.
+    let t = tls::init();
+    match &t.hello {
+        Ok((len, us)) => serial_println!(
+            "TLS_LISTO {} raíces de confianza, hora {}, ClientHello de {} bytes en {} µs",
+            t.roots,
+            if t.clock_ok { "del RTC" } else { "desconocida" },
+            len,
+            us
+        ),
+        Err(err) => serial_println!("TLS_ERROR {}", err),
+    }
     // K9: desde acá hay tareas (y el timer puede cambiar de una a otra, una vez habilitadas las
     // interrupciones). Hace falta la paginación propia: las pilas se mapean con página de guarda.
     task::init("escritorio");
