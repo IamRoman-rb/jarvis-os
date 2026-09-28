@@ -10,7 +10,7 @@ TOKEN = "t" * 32
 
 
 async def connect(token: str = TOKEN) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    server = await start(0, TOKEN, lambda: ScriptedBrain(delay=0.01))
+    server = await start(0, TOKEN, lambda s: ScriptedBrain(s, delay=0.01))
     port = server.sockets[0].getsockname()[1]
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     writer.write(encode({"t": "hola", "token": token, "equipo": "jarvis"}))
@@ -64,3 +64,28 @@ async def test_un_renglon_invalido_corta_sin_romper_el_servicio() -> None:
     writer.write(b"esto no es json\n")
     await writer.drain()
     assert await asyncio.wait_for(reader.read(), 5) == b""
+
+
+async def test_una_accion_la_ejecuta_el_kernel_y_la_confirmacion_la_decide_roman() -> None:
+    reader, writer = await connect()
+    await read(reader)
+    writer.write(encode({"t": "pedido", "id": 2, "texto": "abrí el navegador y buscá rust"}))
+    msg = await read(reader)
+    assert msg["t"] == "accion" and msg["tool"] == "buscar_web"
+    assert msg["args"] == {"consulta": "rust"}
+    writer.write(encode({"t": "resultado", "llamada": msg["llamada"], "ok": True, "datos": "ok"}))
+    text = ""
+    while (m := await read(reader))["t"] != "fin":
+        text += str(m["delta"])
+    assert text.startswith("Hecho (buscar_web)")
+
+    writer.write(encode({"t": "pedido", "id": 3, "texto": "borrá /Documentos/tesis.txt"}))
+    msg = await read(reader)
+    assert msg["t"] == "confirmar" and msg["nivel"] == 3
+    writer.write(encode({"t": "confirmacion", "llamada": msg["llamada"], "ok": False}))
+    text = ""
+    while (m := await read(reader))["t"] != "fin":
+        assert m["t"] == "texto", "sin confirmación no hay acción"
+        text += str(m["delta"])
+    assert text.startswith("No lo hice")
+    writer.close()

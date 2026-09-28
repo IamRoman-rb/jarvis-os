@@ -20,6 +20,9 @@
 //! (si las animaciones están activadas). Cada animación depende solo de la hora del frame, así
 //! que dibujar por partes sigue dando lo mismo que redibujar todo.
 
+#[path = "desktop_actions.rs"]
+mod actions;
+
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -154,6 +157,13 @@ enum Overlay {
     },
     /// Win+N: notificaciones y calendario.
     Notices,
+    /// El cerebro pide permiso para una acción de nivel 2 o 3 (0 = Permitir, 1 = Rechazar).
+    Confirm {
+        call: u32,
+        level: u8,
+        desc: String,
+        sel: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -631,6 +641,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Menu(_) => "enlaces",
             Overlay::Quick { .. } => "rapida",
             Overlay::Notices => "notificaciones",
+            Overlay::Confirm { .. } => "confirmar",
         }
     }
 
@@ -1022,7 +1033,11 @@ impl<D: BlockDevice> Desktop<D> {
         // (Menús y paneles chicos no: se dibujan encima de lo que hay.)
         matches!(
             self.overlay,
-            Overlay::TaskView { .. } | Overlay::Power { .. } | Overlay::Lock | Overlay::Sleep
+            Overlay::TaskView { .. }
+                | Overlay::Power { .. }
+                | Overlay::Lock
+                | Overlay::Sleep
+                | Overlay::Confirm { .. }
         )
     }
 
@@ -1755,6 +1770,28 @@ impl<D: BlockDevice> Desktop<D> {
                 self.overlay_dirty = true;
                 true
             }
+            Overlay::Confirm {
+                call, level, sel, ..
+            } => {
+                let (call, level) = (*call, *level);
+                match key {
+                    Key::Escape => self.answer_confirm(call, false),
+                    Key::Left | Key::Right | Key::Tab => {
+                        *sel = 1 - (*sel).min(1);
+                        self.overlay_dirty = true;
+                    }
+                    // En el nivel 3, el teclado solo puede rechazar: permitir es con un clic.
+                    Key::Enter if *sel == 0 && level >= 3 => {
+                        self.logs.push("CONFIRMAR_NIVEL3_REQUIERE_CLIC".into());
+                    }
+                    Key::Enter => {
+                        let ok = *sel == 0;
+                        self.answer_confirm(call, ok);
+                    }
+                    _ => {}
+                }
+                true
+            }
             Overlay::Notices => {
                 match key {
                     Key::Escape => self.set_overlay(Overlay::None),
@@ -1920,8 +1957,25 @@ impl<D: BlockDevice> Desktop<D> {
                     let first = self.brain.answer.lines().next().unwrap_or("").to_string();
                     self.say(&first, now_ms);
                 }
-                BrainEvent::Error(_) => {}
+                BrainEvent::Error(_) | BrainEvent::Confirm { .. } => {}
+                BrainEvent::Action { call, tool, args } => {
+                    let (ok, datos) = self.run_action(tool, args, now_ms);
+                    self.brain.result(*call, ok, &datos, &mut self.out);
+                }
             }
+            if let BrainEvent::Confirm { call, level, desc } = &ev {
+                // Una confirmación nueva reemplaza a la anterior (que queda rechazada).
+                if let Overlay::Confirm { call: old, .. } = self.overlay {
+                    self.brain.confirmation(old, false, &mut self.out);
+                }
+                self.set_overlay(Overlay::Confirm {
+                    call: *call,
+                    level: *level,
+                    desc: desc.clone(),
+                    sel: 1,
+                });
+            }
+            self.logs.append(&mut self.brain.logs);
             for s in &mut self.slots {
                 if let crate::apps::App::Console(c) = &mut s.app {
                     c.brain_event(&ev);
@@ -1929,6 +1983,13 @@ impl<D: BlockDevice> Desktop<D> {
                 }
             }
         }
+    }
+
+    /// Lo que Roman decidió en el diálogo de confirmación, al cerebro.
+    fn answer_confirm(&mut self, call: u32, ok: bool) {
+        self.set_overlay(Overlay::None);
+        self.brain.confirmation(call, ok, &mut self.out);
+        self.logs.append(&mut self.brain.logs);
     }
 
     fn say(&mut self, text: &str, now_ms: u64) {
@@ -2524,6 +2585,16 @@ impl<D: BlockDevice> Desktop<D> {
                 }
                 return;
             }
+            Overlay::Confirm { call, desc, .. } => {
+                let call = *call;
+                let [permit, reject] = shell::confirm_buttons(self.width, self.height, desc);
+                if permit.contains(x, y) {
+                    self.answer_confirm(call, true);
+                } else if reject.contains(x, y) {
+                    self.answer_confirm(call, false);
+                }
+                return;
+            }
             Overlay::Notices => {
                 let (w, h) = (self.width, self.height);
                 if panels::clear_button(w, h).contains(x, y) {
@@ -3044,6 +3115,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Menu(m) => m.rect(w, h).inset(-4),
             Overlay::Quick { .. } => panels::quick_rect(w, h).inset(-4),
             Overlay::Notices => panels::notices_rect(w, h).inset(-4),
+            Overlay::Confirm { .. } => Rect::new(0, 0, w as i32, h as i32),
             Overlay::Layouts { .. } => shell::layouts_rect(w, h).inset(-4),
             Overlay::Project { .. } => shell::project_rect(w, h).inset(-4),
             _ => Rect::new(0, 0, self.full_w as i32, self.full_h as i32),
@@ -3324,6 +3396,9 @@ impl<D: BlockDevice> Desktop<D> {
                 panels::draw_quick(frame, w, h, &self.config, *sel, &net);
             }
             Overlay::Notices => panels::draw_notices(frame, w, h, &self.notices, clock),
+            Overlay::Confirm {
+                level, desc, sel, ..
+            } => shell::draw_confirm(frame, w, h, *level, desc, *sel),
             Overlay::Layouts { sel } => shell::draw_layouts(frame, w, h, *sel),
             Overlay::Project { sel } => {
                 shell::draw_project(frame, w, h, *sel, self.config.display_mode)

@@ -29,6 +29,12 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   anfitrión sin ventana y JARVIS-OS lo muestra en una ventana propia, con pestañas, barra de
   dirección, atrás/adelante, mouse, rueda y teclado. Se instala con `cargo xtask brave
   --instalar`. El navegador propio de K3–K5 queda como "Navegador simple".
+- **JARVIS con Claude** (K7, ADR 0008): la consola resuelve sus órdenes locales y lo demás se lo
+  pregunta a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code); la respuesta
+  aparece a medida que llega y la esfera habla. JARVIS también **actúa**: abre apps y páginas,
+  lee, crea y mueve archivos, cierra ventanas, manda a la Papelera o ejecuta comandos, con los
+  3 niveles de `docs/permisos.md`: lo que cambia algo pide permiso en un diálogo que muestra la
+  acción completa, y el nivel 3 solo se aprueba con un clic.
 - **Sincronización entre máquinas**: la carpeta `/Sincronizado` se copia sola entre dos (o más)
   JARVIS, aunque estén en redes distintas. En Configuración → Sincronización se genera un código
   en una y se escribe en la otra; las dos se conectan a un **relé** (`cargo xtask relay`) que solo

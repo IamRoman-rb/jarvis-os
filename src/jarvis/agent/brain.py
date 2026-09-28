@@ -8,11 +8,15 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from jarvis.agent.prompts import JARVIS_SYSTEM_PROMPT
 from jarvis.config import Config
+from jarvis.policy.audit import audit
+from jarvis.policy.levels import auto_approved, bare
+from jarvis.tools.system import Gate, Kernel, build_server
 
 
 class BrainError(RuntimeError):
@@ -32,19 +36,37 @@ class Brain(Protocol):
 
 
 class ClaudeBrain:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, kernel: Kernel) -> None:
         self._config = config
+        self._kernel = kernel
+        self._gate = Gate(kernel)
         self._client: Any = None
 
+    async def _can_use_tool(self, name: str, args: dict[str, Any], _ctx: Any) -> Any:
+        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+        if await self._gate.permit(name, args):
+            return PermissionResultAllow()
+        return PermissionResultDeny(message="Roman rechazó la acción (o no está permitida).")
+
+    async def _audit_hook(self, data: Any, _tool_use_id: Any, _ctx: Any) -> dict[str, Any]:
+        # Corre antes que cualquier regla: queda registro de todo intento, aprobado o no.
+        audit("intento", bare(str(data.get("tool_name", "?"))), dict(data.get("tool_input", {})))
+        return {}
+
     def _options(self) -> Any:
-        from claude_agent_sdk import ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
         return ClaudeAgentOptions(
             system_prompt=JARVIS_SYSTEM_PROMPT,
             model=self._config.modelo,
             # Sin las herramientas de Claude Code: JARVIS actúa solo con las suyas (§12.2).
             tools=[],
-            allowed_tools=[],
+            mcp_servers={"jarvis": build_server(self._kernel)},
+            # Solo las de nivel 1 se aprueban solas; las de 2 y 3 caen en can_use_tool.
+            allowed_tools=auto_approved(),
+            can_use_tool=self._can_use_tool,
+            hooks={"PreToolUse": [HookMatcher(hooks=[self._audit_hook])]},  # type: ignore[list-item]
             # Nunca bypassPermissions ni acceptEdits (ver docs/permisos.md).
             permission_mode="default",
             include_partial_messages=True,
@@ -104,17 +126,41 @@ SCRIPT: list[tuple[str, str]] = [
 ]
 
 
-class ScriptedBrain:
-    """Sin red ni API: para `cargo xtask test` y los tests de Python."""
+# Pedidos con acción del cerebro simulado: (patrón, tool, argumentos a partir del match).
+ACTIONS: list[tuple[str, str, Any]] = [
+    (r"abr[ií] el navegador y busc[aá] (.+)", "buscar_web", lambda m: {"consulta": m[1]}),
+    (r"abr[ií] (?:el |la )?(\w+)$", "abrir_app", lambda m: {"app": m[1]}),
+    (r"cre[aá] (\S+) con (.+)", "escribir_archivo", lambda m: {"ruta": m[1], "contenido": m[2]}),
+    (r"(?:borr[aá]|tir[aá]) (\S+)", "a_papelera", lambda m: {"ruta": m[1]}),
+    (r"le[eé] (\S+)", "leer_archivo", lambda m: {"ruta": m[1]}),
+]
 
-    def __init__(self, delay: float = 0.02) -> None:
+
+class ScriptedBrain:
+    """Sin red ni API: para `cargo xtask test` y los tests de Python. Con `kernel`, algunos
+    pedidos ejecutan una tool, con los mismos permisos que con Claude."""
+
+    def __init__(self, kernel: Kernel | None = None, delay: float = 0.02) -> None:
+        self._gate = Gate(kernel) if kernel is not None else None
         self._delay = delay
         self._stop = False
+
+    async def _act(self, text: str) -> str | None:
+        if self._gate is None:
+            return None
+        for pattern, tool, make_args in ACTIONS:
+            m = re.search(pattern, text.strip(), re.IGNORECASE)
+            if m:
+                ok, data = await self._gate.run(tool, make_args(m))
+                return f"Hecho ({tool}): {data}" if ok else f"No lo hice: {data}"
+        return None
 
     async def reply(self, text: str) -> AsyncIterator[str]:
         self._stop = False
         low = text.lower()
-        answer = next((a for k, a in SCRIPT if k in low), f"Entendido: {text}")
+        answer = await self._act(text) or next(
+            (a for k, a in SCRIPT if k in low), f"Entendido: {text}"
+        )
         for i, word in enumerate(answer.split(" ")):
             if self._stop:
                 return

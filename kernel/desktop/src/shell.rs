@@ -1131,6 +1131,117 @@ pub fn draw_power(c: &mut Canvas<'_>, w: usize, h: usize, sel: usize) {
     }
 }
 
+// --- confirmación de una acción de JARVIS -------------------------------------------------------
+
+const CONFIRM_W: i32 = 560;
+const CONFIRM_LINE: i32 = 22;
+
+/// La descripción en renglones que entran en el diálogo: completa, nunca recortada.
+fn confirm_lines(desc: &str) -> Vec<String> {
+    let st = s16(theme::text());
+    let max = CONFIRM_W - 48;
+    let mut lines = Vec::new();
+    for para in desc.split('\n') {
+        let mut line = String::new();
+        for word in para.split(' ') {
+            let candidate = if line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{line} {word}")
+            };
+            if text::width(&candidate, &st) <= max {
+                line = candidate;
+                continue;
+            }
+            if !line.is_empty() {
+                lines.push(core::mem::take(&mut line));
+            }
+            // Una palabra que sola no entra (un comando largo): de a caracteres.
+            for ch in word.chars() {
+                line.push(ch);
+                if text::width(&line, &st) > max {
+                    let last = line.pop().unwrap_or(' ');
+                    lines.push(core::mem::take(&mut line));
+                    line.push(last);
+                }
+            }
+        }
+        lines.push(line);
+    }
+    lines
+}
+
+fn confirm_rect(w: usize, h: usize, desc: &str) -> Rect {
+    let n = confirm_lines(desc).len() as i32;
+    let dh = (150 + n * CONFIRM_LINE).min(h as i32 - 40);
+    Rect::new(
+        (w as i32 - CONFIRM_W) / 2,
+        (h as i32 - dh) / 2,
+        CONFIRM_W,
+        dh,
+    )
+}
+
+/// Permitir y Rechazar.
+pub fn confirm_buttons(w: usize, h: usize, desc: &str) -> [Rect; 2] {
+    let d = confirm_rect(w, h, desc);
+    let y = d.y + d.h - 56;
+    [
+        Rect::new(d.x + d.w - 2 * 150 - 36, y, 150, 36),
+        Rect::new(d.x + d.w - 150 - 20, y, 150, 36),
+    ]
+}
+
+pub fn draw_confirm(c: &mut Canvas<'_>, w: usize, h: usize, level: u8, desc: &str, sel: usize) {
+    c.fill_rect(
+        0,
+        0,
+        w as i32,
+        h as i32,
+        theme::void().lerp(Color::BLACK, 90),
+    );
+    let d = confirm_rect(w, h, desc);
+    let col = if level >= 3 {
+        theme::crimson()
+    } else {
+        theme::amber()
+    };
+    rounded_rect(c, d.x, d.y, d.w, d.h, 12, theme::menu(), 255);
+    rounded_outline(c, d.x, d.y, d.w, d.h, 12, col.scale(180));
+    text::draw(
+        c,
+        d.x + 24,
+        d.y + 24,
+        tr("JARVIS QUIERE HACER ESTO"),
+        &label(col),
+    );
+    let lines = confirm_lines(desc);
+    let max_lines = ((d.h - 150) / CONFIRM_LINE).max(1) as usize;
+    for (i, l) in lines.iter().take(max_lines).enumerate() {
+        text::draw(
+            c,
+            d.x + 24,
+            d.y + 60 + i as i32 * CONFIRM_LINE,
+            l,
+            &s16(theme::text()),
+        );
+    }
+    let hint = if level >= 3 {
+        tr("Nivel 3: para permitir hace falta un clic (Esc rechaza)")
+    } else {
+        tr("Nivel 2: Enter elige, Esc rechaza")
+    };
+    text::draw(c, d.x + 24, d.y + d.h - 88, hint, &light(theme::text_dim()));
+    let labels = [tr("PERMITIR"), tr("RECHAZAR")];
+    let colors = [col, theme::text_dim()];
+    for (i, r) in confirm_buttons(w, h, desc).into_iter().enumerate() {
+        button(c, r, labels[i], colors[i], if i == sel { 90 } else { 20 });
+        if i == sel {
+            rounded_outline(c, r.x - 3, r.y - 3, r.w + 6, r.h + 6, 6, colors[i]);
+        }
+    }
+}
+
 // --- avisos -----------------------------------------------------------------------------------
 
 pub const TOAST_H: i32 = 44;
