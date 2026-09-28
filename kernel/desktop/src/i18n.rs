@@ -300,6 +300,7 @@ static EN: &[(&str, &str)] = &[
         "After a while without using the keyboard or mouse",
     ),
     ("Desvanecer", "Fade"),
+    ("Deteniendo...", "Stopping..."),
     ("Diciembre", "December"),
     ("Dirección física (MAC)", "Physical address (MAC)"),
     (
@@ -628,6 +629,10 @@ static EN: &[(&str, &str)] = &[
     ("Nunca", "Never"),
     ("Octubre", "October"),
     ("PAPELERA", "TRASH"),
+    (
+        "PEDILE A JARVIS QUE ABRA UN PROYECTO",
+        "ASK JARVIS TO OPEN A PROJECT",
+    ),
     ("PEGAR", "PASTE"),
     ("PERMITIR", "ALLOW"),
     ("PIN INCORRECTO. PROBÁ OTRA VEZ.", "WRONG PIN. TRY AGAIN."),
@@ -665,6 +670,7 @@ static EN: &[(&str, &str)] = &[
     ("Procesador", "Processor"),
     ("Programas de Windows (winget)", "Windows programs (winget)"),
     ("Programas instalados", "Installed programs"),
+    ("Proyecto", "Project"),
     ("Proyectos", "Projects"),
     ("Puente de Brave", "Brave bridge"),
     ("Puerta de enlace y DNS", "Gateway and DNS"),
@@ -764,7 +770,9 @@ static EN: &[(&str, &str)] = &[
     ("Suspender", "Sleep"),
     ("TAMAÑO", "SIZE"),
     ("TEMPERATURA", "TEMPERATURE"),
+    ("TERMINADO", "FINISHED"),
     ("TIPO", "TYPE"),
+    ("TRABAJANDO · ESC DETIENE", "WORKING · ESC STOPS"),
     ("Tamaño en píxeles", "Size in pixels"),
     (
         "También al maximizar, acoplar y minimizar",
@@ -1086,6 +1094,7 @@ static PT: &[(&str, &str)] = &[
         "Depois de um tempo sem usar o teclado nem o mouse",
     ),
     ("Desvanecer", "Esmaecer"),
+    ("Deteniendo...", "Parando..."),
     ("Diciembre", "Dezembro"),
     ("Dirección física (MAC)", "Endereço físico (MAC)"),
     (
@@ -1426,6 +1435,10 @@ static PT: &[(&str, &str)] = &[
     ("Nunca", "Nunca"),
     ("Octubre", "Outubro"),
     ("PAPELERA", "LIXEIRA"),
+    (
+        "PEDILE A JARVIS QUE ABRA UN PROYECTO",
+        "PEÇA AO JARVIS PARA ABRIR UM PROJETO",
+    ),
     ("PEGAR", "COLAR"),
     ("PERMITIR", "PERMITIR"),
     (
@@ -1466,6 +1479,7 @@ static PT: &[(&str, &str)] = &[
         "Programas do Windows (winget)",
     ),
     ("Programas instalados", "Programas instalados"),
+    ("Proyecto", "Projeto"),
     ("Proyectos", "Projetos"),
     ("Puente de Brave", "Ponte do Brave"),
     ("Puerta de enlace y DNS", "Gateway e DNS"),
@@ -1565,7 +1579,9 @@ static PT: &[(&str, &str)] = &[
     ("Suspender", "Suspender"),
     ("TAMAÑO", "TAMANHO"),
     ("TEMPERATURA", "TEMPERATURA"),
+    ("TERMINADO", "TERMINADO"),
     ("TIPO", "TIPO"),
+    ("TRABAJANDO · ESC DETIENE", "TRABALHANDO · ESC PARA"),
     ("Tamaño en píxeles", "Tamanho em pixels"),
     (
         "También al maximizar, acoplar y minimizar",

@@ -22,11 +22,13 @@ LEVELS: dict[str, int] = {
     "abrir_app": 1,
     "abrir_web": 1,
     "buscar_web": 1,
+    "listar_proyectos": 1,
     "escribir_archivo": 2,
     "crear_carpeta": 2,
     "copiar": 2,
     "mover": 2,
     "cerrar_ventana": 2,
+    "abrir_proyecto": 2,
     "a_papelera": 3,
     "ejecutar_comando": 3,
 }

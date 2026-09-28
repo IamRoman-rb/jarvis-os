@@ -423,7 +423,7 @@ impl Console {
                 self.lines.push((Who::User, format!("  · {tool}")));
                 self.streaming = None;
             }
-            BrainEvent::Confirm { .. } => {}
+            BrainEvent::Confirm { .. } | BrainEvent::Project { .. } => {}
             BrainEvent::End => {
                 self.waiting = false;
                 self.streaming = None;

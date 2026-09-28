@@ -12,6 +12,7 @@ pub mod editor;
 pub mod files;
 pub mod monitor;
 pub mod music;
+pub mod project;
 pub mod settings;
 pub mod terminal;
 pub mod viewer;
@@ -117,6 +118,7 @@ pub enum App {
     Files(files::FilesWindow),
     Monitor(monitor::Monitor),
     Console(console::Console),
+    Project(project::Project),
     Editor(editor::Editor),
     Music(music::Music),
     Viewer(viewer::Viewer),
@@ -132,6 +134,7 @@ macro_rules! each {
             App::Files($a) => $e,
             App::Monitor($a) => $e,
             App::Console($a) => $e,
+            App::Project($a) => $e,
             App::Editor($a) => $e,
             App::Music($a) => $e,
             App::Viewer($a) => $e,
@@ -149,6 +152,7 @@ impl App {
             App::Files(_) => AppKind::Files,
             App::Monitor(_) => AppKind::Monitor,
             App::Console(_) => AppKind::Console,
+            App::Project(_) => AppKind::Project,
             App::Editor(_) => AppKind::Editor,
             App::Music(_) => AppKind::Music,
             App::Viewer(_) => AppKind::Viewer,
@@ -169,6 +173,7 @@ impl App {
             App::Files(_) => (1180, 600),
             App::Monitor(_) => (960, 600),
             App::Console(_) => (760, 460),
+            App::Project(_) => (820, 520),
             App::Editor(_) => (820, 560),
             App::Music(_) => (640, 440),
             App::Viewer(_) => (760, 560),
@@ -193,6 +198,7 @@ impl App {
             App::Files(a) => a.draw(c, content, sys),
             App::Monitor(a) => a.draw(c, content, sys),
             App::Console(a) => a.draw(c, content),
+            App::Project(a) => a.draw(c, content),
             App::Editor(a) => a.draw(c, content, sys.now_ms),
             App::Music(a) => a.draw(c, content, sys.now_ms),
             App::Viewer(a) => a.draw(c, content),
@@ -215,6 +221,7 @@ impl App {
             App::Files(a) => a.key(key, mods, content, ctx),
             App::Monitor(a) => a.key(key, ctx),
             App::Console(a) => a.key(key, mods, ctx),
+            App::Project(a) => a.key(key, mods, ctx),
             App::Editor(a) => a.key(key, mods, content, ctx),
             App::Music(a) => a.key(key, ctx),
             App::Viewer(a) => a.key(key, ctx),
@@ -229,7 +236,7 @@ impl App {
         match self {
             App::Files(a) => a.click(click, content, ctx),
             App::Monitor(a) => a.click(click, content, ctx),
-            App::Console(_) => {}
+            App::Console(_) | App::Project(_) => {}
             App::Editor(a) => a.click(click, content),
             App::Music(a) => a.click(click, content, ctx),
             App::Viewer(_) => {}
@@ -247,6 +254,7 @@ impl App {
             App::Editor(a) => a.wheel(delta, content),
             App::Browser(a) => a.wheel(delta, content),
             App::Console(a) => a.wheel(delta),
+            App::Project(a) => a.wheel(delta),
             App::Terminal(a) => a.wheel(delta),
             App::Brave(a) => a.wheel(delta, ctx),
             App::Settings(a) => a.wheel(delta, content, ctx.stats),
@@ -333,6 +341,7 @@ impl App {
 pub fn icon_of(kind: AppKind) -> Icon {
     match kind {
         AppKind::Console => Icon::Mic,
+        AppKind::Project => Icon::Document,
         AppKind::Monitor => Icon::Gauge,
         AppKind::Files => Icon::Folder,
         AppKind::Music => Icon::Music,
@@ -360,6 +369,7 @@ pub fn app_by_name(name: &str) -> Option<AppKind> {
         "navegador-simple" | "navegador simple" => AppKind::Browser,
         "editor" | "notas" | "bloc" | "bloc de notas" => AppKind::Editor,
         "consola" | "console" => AppKind::Console,
+        "proyecto" => AppKind::Project,
         "terminal" | "jsh" => AppKind::Terminal,
         "configuracion" | "configuración" | "ajustes" | "settings" => AppKind::Settings,
         "visor" | "imagenes" | "imágenes" => AppKind::Viewer,
@@ -371,6 +381,7 @@ pub fn app_by_name(name: &str) -> Option<AppKind> {
 pub fn name_of(kind: AppKind) -> &'static str {
     match kind {
         AppKind::Console => tr("Consola JARVIS"),
+        AppKind::Project => tr("Proyecto"),
         AppKind::Monitor => tr("Monitor del sistema"),
         AppKind::Files => tr("Archivos"),
         AppKind::Music => tr("Música"),

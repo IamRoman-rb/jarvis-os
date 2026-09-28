@@ -171,6 +171,8 @@ pub enum AppKind {
     Settings,
     /// Brave, en el anfitrión (ADR 0007).
     Brave,
+    /// El agente de código que JARVIS abrió en un proyecto del anfitrión (ADR 0008).
+    Project,
 }
 
 /// Qué abrir.

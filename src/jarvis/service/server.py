@@ -13,9 +13,12 @@ import hmac
 import itertools
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from jarvis.agent.brain import Brain, BrainError
+from jarvis.projects import ProjectError, ProjectRunner, list_projects, resolve_project
 from jarvis.protocol import MAX_LINE, Message, ProtocolError, decode, encode
 
 log = logging.getLogger("jarvis.serve")
@@ -26,13 +29,32 @@ CALL_TIMEOUT = 30.0
 CONFIRM_TIMEOUT = 120.0
 
 
+#: Tools que se atienden acá, en el anfitrión (no en el kernel).
+HOST_TOOLS = {"listar_proyectos", "abrir_proyecto"}
+
+MakeProject = Callable[[Path, str, bool], ProjectRunner]
+
+
+@dataclass
+class Host:
+    """Lo del anfitrión que usa una sesión: la carpeta de proyectos y cómo abrir uno."""
+
+    projects: Path
+    make_project: MakeProject | None = None
+
+
 class Session:
     """Una conexión del kernel. También es el `Kernel` de las tools: les ejecuta las acciones y
     les pide las confirmaciones."""
 
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    def __init__(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, host: Host | None = None
+    ) -> None:
         self.reader = reader
         self.writer = writer
+        self.host = host
+        self.project: ProjectRunner | None = None
+        self.project_task: asyncio.Task[None] | None = None
         self.brain: Brain | None = None
         self.current: asyncio.Task[None] | None = None
         self.current_id: int | None = None
@@ -50,7 +72,9 @@ class Session:
             self._pending.pop(call, None)
 
     async def call(self, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
-        """El kernel ejecuta la acción y contesta `resultado`."""
+        """El kernel ejecuta la acción y contesta `resultado` (las de proyectos, acá)."""
+        if tool in HOST_TOOLS:
+            return await self._host_call(tool, args)
         try:
             ok, data = await self._ask({"t": "accion", "tool": tool, "args": args}, CALL_TIMEOUT)
         except TimeoutError:
@@ -68,6 +92,47 @@ class Session:
             )
         except TimeoutError:
             return False
+
+    async def _host_call(self, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
+        if self.host is None:
+            return False, "Este JARVIS no tiene carpeta de proyectos."
+        root = self.host.projects
+        if tool == "listar_proyectos":
+            names = list_projects(root)
+            return True, "\n".join(names) if names else f"No hay proyectos en {root}."
+        try:
+            path = resolve_project(root, str(args.get("nombre", "")))
+        except ProjectError as e:
+            return False, str(e)
+        if self.project_task is not None and not self.project_task.done():
+            return False, f"Ya estoy trabajando en {self.project.name if self.project else '?'}."
+        if self.host.make_project is None:
+            return False, "No puedo abrir proyectos."
+        runner = self.host.make_project(
+            path, str(args.get("pedido", "")), args.get("seguir", True) is not False
+        )
+        self.project = runner
+        self.project_task = asyncio.create_task(self._run_project(runner))
+        return True, f"Abrí {path.name}: el avance se ve en la ventana Proyecto de JARVIS-OS."
+
+    async def _run_project(self, runner: ProjectRunner) -> None:
+        async def emit(ev: str, text: str) -> None:
+            await self.send({"t": "proyecto", "nombre": runner.name, "ev": ev, "texto": text})
+
+        try:
+            await runner.run(emit, self.confirm)
+        except asyncio.CancelledError:
+            await emit("fin", "Detenido.")
+            raise
+        except Exception as e:  # el kernel tiene que enterarse de cualquier falla
+            log.exception("el agente del proyecto falló")
+            await emit("error", str(e))
+
+    async def stop_project(self) -> None:
+        if self.project_task is not None and not self.project_task.done():
+            if self.project is not None:
+                await self.project.stop()
+            self.project_task.cancel()
 
     def _resolve(self, msg: Message, value: Any) -> None:
         fut = self._pending.get(msg.get("llamada", -1))
@@ -116,6 +181,8 @@ class Session:
             self._resolve(msg, (msg.get("ok") is True, msg.get("datos", "")))
         elif t == "confirmacion":
             self._resolve(msg, msg.get("ok") is True)
+        elif t == "proyecto_detener":
+            await self.stop_project()
         else:
             log.info("mensaje desconocido: %s", t)
 
@@ -125,9 +192,10 @@ async def serve_connection(
     writer: asyncio.StreamWriter,
     token: str,
     make_brain: Callable[[Session], Brain],
+    host: Host | None = None,
 ) -> None:
     peer = writer.get_extra_info("peername")
-    session = Session(reader, writer)
+    session = Session(reader, writer, host)
     brain = session.brain = make_brain(session)
     try:
         line = await asyncio.wait_for(reader.readline(), HELLO_TIMEOUT)
@@ -153,23 +221,28 @@ async def serve_connection(
         pass
     finally:
         await session.cancel()
+        await session.stop_project()
         await brain.close()
         writer.close()
         log.info("kernel desconectado (%s)", peer)
 
 
-async def start(port: int, token: str, make_brain: Callable[[Session], Brain]) -> asyncio.Server:
+async def start(
+    port: int, token: str, make_brain: Callable[[Session], Brain], host: Host | None = None
+) -> asyncio.Server:
     """Empieza a escuchar (puerto 0 = uno libre, para los tests)."""
     return await asyncio.start_server(
-        lambda r, w: serve_connection(r, w, token, make_brain),
+        lambda r, w: serve_connection(r, w, token, make_brain, host),
         host="127.0.0.1",
         port=port,
         limit=MAX_LINE + 1,
     )
 
 
-async def serve(port: int, token: str, make_brain: Callable[[Session], Brain]) -> None:
-    server = await start(port, token, make_brain)
+async def serve(
+    port: int, token: str, make_brain: Callable[[Session], Brain], host: Host | None = None
+) -> None:
+    server = await start(port, token, make_brain, host)
     log.info("cerebro escuchando en 127.0.0.1:%d", port)
     async with server:
         await server.serve_forever()

@@ -35,6 +35,9 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   lee, crea y mueve archivos, cierra ventanas, manda a la Papelera o ejecuta comandos, con los
   3 niveles de `docs/permisos.md`: lo que cambia algo pide permiso en un diálogo que muestra la
   acción completa, y el nivel 3 solo se aprueba con un clic.
+  "Abrí jarvis-os y seguí con lo que estábamos": JARVIS abre un **agente de código** (el de Claude
+  Code) en esa carpeta del anfitrión, retoma la última conversación y muestra su avance en la
+  ventana **Proyecto**; cada edición (nivel 2) y cada comando (nivel 3) se confirman.
 - **Sincronización entre máquinas**: la carpeta `/Sincronizado` se copia sola entre dos (o más)
   JARVIS, aunque estén en redes distintas. En Configuración → Sincronización se genera un código
   en una y se escribe en la otra; las dos se conectan a un **relé** (`cargo xtask relay`) que solo

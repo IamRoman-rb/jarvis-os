@@ -89,3 +89,34 @@ async def test_una_accion_la_ejecuta_el_kernel_y_la_confirmacion_la_decide_roman
         text += str(m["delta"])
     assert text.startswith("No lo hice")
     writer.close()
+
+
+async def test_abrir_un_proyecto_muestra_el_avance_y_pide_confirmar(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from jarvis.projects import ScriptedProject
+    from jarvis.service.server import Host
+
+    (tmp_path / "jarvis-os").mkdir()
+    host = Host(projects=tmp_path, make_project=lambda p, r, k: ScriptedProject(p, r, k))
+    server = await start(0, TOKEN, lambda s: ScriptedBrain(s, delay=0.0), host)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(encode({"t": "hola", "token": TOKEN}))
+    await read(reader)
+    writer.write(encode({"t": "pedido", "id": 1, "texto": "abrí el proyecto jarvis y seguí"}))
+    seen: list[str] = []
+    while True:
+        msg = await read(reader)
+        if msg["t"] == "confirmar":
+            assert msg["nivel"] == 2
+            if "abrir_proyecto" in str(msg["tool"]):
+                writer.write(encode({"t": "confirmacion", "llamada": msg["llamada"], "ok": True}))
+            else:
+                assert msg["descripcion"] == "[jarvis-os] Edit README.md"
+                writer.write(encode({"t": "confirmacion", "llamada": msg["llamada"], "ok": False}))
+        elif msg["t"] == "proyecto":
+            seen.append(f"{msg['ev']}: {msg['texto']}")
+            if msg["ev"] == "fin":
+                break
+    assert seen[0] == "inicio: jarvis-os: Seguí con lo que estábamos trabajando."
+    assert "texto: No toqué nada." in seen
+    writer.close()

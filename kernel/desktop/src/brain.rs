@@ -47,6 +47,12 @@ pub enum BrainEvent {
         level: u8,
         desc: String,
     },
+    /// El avance del agente de un proyecto (para la ventana Proyecto).
+    Project {
+        name: String,
+        ev: String,
+        text: String,
+    },
 }
 
 /// Lo que la consola le pide al cerebro (por el [`Outbox`]).
@@ -54,6 +60,8 @@ pub enum BrainEvent {
 pub enum BrainOp {
     Ask(String),
     Cancel,
+    /// Detener el agente del proyecto (Esc en la ventana Proyecto).
+    StopProject,
 }
 
 pub struct BrainService {
@@ -185,6 +193,7 @@ impl BrainService {
                     self.send(out, format!("{{\"t\":\"cancelar\",\"id\":{id}}}"));
                 }
             }
+            BrainOp::StopProject => self.send(out, "{\"t\":\"proyecto_detener\"}".into()),
         }
         true
     }
@@ -325,6 +334,15 @@ impl BrainService {
                     tool: tool.to_string(),
                     args,
                 });
+            }
+            "proyecto" => {
+                let s = |k: &str| msg.get(k).and_then(Json::str).unwrap_or("").to_string();
+                let (name, ev, text) = (s("nombre"), s("ev"), s("texto"));
+                if ev != "texto" {
+                    self.logs
+                        .push(format!("PROYECTO_{} {name}", ev.to_uppercase()));
+                }
+                events.push(BrainEvent::Project { name, ev, text });
             }
             "confirmar" => {
                 let Some(call) = num(msg.get("llamada")) else {
