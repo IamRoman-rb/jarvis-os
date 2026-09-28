@@ -39,6 +39,10 @@ pub struct Console {
     history_pos: Option<usize>,
     /// Cuántas líneas se subió con la rueda o RePág (0 = pegado al final).
     scroll: usize,
+    /// Esperando la respuesta del cerebro (Esc la corta).
+    waiting: bool,
+    /// La línea de la respuesta que se está armando (llega de a pedazos).
+    streaming: Option<usize>,
 }
 
 const HELP: &[&str] = &[
@@ -72,7 +76,19 @@ impl Console {
             history: Vec::new(),
             history_pos: None,
             scroll: 0,
+            waiting: false,
+            streaming: None,
         }
+    }
+
+    /// Todo lo que muestra la consola (para los tests).
+    pub fn text(&self) -> String {
+        let mut s = String::new();
+        for (_, l) in &self.lines {
+            s.push_str(l);
+            s.push('\n');
+        }
+        s
     }
 
     pub fn title(&self) -> String {
@@ -152,6 +168,9 @@ impl Console {
             return true;
         }
         match key {
+            Key::Escape if self.waiting => {
+                ctx.out.brain.push(crate::brain::BrainOp::Cancel);
+            }
             Key::Enter => {
                 let cmd = core::mem::take(&mut self.input.text);
                 let cmd = cmd.trim().to_string();
@@ -217,7 +236,7 @@ impl Console {
                     self.say(Who::Jarvis, *l);
                 }
             }
-            "hola" => self.answer(ctx, "Hola. Estoy acá: escribí \"ayuda\" para ver qué puedo hacer."),
+            "hola" if !ctx.stats.brain_online => self.answer(ctx, "Hola. Estoy acá: escribí \"ayuda\" para ver qué puedo hacer."),
             "limpiar" | "clear" | "cls" => self.lines.clear(),
             "hora" | "fecha" => {
                 let msg = match ctx.clock {
@@ -369,10 +388,52 @@ impl Console {
                 self.answer(ctx, "Reiniciando.");
                 ctx.out.power = Some(Power::Reboot);
             }
+            // Lo que no es una orden local va al cerebro (Claude, en el anfitrión).
+            _ if ctx.stats.brain_online => {
+                self.waiting = true;
+                self.streaming = None;
+                ctx.out.brain.push(crate::brain::BrainOp::Ask(cmd.to_string()));
+            }
             _ => self.answer(
                 ctx,
-                "Todavía no entiendo eso: cuando me conecten con Claude voy a poder responderte. Escribí \"ayuda\".",
+                tr("No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales."),
             ),
+        }
+    }
+
+    /// Lo que llega del cerebro: la respuesta se va escribiendo a medida que llega.
+    pub fn brain_event(&mut self, ev: &crate::brain::BrainEvent) {
+        use crate::brain::BrainEvent;
+        self.dirty = true;
+        self.scroll = 0;
+        match ev {
+            BrainEvent::Text(delta) => {
+                for (i, part) in delta.split('\n').enumerate() {
+                    match self.streaming {
+                        Some(n) if i == 0 && n < self.lines.len() => {
+                            self.lines[n].1.push_str(part);
+                        }
+                        _ => {
+                            self.lines.push((Who::Jarvis, part.into()));
+                            self.streaming = Some(self.lines.len() - 1);
+                        }
+                    }
+                }
+                if self.lines.len() > MAX_LINES {
+                    let cut = self.lines.len() - MAX_LINES;
+                    self.lines.drain(..cut);
+                    self.streaming = self.streaming.map(|n| n.saturating_sub(cut));
+                }
+            }
+            BrainEvent::End => {
+                self.waiting = false;
+                self.streaming = None;
+            }
+            BrainEvent::Error(m) => {
+                self.waiting = false;
+                self.streaming = None;
+                self.fail(m.clone());
+            }
         }
     }
 }

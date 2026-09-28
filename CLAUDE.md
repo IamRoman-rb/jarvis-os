@@ -5,7 +5,7 @@ con el asistente JARVIS en el centro y un escritorio con ventanas al estilo Wind
 de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va a hablar por la
 red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
-idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007). Roadmap y arquitectura del kernel:
+idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -59,6 +59,8 @@ Kernel (desde kernel/):
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
 Cerebro (desde la raíz):
 - uv sync ; uv run pytest ; uv run ruff check . ; uv run mypy
+- jarvis serve [--simulado]: el cerebro para el kernel (ADR 0008). Lo levanta `cargo xtask run`
+  con un token por sesión (variable JARVIS_CEREBRO_TOKEN; el kernel lo recibe por fw_cfg)
 - uv run pytest -m live   (API real: solo si te lo pido)
 
 ## Reglas del kernel

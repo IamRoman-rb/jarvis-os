@@ -50,6 +50,8 @@ pub struct SystemStats {
     pub sync: Option<crate::sync::Status>,
     pub sync_peer: Option<String>,
     pub sync_counts: (u32, u32),
+    /// El cerebro (Claude, en el anfitrión) está conectado.
+    pub brain_online: bool,
 }
 
 /// Últimos `N` valores (una muestra por segundo), para los gráficos.
@@ -261,6 +263,8 @@ pub enum StreamEvent {
 pub struct Outbox {
     /// Conexiones TCP largas: abrir, mandar, cerrar.
     pub streams: Vec<StreamOp>,
+    /// Pedidos al cerebro (la consola).
+    pub brain: Vec<crate::brain::BrainOp>,
     pub launch: Vec<Launch>,
     /// (texto, es_error)
     pub notify: Vec<(String, bool)>,

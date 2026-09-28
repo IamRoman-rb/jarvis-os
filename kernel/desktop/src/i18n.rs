@@ -333,6 +333,10 @@ static EN: &[(&str, &str)] = &[
         "El archivo es muy grande: se muestra el principio.",
         "The file is too big: showing the beginning.",
     ),
+    (
+        "El cerebro no está conectado.",
+        "The brain is not connected.",
+    ),
     ("El de la barra de arriba", "The one on the top bar"),
     (
         "El de la barra de íconos, JARVIS y la barra de arriba",
@@ -581,6 +585,10 @@ static EN: &[(&str, &str)] = &[
         "Neither apps nor the terminal delete forever without asking",
     ),
     ("Ninguna", "None"),
+    (
+        "No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales.",
+        "I don't understand that and the brain (Claude) is not connected: start JARVIS with \"cargo xtask run\", which launches it. Type \"ayuda\" for the local commands.",
+    ),
     ("No hay apps abiertas.", "No open apps."),
     (
         "No hay disco para guardar la captura.",
@@ -699,6 +707,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Se convierten a BMP en el puente del anfitrión",
         "They're converted to BMP by the host bridge",
+    ),
+    (
+        "Se cortó la conexión con el cerebro.",
+        "The connection to the brain was lost.",
     ),
     ("Segundos en el reloj", "Seconds on the clock"),
     ("Septiembre", "September"),
@@ -823,6 +835,7 @@ static EN: &[(&str, &str)] = &[
     ("archivo", "file"),
     ("archivo comprimido", "archive"),
     ("carpeta", "folder"),
+    ("conectado", "connected"),
     ("código", "code"),
     ("do", "su"),
     ("en ejecución", "running"),
@@ -1095,6 +1108,10 @@ static PT: &[(&str, &str)] = &[
         "El archivo es muy grande: se muestra el principio.",
         "O arquivo é muito grande: mostrando o começo.",
     ),
+    (
+        "El cerebro no está conectado.",
+        "O cérebro não está conectado.",
+    ),
     ("El de la barra de arriba", "O da barra superior"),
     (
         "El de la barra de íconos, JARVIS y la barra de arriba",
@@ -1352,6 +1369,10 @@ static PT: &[(&str, &str)] = &[
         "Nem os apps nem o terminal apagam para sempre sem perguntar",
     ),
     ("Ninguna", "Nenhuma"),
+    (
+        "No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales.",
+        "Não entendo isso e o cérebro (Claude) não está conectado: abra o JARVIS com \"cargo xtask run\", que o inicia. Digite \"ayuda\" para os comandos locais.",
+    ),
     ("No hay apps abiertas.", "Nenhum app aberto."),
     (
         "No hay disco para guardar la captura.",
@@ -1477,6 +1498,10 @@ static PT: &[(&str, &str)] = &[
         "Se convierten a BMP en el puente del anfitrión",
         "São convertidas para BMP na ponte do anfitrião",
     ),
+    (
+        "Se cortó la conexión con el cerebro.",
+        "A conexão com o cérebro caiu.",
+    ),
     ("Segundos en el reloj", "Segundos no relógio"),
     ("Septiembre", "Setembro"),
     (
@@ -1600,6 +1625,7 @@ static PT: &[(&str, &str)] = &[
     ("archivo", "arquivo"),
     ("archivo comprimido", "arquivo compactado"),
     ("carpeta", "pasta"),
+    ("conectado", "conectado"),
     ("código", "código"),
     ("do", "do"),
     ("en ejecución", "em execução"),

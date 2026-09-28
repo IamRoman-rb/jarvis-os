@@ -54,6 +54,16 @@ pub fn file(name: &str) -> Option<Vec<u8>> {
     None
 }
 
+/// `opt/jarvis/cerebro` = "puerto token": dónde está el cerebro en el anfitrión y el token de
+/// esta sesión (lo genera `cargo xtask run`).
+pub fn brain() -> Option<(u16, String)> {
+    let s = String::from_utf8(file("opt/jarvis/cerebro")?).ok()?;
+    let (port, token) = s.trim().split_once(' ')?;
+    let token = token.trim();
+    (token.len() >= 16 && token.chars().all(|c| c.is_ascii_alphanumeric()))
+        .then(|| Some((port.parse().ok()?, token.into())))?
+}
+
 /// `opt/jarvis/resolucion` = "ANCHOxALTO".
 pub fn resolution() -> Option<(u32, u32)> {
     let s = String::from_utf8(file("opt/jarvis/resolucion")?).ok()?;

@@ -10,6 +10,7 @@ extern crate alloc;
 
 pub mod apps;
 pub mod bmp;
+pub mod brain;
 pub mod chrome;
 pub mod config;
 pub mod cursor;

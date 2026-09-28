@@ -21,6 +21,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod brave;
+mod cerebro;
 mod iso;
 mod puente;
 mod sincro;
@@ -324,6 +325,11 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         cmd.arg("-drive")
             .arg(format!("if=pflash,format=raw,file={}", vars.display()));
     }
+    // El cerebro: su puerto y el token de esta sesión (ver cerebro.rs).
+    if let Some(v) = cerebro::fw_cfg() {
+        cmd.arg("-fw_cfg")
+            .arg(format!("name=opt/jarvis/cerebro,string={v}"));
+    }
     if image.extension().is_some_and(|e| e == "iso") {
         // Desde la ISO, como un CD y sin disco: modo en vivo (el disco se ignora).
         cmd.arg("-cdrom").arg(image);
@@ -469,6 +475,8 @@ fn boot_iso(iso: &Path) -> Result<()> {
 fn run(image: &Path, disk: &Path) -> Result<()> {
     puente::start();
     brave::start(brave_profile());
+    // El cerebro con Claude (se cierra al terminar).
+    let _brain = cerebro::start(cerebro::PORT, false);
     let status = qemu(image, disk, false)?
         .status()
         .map_err(|e| format!("no pude abrir QEMU ({}): {e}", qemu_binary().display()))?;
@@ -702,9 +710,14 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     // El puente sirve el repositorio de paquetes (apt).
     puente::start();
     brave::start(brave_profile());
+    // El cerebro simulado (sin Claude): respuestas fijas.
+    let brain = cerebro::start(cerebro::TEST_PORT, true);
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.wait_for("RED_IP 10.0.2.15", STEP)?;
+    if brain.is_some() {
+        s.wait_for("CEREBRO_CONECTADO", STEP)?;
+    }
     s.monitor("sendkey spc")?;
     s.wait_for("JARVIS_HABLA", STEP)?;
     s.monitor("sendkey tab")?;
@@ -722,6 +735,12 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
 
     s.monitor("sendkey meta_l-r")?;
     s.wait_for("VENTANA_ABIERTA Consola JARVIS", STEP)?;
+    if brain.is_some() {
+        // Lo que no es una orden local va al cerebro, y la respuesta vuelve.
+        s.type_text("hola jarvis")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("CEREBRO_RESPUESTA Hola, Roman.", STEP)?;
+    }
     s.type_text(&format!("ir http://10.0.2.2:{port}/"))?;
     s.monitor("sendkey ret")?;
     s.wait_for("VENTANA_ABIERTA Navegador", STEP)?;
