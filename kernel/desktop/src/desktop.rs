@@ -360,6 +360,8 @@ pub struct Desktop<D: BlockDevice> {
     last_clock: Option<DateTime>,
     /// La carpeta /Sincronizado con otras máquinas (ADR 0007).
     pub(crate) sync: crate::sync::SyncService,
+    /// La conexión con el cerebro de JARVIS (ADR 0008).
+    pub(crate) brain: crate::brain::BrainService,
     last_now: u64,
     /// Historial de avisos para el centro de notificaciones: (texto, error, hora).
     notices: Vec<(String, bool, String)>,
@@ -491,6 +493,7 @@ impl<D: BlockDevice> Desktop<D> {
             fw_blocked_streams: Vec::new(),
             last_clock: None,
             sync: Default::default(),
+            brain: Default::default(),
             last_now: 0,
         }
     }
@@ -740,6 +743,15 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// Una conexión larga cambió (el kernel la atiende): se le avisa a quien la abrió.
     pub fn stream_event(&mut self, id: u32, event: StreamEvent) {
+        if let Some(events) = self
+            .brain
+            .stream_event(id, &event, self.last_now, &mut self.out)
+        {
+            self.brain_events(events, self.last_now);
+            let clock = self.last_clock;
+            self.process_outbox(self.last_now, clock);
+            return;
+        }
         if let Some(fs) = self.fs.as_mut()
             && self.sync.stream_event(
                 id,
@@ -781,6 +793,8 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// El kernel mide la máquina una vez por segundo.
     pub fn set_stats(&mut self, stats: SystemStats) {
+        self.brain.tick(self.last_now, &mut self.out);
+        self.logs.append(&mut self.brain.logs);
         if let Some(fs) = self.fs.as_mut() {
             let (code, relay, name) = (
                 self.config.sync_code.clone(),
@@ -800,6 +814,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.sync = Some(self.sync.status);
         self.stats.sync_peer = self.sync.peer.clone();
         self.stats.sync_counts = (self.sync.sent, self.sync.received);
+        self.stats.brain_online = self.brain.online();
         self.stats_version += 1;
         for s in &mut self.slots {
             if s.app.kind() == AppKind::Monitor {
@@ -1884,6 +1899,38 @@ impl<D: BlockDevice> Desktop<D> {
         self.say(text, now_ms);
     }
 
+    /// El token del cerebro y el nombre del equipo (el kernel los recibe del anfitrión).
+    pub fn set_brain(&mut self, port: u16, token: &str) {
+        let equipo = self.config.hostname.clone();
+        self.brain.configure(port, token, &equipo);
+    }
+
+    /// Lo que llegó del cerebro: a la consola, y la esfera "habla" mientras llega.
+    fn brain_events(&mut self, events: Vec<crate::brain::BrainEvent>, now_ms: u64) {
+        use crate::brain::BrainEvent;
+        self.stats.brain_online = self.brain.online();
+        self.logs.append(&mut self.brain.logs);
+        for ev in events {
+            match &ev {
+                BrainEvent::Text(_) => {
+                    let last = self.brain.answer.lines().last().unwrap_or("").to_string();
+                    self.assistant.say(&last, now_ms);
+                }
+                BrainEvent::End => {
+                    let first = self.brain.answer.lines().next().unwrap_or("").to_string();
+                    self.say(&first, now_ms);
+                }
+                BrainEvent::Error(_) => {}
+            }
+            for s in &mut self.slots {
+                if let crate::apps::App::Console(c) = &mut s.app {
+                    c.brain_event(&ev);
+                    s.content_dirty = true;
+                }
+            }
+        }
+    }
+
     fn say(&mut self, text: &str, now_ms: u64) {
         self.assistant.say(text, now_ms);
         self.logs.push(format!("JARVIS_HABLA: {text}"));
@@ -2053,6 +2100,7 @@ impl<D: BlockDevice> Desktop<D> {
                 && !out.screenshot
                 && out.net.is_empty()
                 && out.streams.is_empty()
+                && out.brain.is_empty()
                 && out.tone.is_none()
                 && out.power.is_none()
                 && out.config.is_none()
@@ -2091,6 +2139,16 @@ impl<D: BlockDevice> Desktop<D> {
                 match self.firewall_check(&req) {
                     Ok(()) => self.requests.net.push(req),
                     Err(why) => self.firewall_block(req, why, now_ms, clock),
+                }
+            }
+            for op in out.brain {
+                if !self.brain.handle(op, &mut self.out) {
+                    self.brain_events(
+                        alloc::vec![crate::brain::BrainEvent::Error(
+                            tr("El cerebro no está conectado.").into()
+                        )],
+                        now_ms,
+                    );
                 }
             }
             for op in out.streams {

@@ -663,7 +663,11 @@ pub fn draw_status(
     text::draw_right(c, right, row(5), &perf, &value);
 
     text::draw(c, p.x + 12, row(6), tr("CEREBRO"), &key);
-    text::draw_right(c, right, row(6), tr("sin conectar"), &light(theme::amber()));
+    if st.brain_online {
+        text::draw_right(c, right, row(6), tr("conectado"), &light(theme::cyan()));
+    } else {
+        text::draw_right(c, right, row(6), tr("sin conectar"), &light(theme::amber()));
+    }
 
     // Píldora "Control de misión" (abre la vista de tareas, como Win+Tab).
     let pill = pill_rect(w, h);

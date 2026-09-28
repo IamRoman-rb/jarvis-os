@@ -290,6 +290,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut surfaces = display::Surfaces::new(&firmware, gpu, capacity);
 
     let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
+    // El cerebro de JARVIS en el anfitrión (si `cargo xtask run` lo levantó).
+    if let Some((port, token)) = fw_cfg::brain() {
+        serial_println!("cerebro: en el anfitrión, puerto {port}");
+        desktop.set_brain(port, &token);
+    }
     if surfaces.has_gpu() {
         desktop.set_outputs(outputs);
         if let Some(l) = desktop.take_display()
