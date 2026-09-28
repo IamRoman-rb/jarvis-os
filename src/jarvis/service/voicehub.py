@@ -52,12 +52,18 @@ class VoiceHub:
             try:
                 self.voice.run(
                     lambda text: self._post({"t": "oido", "texto": text}),
-                    lambda on: self._post({"t": "escuchando", "activo": on}),
+                    self._listening,
                 )
             except Exception:
                 log.exception("la voz se detuvo")
 
         threading.Thread(target=run, name="jarvis-voz", daemon=True).start()
+
+    def _listening(self, on: bool) -> None:
+        self._post({"t": "escuchando", "activo": on})
+        if on:
+            # "JARVIS" solo: contesta, así Roman sabe que lo escuchó.
+            asyncio.run_coroutine_threadsafe(self.speak("¿Sí?"), self.loop)
 
     def listen_now(self) -> None:
         self.voice.listen_now()

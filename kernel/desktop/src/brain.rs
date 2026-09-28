@@ -68,6 +68,8 @@ pub enum BrainOp {
     Ask(String, bool),
     /// Escuchar un pedido sin la palabra de activación (Win+J).
     Listen,
+    /// Decir un texto en voz alta (la respuesta local a una orden por voz).
+    Speak(String),
     Cancel,
     /// Detener el agente del proyecto (Esc en la ventana Proyecto).
     StopProject,
@@ -185,6 +187,10 @@ impl BrainService {
         }
         match op {
             BrainOp::Listen => self.send(out, "{\"t\":\"escuchar\"}".into()),
+            BrainOp::Speak(text) => self.send(
+                out,
+                format!("{{\"t\":\"decir\",\"texto\":{}}}", quote(&text)),
+            ),
             BrainOp::Ask(text, by_voice) => {
                 self.next_id += 1;
                 self.current = Some(self.next_id);

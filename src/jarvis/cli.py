@@ -83,7 +83,7 @@ async def start_voice() -> "VoiceHub | None":
         return None
     hub = VoiceHub(voice, asyncio.get_running_loop())
     hub.start()
-    logging.getLogger("jarvis.voz").info('voz lista: decí "hey jarvis" (o Win+J en JARVIS-OS)')
+    logging.getLogger("jarvis.voz").info('voz lista: decí "JARVIS" (o Win+J en JARVIS-OS)')
     return hub
 
 
@@ -93,14 +93,13 @@ app.add_typer(voz_app, name="voz")
 
 @voz_app.command("instalar")
 def voz_instalar(si: bool = typer.Option(False, "--si", help="No preguntar.")) -> None:
-    """Baja los modelos de voz (~600 MB en total)."""
+    """Baja los modelos de voz (~590 MB en total)."""
     import urllib.request
 
     from jarvis.voice.engine import PIPER_URL, PIPER_VOICE, WHISPER_MODEL, models_dir
 
     typer.echo(
         "Voy a bajar:\n"
-        '  - openWakeWord ("hey jarvis"): ~10 MB\n'
         f"  - Whisper {WHISPER_MODEL} (voz a texto): ~470 MB, de Hugging Face\n"
         f"  - Piper {PIPER_VOICE} (texto a voz): ~115 MB, de Hugging Face\n"
         f"en {models_dir()} y en la caché de Hugging Face."
@@ -108,12 +107,10 @@ def voz_instalar(si: bool = typer.Option(False, "--si", help="No preguntar.")) -
     if not si and not typer.confirm("¿Sigo?"):
         raise typer.Exit(1)
     try:
-        import openwakeword.utils
         from faster_whisper import WhisperModel
     except ImportError:
         typer.echo("Primero: uv sync --extra voice", err=True)
         raise typer.Exit(2) from None
-    openwakeword.utils.download_models(["hey_jarvis"])
     WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
     models_dir().mkdir(parents=True, exist_ok=True)
     for suffix in (".onnx", ".onnx.json"):
@@ -121,7 +118,7 @@ def voz_instalar(si: bool = typer.Option(False, "--si", help="No preguntar.")) -
         if not dest.exists():
             typer.echo(f"bajando {dest.name}...")
             urllib.request.urlretrieve(PIPER_URL.removesuffix(".onnx") + suffix, dest)  # noqa: S310
-    typer.echo('Listo: la próxima vez que arranques JARVIS, decí "hey jarvis".')
+    typer.echo('Listo: la próxima vez que arranques JARVIS, decí "JARVIS".')
 
 
 @voz_app.command("probar")

@@ -196,6 +196,14 @@ class Session:
             self._resolve(msg, msg.get("ok") is True)
         elif t == "proyecto_detener":
             await self.stop_project()
+        elif t == "decir":
+            # Una respuesta local de JARVIS-OS a una orden por voz: también en voz alta.
+            text = msg.get("texto")
+            voice = self.host.voice if self.host else None
+            if isinstance(text, str) and voice is not None:
+                task = asyncio.create_task(voice.speak(text))
+                self._background.add(task)
+                task.add_done_callback(self._background.discard)
         elif t == "escuchar":
             if self.host is not None and self.host.voice is not None:
                 self.host.voice.listen_now()

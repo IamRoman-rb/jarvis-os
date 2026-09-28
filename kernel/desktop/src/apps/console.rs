@@ -220,6 +220,11 @@ impl Console {
     fn answer<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>, text: impl Into<String>) {
         let text = text.into();
         ctx.out.say = Some(text.lines().next().unwrap_or("").into());
+        if self.by_voice {
+            ctx.out.brain.push(crate::brain::BrainOp::Speak(
+                text.lines().next().unwrap_or("").into(),
+            ));
+        }
         self.say(Who::Jarvis, text);
     }
 

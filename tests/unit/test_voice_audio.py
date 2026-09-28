@@ -33,3 +33,28 @@ def test_si_no_habla_es_una_falsa_alarma() -> None:
     frame_ms = FRAME * 1000 // RATE
     results = [r.feed(tone(0, frame_ms)) for _ in range(3)]
     assert results[-1] and r.speech() == b""
+
+
+def test_la_palabra_de_activacion() -> None:
+    from jarvis.voice.audio import split_wake
+
+    assert split_wake("Jarvis, abrí el monitor.") == "abrí el monitor"
+    assert split_wake("CARIS, abrí el monitor.") == "abrí el monitor"
+    assert split_wake("Oye Yarbis ¿qué hora es?") == "qué hora es"
+    assert split_wake("JARVIS.") == ""
+    assert split_wake("mañana llueve") is None
+    assert split_wake("vamos a comer") is None
+    assert split_wake("Carlos abrí la puerta") is None
+
+
+def test_el_segmentador_corta_en_el_silencio() -> None:
+    from jarvis.voice.audio import Segmenter
+
+    s = Segmenter(silence_ms=400)
+    for _ in range(20):
+        assert s.feed(tone(100, 80)) is None  # ruido de fondo
+    assert s.feed(tone(9000, 80)) is None
+    out = None
+    for _ in range(6):
+        out = out or s.feed(tone(100, 80))
+    assert out is not None and len(out) > 0

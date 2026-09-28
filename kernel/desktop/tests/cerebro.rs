@@ -280,7 +280,13 @@ fn lo_que_se_oye_se_trata_como_escrito() {
     // Una orden local, por voz.
     b.reply(r#"{"t":"oido","texto":"abrir monitor"}"#);
     assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
-    assert!(b.sent.is_empty(), "las órdenes locales no van al cerebro");
+    assert!(!b.sent.contains("pedido"), "las órdenes locales no van al cerebro");
+    assert!(
+        b.sent.starts_with(r#"{"t":"decir","texto":"Abriendo"#),
+        "pero la respuesta se dice en voz alta: {}",
+        b.sent
+    );
+    b.sent.clear();
     // Un pedido para Claude, por voz: va con origen voz (se contesta en voz alta).
     b.reply(r#"{"t":"oido","texto":"contame un chiste"}"#);
     assert!(

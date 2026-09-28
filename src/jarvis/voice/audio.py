@@ -70,3 +70,86 @@ class SpeechRecorder:
 
     def speech(self) -> bytes:
         return bytes(self.audio) if self.heard else b""
+
+
+#: Cómo suele escribir Whisper "JARVIS" (con y sin tilde, y confusiones comunes).
+WAKE_WORDS = ("jarvis", "yarvis", "jarbis", "yarbis", "charvis", "jervis", "harvis", "jarviz")
+
+
+def _plain(text: str) -> str:
+    import unicodedata
+
+    t = unicodedata.normalize("NFD", text.lower())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    return "".join(c if c.isalnum() else " " for c in t)
+
+
+def _distance(a: str, b: str) -> int:
+    """Distancia de edición (Levenshtein)."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def is_wake(word: str) -> bool:
+    """ "jarvis" y cómo lo escribe Whisper cuando lo entiende mal ("caris", "yarbis"…)."""
+    return word in WAKE_WORDS or (4 <= len(word) <= 7 and _distance(word, "jarvis") <= 2)
+
+
+def split_wake(text: str) -> str | None:
+    """Si `text` empieza con "JARVIS" (en las primeras 2 palabras), lo que sigue (puede ser "");
+    si no lo nombra, `None`. Conserva el texto original de la orden."""
+    words = text.split()
+    plain = _plain(text).split()
+    for i, w in enumerate(plain[:2]):
+        if is_wake(w):
+            # La misma posición en el texto original (las palabras coinciden una a una salvo
+            # la puntuación suelta, que se descarta).
+            orig = [x for x in words if _plain(x).strip()]
+            rest = " ".join(orig[i + 1 :])
+            return rest.strip(" ,.;:!¡?¿")
+    return None
+
+
+class Segmenter:
+    """Corta el audio continuo en frases: empieza con voz y termina con un silencio. El umbral
+    se adapta al ruido del ambiente."""
+
+    def __init__(self, silence_ms: int = 700, max_ms: int = 8_000) -> None:
+        self.silence_ms = silence_ms
+        self.max_ms = max_ms
+        self.noise = 200.0
+        self.current: bytearray | None = None
+        self.pre = bytearray()
+        self.quiet_ms = 0
+        self.total_ms = 0
+
+    def threshold(self) -> float:
+        return max(400.0, self.noise * 3)
+
+    def feed(self, pcm: bytes) -> bytes | None:
+        """Agrega un pedazo; devuelve una frase completa cuando termina."""
+        ms = len(pcm) // 2 * 1000 // RATE
+        energy = rms(pcm)
+        loud = energy >= self.threshold()
+        if self.current is None:
+            if not loud:
+                self.noise = self.noise * 0.95 + energy * 0.05
+                self.pre = (self.pre + pcm)[-RATE // 2 * 2 :]  # medio segundo antes
+                return None
+            self.current = bytearray(self.pre)
+            self.quiet_ms = 0
+            self.total_ms = 0
+        self.current += pcm
+        self.total_ms += ms
+        self.quiet_ms = 0 if loud else self.quiet_ms + ms
+        if self.quiet_ms >= self.silence_ms or self.total_ms >= self.max_ms:
+            phrase = bytes(self.current)
+            self.current = None
+            self.pre = bytearray()
+            return phrase
+        return None
