@@ -6,7 +6,8 @@
 //!
 //! Para escribir en esa memoria física se usa el **mapeo de toda la memoria física** que arma el
 //! bootloader (`physical_memory_offset`): la dirección física `p` se ve en la virtual
-//! `offset + p`. La paginación propia llega más adelante (ver docs/kernel.md). Referencia: <https://os.phil-opp.com/heap-allocation/>.
+//! `offset + p`; desde K8 ese mapeo lo arma el kernel (paging.rs), igual que el del bootloader. Los
+//! buffers de DMA salen de acá: su dirección física es `virtual − offset`. Referencia: <https://os.phil-opp.com/heap-allocation/>.
 
 use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use linked_list_allocator::LockedHeap;
@@ -17,8 +18,9 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
 /// Tope del heap: los buffers de pantalla, uno por ventana, las páginas web y la pila de red.
 const MAX_HEAP: u64 = 256 * 1024 * 1024;
 
-/// Devuelve el tamaño del heap en bytes, o `None` si no hay una región usable.
-pub fn init(regions: &MemoryRegions, physical_memory_offset: u64) -> Option<u64> {
+/// Devuelve dónde quedó el heap en la memoria física (inicio, tamaño en bytes), o `None` si no
+/// hay una región usable. La paginación (paging.rs) no entrega esos marcos.
+pub fn init(regions: &MemoryRegions, physical_memory_offset: u64) -> Option<(u64, u64)> {
     let region = regions
         .iter()
         .filter(|r| r.kind == MemoryRegionKind::Usable)
@@ -28,7 +30,7 @@ pub fn init(regions: &MemoryRegions, physical_memory_offset: u64) -> Option<u64>
     // SAFETY: la región es RAM libre según el bootloader (no la usa nadie más), está mapeada en
     // `physical_memory_offset + físico`, y el allocator se inicializa una sola vez.
     unsafe { ALLOCATOR.lock().init(start, size as usize) };
-    Some(size)
+    Some((region.start, size))
 }
 
 /// (usados, total) del heap en bytes.

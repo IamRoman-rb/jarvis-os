@@ -41,6 +41,12 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   **Por voz**: "JARVIS, …" (o Win+J; "JARVIS" solo contesta "¿Sí?" y espera la orden) con el micrófono del anfitrión; lo que entiende se trata
   como si se hubiera escrito, y la respuesta se dice en voz alta mientras la esfera se mueve con
   el audio real (`uv sync --extra voice` y `uv run jarvis voz instalar`, ~590 MB de modelos). El micrófono queda siempre abierto: cada frase se transcribe local y solo las que empiezan con "JARVIS" son órdenes; nada sale de la PC.
+- **Paginación propia** (K8, `paging.rs` + crate `jarvis-mem`): al arrancar, el kernel deja las
+  tablas de páginas del bootloader y arma las suyas con su propio allocator de marcos físicos.
+  El código del kernel queda de solo lectura y los datos sin permiso de ejecución (**W^X**,
+  verificado en cada arranque); la RAM se mapea con páginas de 2 MiB (o de 1 GiB si la CPU las
+  tiene): 29 tablas en vez de las ~1050 del bootloader. El Monitor muestra la RAM física libre
+  ([captura](img/k8-monitor.png)).
 - **Micrófono** (driver `virtio_sound.rs`, sobre `virtio_modern.rs`): QEMU agrega una placa
   virtio-sound conectada al micrófono del anfitrión; el kernel configura su entrada (PCM de 16 bits
   a 16 kHz) y recibe audio en buffers de 20 ms. Configuración → **Micrófono** muestra si se
@@ -330,8 +336,8 @@ puerto.
 
 ```
 firmware UEFI (OVMF en QEMU)
-  └─ bootloader (crate bootloader 0.11): modo 64 bits, tablas de páginas, framebuffer,
-     mapeo de toda la memoria física
+  └─ bootloader (crate bootloader 0.11): modo 64 bits, tablas de páginas iniciales, framebuffer,
+     mapeo de toda la memoria física (el kernel lo reemplaza por el suyo, K8)
        └─ kernel_main (kernel/kernel/src/main.rs) — solo hardware
             ├─ serial.rs      COM1: logs al host
             ├─ gdt.rs         GDT + TSS (stack de emergencia para el doble fallo)
@@ -343,6 +349,7 @@ firmware UEFI (OVMF en QEMU)
             │                 distribución EE. UU. o latinoamericana (desktop/keymap.rs)
             ├─ mouse.rs       mouse PS/2 con rueda (puerto auxiliar del 8042)
             ├─ allocator.rs   heap de 256 MiB (alloc: Vec, String)
+            ├─ paging.rs      tablas de páginas propias (jarvis-mem), W^X, map_mmio
             ├─ pci.rs         enumeración del bus PCI
             ├─ virtio_blk.rs  driver de disco virtio-blk (DMA, virtqueue, polling)
             ├─ virtio_net.rs  driver de placa de red virtio-net (dos virtqueues, polling)
@@ -366,10 +373,41 @@ firmware UEFI (OVMF en QEMU)
 | `fs` (`jarvis-fs`) | FAT32 propio: montaje, FAT (dos copias), nombres largos, lectura, escritura, carpetas, renombrar, mover, **copiar**, borrar, **caché de sectores**. Sobre un trait `BlockDevice`. | 22 tests, 14 de ellos **cruzados contra `fatfs`**: cada uno lee lo que escribe el otro, y el espacio libre se cuenta sobre la FAT cruda |
 | `desktop` (`jarvis-desktop`) | Escritorio: gestor de ventanas (con escritorios virtuales), atajos, barra, panel de estado, menús y paneles, configuración, firewall, idiomas, composición; apps (Archivos, Terminal, Configuración, Monitor, Consola, Editor, Música, Visor, Navegador); shell `jsh`, `apt`, `snap`, `winget`, `ufw`, formatos PE/ELF/squashfs; web: URL, HTTP, DOM, selectores y cascada, maquetación en cajas (flujo, flotantes, flex, grid, tablas), JSON, adaptador de YouTube; teclado latinoamericano. | 116 tests: el escritorio manejado con teclas y clics sobre un disco en memoria, verificado con `fatfs`; la terminal, `apt`, `snap` y `winget` contra el repositorio real y respuestas grabadas; el firewall; la maquetación sobre HTML de prueba; incluye "render incremental == redibujar todo". Más `vista_previa` (a mano): arma una página real, con imágenes, y la guarda en BMP |
 | `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente, conexiones TCP largas. | 5 tests de punta a punta en memoria (placa "loopback" + servidores de juguete) |
+| `mem` (`jarvis-mem`) | Memoria: allocator de marcos físicos (mapa de bits), tablas de páginas de 4 niveles (mapear, traducir, desmapear, recorrer; páginas de 4 KiB, 2 MiB y 1 GiB) y segmentos del ELF del kernel para W^X. Sobre un trait `PhysMem`. | 8 tests sobre una RAM de mentira (copiar una jerarquía da las mismas traducciones) y `cargo xtask test` (el kernel arranca con sus tablas y verifica W^X) |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K8: paginación propia
+- **Cambiar de tablas en caliente**: al cargar una PML4 nueva en CR3, la instrucción siguiente ya
+  se traduce con ella. Por eso la tabla nueva tiene que mapear *todo* lo que está en uso: el
+  código que está corriendo, la pila, los estáticos, la información de arranque, el framebuffer y
+  la RAM. En vez de adivinar qué dejó el bootloader, se **recorren sus tablas** y se copia cada
+  hoja (salvo el mapeo de la RAM, que se rehace). El test "copiar una jerarquía da las mismas
+  traducciones" es la garantía de que ese paso no pierde nada.
+- **Las tablas de páginas son un árbol en memoria física**: cada entrada guarda la dirección
+  *física* de la tabla siguiente. Para leerlas hace falta verlas en alguna dirección virtual; acá
+  se usa el mapeo de toda la RAM (`offset + física`). En `jarvis-mem` eso es un trait
+  (`PhysMem`), así la misma lógica corre en el kernel y, en los tests, sobre un `HashMap`.
+- **Un allocator de marcos empieza con todo ocupado** y libera solo lo que el firmware declara
+  como RAM usable. Al revés (todo libre y reservar lo que se sepa) un agujero no declarado
+  termina entregado como si fuera memoria. El heap y el primer MiB se reservan aparte.
+- **W^X** (write xor execute): los permisos salen de los encabezados de programa del ELF del
+  kernel (el bootloader deja el archivo en memoria). El código queda R-X, las constantes R-- y los
+  datos RW-. Hacen falta dos bits de control: EFER.NXE (sin él, el bit "no ejecutar" es un error
+  de formato) y CR0.WP (sin él, el kernel escribe aunque la página diga "solo lectura"). Al
+  arrancar se comprueba en la tabla activa que el código no se pueda escribir y los datos no se
+  puedan ejecutar.
+- **Páginas grandes**: el bootloader mapeaba hasta 1 TiB (el firmware declara zonas reservadas
+  ahí arriba) con páginas de 2 MiB: ~1050 tablas, 4 MiB de RAM solo en tablas. Ahora se mapea
+  denso hasta la última RAM (y todo lo de abajo de 4 GiB); lo de más arriba lo mapea `map_mmio`
+  cuando un driver lo pide, de a 4 KiB y **sin caché**, que es lo correcto para registros de un
+  dispositivo. Resultado: 29 tablas. Con `cpuid` se ve si hay páginas de 1 GiB (QEMU `qemu64` no
+  las tiene).
+- **Qué queda para más adelante**: los buffers de DMA siguen saliendo del heap (física = virtual −
+  offset); cuando haya espacio de usuario (K11) cada proceso va a tener su propia PML4, que
+  comparte la mitad alta (el kernel) y los marcos van a salir de este allocator.
 
 ### K6: Brave, sesión, personalización y sincronización
 - **Un navegador remoto es un VNC con más información**: en vez de mandar la pantalla entera, el
@@ -497,7 +535,7 @@ firmware UEFI (OVMF en QEMU)
   recibe sus argumentos y la entrada estándar y devuelve texto: una tubería es pasar el texto de
   uno al siguiente. Lo que tiene que esperar a la red no puede bloquear (hay un solo hilo): el
   comando devuelve un "trabajo pendiente", la shell guarda en qué parte de la línea quedó y sigue
-  cuando llega la respuesta. Es un planificador cooperativo en miniatura (K8 lo hace de verdad).
+  cuando llega la respuesta. Es un planificador cooperativo en miniatura (K9 lo hace de verdad).
 - **Las palabras se expanden al ejecutar**, no al leer: por eso `false || echo $?` dice 1. Y las
   asignaciones (`N=$(wc -l < x)`) no se parten en palabras, como en bash.
 - **Programas = scripts**: sin espacio de usuario no hay dónde cargar un ELF o un `.exe`. Los
@@ -582,7 +620,7 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K6 terminados; sigue K7 (el puente con el cerebro). Son 7 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
+**Dónde estamos:** K0–K8 terminados; sigue K9 (multitarea). Son 9 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
 K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los anteriores juntos.
 
 | Hito | Qué se logra | Qué se aprende |
@@ -594,8 +632,8 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K4** ✅ | **Terminal y sistema**: shell `jsh`, `apt`, Configuración, más atajos, escritorios virtuales, navegador con CSS e imágenes, teclado latinoamericano | Intérpretes, gestión de paquetes, CSS y la cascada |
 | **K5** ✅ | **Motor web y sistema**: maquetación en cajas (flex, grid, tablas, flotantes), fuente proporcional, SVG y transparencias, YouTube sin JavaScript, firewall (`ufw`), `snap`, `winget`, idiomas, barra de arriba y transiciones de ventanas | Motores de maquetación, tipografía, filtrado de red, internacionalización, animación |
 | **K6** ✅ | **Brave y sistema**: conexiones TCP largas ✅, Brave remoto (DevTools + mosaicos) ✅, temperatura, cerrar sesión y suspender ✅, personalización en capas ✅, selección múltiple y distribuciones de ventanas ✅, varios monitores (virtio-gpu) ✅, sincronización de carpetas entre máquinas (relé + ChaCha20-Poly1305) ✅ e ISO con modo en vivo ✅ | Protocolos binarios, control de flujo, relojes lógicos, criptografía autenticada, El Torito |
-| K7 🚧 | **JARVIS con Claude** (ADR 0008): la consola le habla a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code) y la esfera pulsa con la respuesta ✅; acciones en JARVIS-OS con 3 niveles de permiso; "abrí tal proyecto y seguí"; **voz** con el micrófono y los parlantes del anfitrión (adelantada de K12) | Protocolos, agentes, permisos, voz |
-| K8 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
+| **K7** ✅ | **JARVIS con Claude** (ADR 0008): la consola le habla a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code) y la esfera pulsa con la respuesta ✅; acciones en JARVIS-OS con 3 niveles de permiso ✅; "abrí tal proyecto y seguí" ✅; **voz** con el micrófono y los parlantes del anfitrión (adelantada de K12) ✅; micrófono virtio-sound ✅; cuenta de Claude e inicio de sesión con Google desde Configuración ✅ | Protocolos, agentes, permisos, voz |
+| **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
 | K9 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
 | K10 | **TLS en el kernel** (sin puente) y decodificadores PNG/JPEG | Criptografía, certificados, compresión |
 | K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |

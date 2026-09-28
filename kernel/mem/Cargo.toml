@@ -1,0 +1,12 @@
+[package]
+name = "jarvis-mem"
+description = "Memoria de JARVIS-OS: marcos físicos, tablas de páginas y la imagen del kernel. no_std y testeable en el host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

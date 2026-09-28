@@ -186,20 +186,23 @@ impl Monitor {
             &format!("{pct} %"),
             &big(theme::particle_bright()),
         );
-        let detail = format!(
-            "{} de {} · RAM {}",
+        let heap = format!(
+            "{} de {}",
             format_size(st.heap_used),
-            format_size(st.heap_total),
-            format_size(st.ram_total)
+            format_size(st.heap_total)
         );
-        draw_fit(
-            c,
-            inner.x + 110,
-            inner.y + 8,
-            &detail,
-            &light(theme::text_dim()),
-            inner.w - 110,
-        );
+        // La RAM física que el allocator de marcos todavía no entregó (paginación propia, K8).
+        let ram = format!("{} {}", tr("RAM libre"), format_size(st.ram_free));
+        for (i, line) in [heap, ram].iter().enumerate() {
+            draw_fit(
+                c,
+                inner.x + 110,
+                inner.y + 1 + 18 * i as i32,
+                line,
+                &light(theme::text_dim()),
+                inner.w - 110,
+            );
+        }
         let g = Rect::new(inner.x, inner.y + 42, inner.w, inner.h - 42);
         graph(c, g, &h.mem, 100, theme::particle_bright());
 

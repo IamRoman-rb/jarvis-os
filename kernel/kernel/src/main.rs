@@ -1,4 +1,4 @@
-//! Kernel de JARVIS-OS — hito K5: motor web, firewall, snap/winget e idiomas.
+//! Kernel de JARVIS-OS — hito K8: paginación propia.
 //!
 //! No hay sistema operativo debajo: este código corre directamente sobre el hardware (o QEMU).
 //! El crate `bootloader` se encarga de lo previo: pasar la CPU a modo 64 bits, armar las tablas
@@ -9,7 +9,7 @@
 //! de red, parlante, pantalla) y le pasa todo al escritorio (`jarvis-desktop`), que tiene la
 //! lógica de la interfaz. La pila TCP/IP y las descargas están en `jarvis-net`.
 //!
-//! Orden de arranque: serie → GDT → IDT/PIC → PIT → TSC → heap → disco → red → mouse →
+//! Orden de arranque: serie → GDT → IDT/PIC → PIT → TSC → heap → tablas de páginas propias → disco → red → mouse →
 //! pantalla → interrupciones → bucle.
 
 #![no_std]
@@ -163,6 +163,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         .expect("el bootloader no mapeó la memoria física");
     let heap = allocator::init(&boot_info.memory_regions, phys_offset)
         .expect("no hay RAM usable para el heap");
+    let heap_phys = heap;
+    let heap = heap.1;
     let ram: u64 = boot_info
         .memory_regions
         .iter()
@@ -174,7 +176,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ram / (1024 * 1024),
         heap / (1024 * 1024)
     );
-    paging::init(phys_offset);
+    // K8: el kernel deja las tablas de páginas del bootloader y arma las suyas.
+    let pg = paging::init(boot_info, phys_offset, heap_phys)
+        .expect("no se pudieron armar las tablas de páginas propias");
+    serial_println!(
+        "PAGINACION_PROPIA {} tablas, RAM mapeada {} MiB, {} MiB de marcos libres, kernel {} segmentos{}",
+        pg.tables,
+        pg.ram_mapped_mib,
+        pg.free_mib,
+        pg.kernel_segments,
+        if pg.w_xor_x {
+            " con W^X"
+        } else {
+            " (sin W^X: no se pudo leer el ELF)"
+        }
+    );
     let cpu_name = cpu::brand();
     serial_println!("CPU: {}", cpu_name);
     let thermal = cpu::Thermal::detect();
@@ -517,6 +533,10 @@ fn run(
             stats.cpu_pct = (busy * 100 / elapsed).min(100) as u8;
             stats.heap_used = heap_used;
             stats.heap_total = heap_total;
+            if let Some((free, tables)) = paging::usage() {
+                stats.ram_free = free as u64 * 4096;
+                stats.page_tables = tables as u32;
+            }
             stats.fps = (frames * 1000 / secs) as u32;
             stats.frame_ms = (render_ms / frames.max(1)) as u32;
             stats.uptime_ms = now;

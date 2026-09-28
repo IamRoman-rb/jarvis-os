@@ -84,11 +84,13 @@ impl<D: BlockDevice> Desktop<D> {
                 (
                     true,
                     format!(
-                        "CPU {} % ({}), memoria {} de {} MiB, {} ventanas abiertas, red: {}",
+                        "CPU {} % ({}), memoria {} de {} MiB (RAM física libre {} MiB, {} tablas de páginas), {} ventanas abiertas, red: {}",
                         s.cpu_pct,
                         s.cpu_name,
                         s.heap_used >> 20,
                         s.heap_total >> 20,
+                        s.ram_free >> 20,
+                        s.page_tables,
                         self.slots.len(),
                         if s.net.ip.is_some() {
                             "conectada"

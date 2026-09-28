@@ -469,6 +469,7 @@ fn iso_cmd(image: &Path) -> Result<()> {
 /// Arranca la ISO como un CD, sin disco, y espera el escritorio en modo en vivo.
 fn boot_iso(iso: &Path) -> Result<()> {
     let mut s = Session::start(iso, Path::new(""))?;
+    s.wait_for("segmentos con W^X", BOOT_TIMEOUT)?;
     s.wait_for("MODO_EN_VIVO", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.quit();
@@ -717,6 +718,8 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     // El cerebro simulado (sin Claude): respuestas fijas.
     let brain = cerebro::start(cerebro::TEST_PORT, true);
     let mut s = Session::start(image, disk)?;
+    // K8: el kernel cambió a sus propias tablas de páginas (con W^X) y siguió andando.
+    s.wait_for("segmentos con W^X", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.wait_for("RED_IP 10.0.2.15", STEP)?;
     if brain.is_some() {

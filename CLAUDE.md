@@ -22,13 +22,16 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (config.rs), aspecto no cromático (look.rs: tamaños, botones, gráficos de la barra), firewall (firewall.rs), idiomas (i18n.rs), teclado latino
                    (keymap.rs), apps (apps/), shell, apt, snap y winget (term/), web sin red
                    (web/: URL, HTTP, DOM, CSS y estilos, maquetación en cajas, JSON, adaptadores)
+    - mem/         memoria (K8): allocator de marcos físicos, tablas de páginas de 4 niveles y
+                   segmentos del ELF del kernel (W^X); no_std, sobre un trait PhysMem
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - sync/        sincronización de /Sincronizado: emparejado (HKDF), cifrado (ChaCha20-Poly1305),
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red
                    (desktop/src/sync.rs lo une con el FAT32 y las conexiones largas)
     - relay/       el relé (std): reenvía marcos cifrados entre las máquinas de un grupo
     - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
-                   (virtio_gpu.rs + paging.rs: varios monitores; display.rs: las superficies)
+                   (paging.rs: tablas de páginas propias con jarvis-mem y map_mmio;
+                   virtio_gpu.rs: varios monitores; display.rs: las superficies)
     - xtask/       imagen booteable, disco FAT32, QEMU, puente (puente.rs: HTTPS, paquetes,
                    imágenes y SVG → BMP), puente de Brave (brave.rs: DevTools → mosaicos), tests,
                    capturas

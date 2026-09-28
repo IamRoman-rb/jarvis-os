@@ -31,6 +31,10 @@ pub struct SystemStats {
     pub heap_total: u64,
     /// RAM total que informó el firmware.
     pub ram_total: u64,
+    /// RAM física sin usar: marcos que el allocator de marcos todavía no entregó (fuera del heap).
+    pub ram_free: u64,
+    /// Tablas de páginas del kernel (paginación propia, K8).
+    pub page_tables: u32,
     pub fps: u32,
     pub frame_ms: u32,
     pub uptime_ms: u64,

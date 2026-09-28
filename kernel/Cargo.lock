@@ -697,6 +697,7 @@ dependencies = [
  "jarvis-desktop",
  "jarvis-fs",
  "jarvis-gfx",
+ "jarvis-mem",
  "jarvis-net",
  "linked_list_allocator",
  "pc-keyboard",
@@ -705,6 +706,10 @@ dependencies = [
  "spin",
  "x86_64",
 ]
+
+[[package]]
+name = "jarvis-mem"
+version = "0.1.0"
 
 [[package]]
 name = "jarvis-net"
