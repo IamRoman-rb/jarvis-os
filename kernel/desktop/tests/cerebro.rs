@@ -120,7 +120,11 @@ fn la_respuesta_llega_de_a_pedazos() {
 fn las_ordenes_locales_siguen_siendo_locales() {
     let mut b = connected();
     b.ask("abrir monitor");
-    assert!(b.sent.is_empty(), "no fue al cerebro: {}", b.sent);
+    assert!(!b.sent.contains("pedido"), "no fue al cerebro: {}", b.sent);
+    assert!(
+        b.sent.contains(r#""t":"decir""#),
+        "pero se dice en voz alta"
+    );
     assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
 }
 
@@ -272,4 +276,37 @@ fn un_proyecto_abre_su_ventana_y_esc_lo_detiene() {
     assert_eq!(b.sent, "{\"t\":\"proyecto_detener\"}\n");
     b.reply(r#"{"t":"proyecto","nombre":"jarvis-os","ev":"fin","texto":"Detenido."}"#);
     assert!(b.t.logs().iter().any(|l| l == "PROYECTO_FIN jarvis-os"));
+}
+
+#[test]
+fn lo_que_se_oye_se_trata_como_escrito() {
+    let mut b = connected();
+    // Una orden local, por voz.
+    b.reply(r#"{"t":"oido","texto":"abrir monitor"}"#);
+    assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
+    assert!(
+        !b.sent.contains("pedido"),
+        "las órdenes locales no van al cerebro"
+    );
+    assert!(
+        b.sent.starts_with(r#"{"t":"decir","texto":"Abriendo"#),
+        "pero la respuesta se dice en voz alta: {}",
+        b.sent
+    );
+    b.sent.clear();
+    // Un pedido para Claude, por voz: va con origen voz (se contesta en voz alta).
+    b.reply(r#"{"t":"oido","texto":"contame un chiste"}"#);
+    assert!(
+        b.sent
+            .contains(r#""texto":"contame un chiste","origen":"voz""#),
+        "{}",
+        b.sent
+    );
+    assert!(b.console().contains("(voz) contame un chiste"));
+    b.reply(r#"{"t":"voz","nivel":60}"#);
+    // Win+J: escuchar sin la palabra de activación.
+    b.sent.clear();
+    b.t.combo(Mods::WIN, Key::Char('j'));
+    b.collect();
+    assert_eq!(b.sent, "{\"t\":\"escuchar\"}\n");
 }

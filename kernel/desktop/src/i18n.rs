@@ -778,6 +778,7 @@ static EN: &[(&str, &str)] = &[
         "También al maximizar, acoplar y minimizar",
         "Also when maximizing, snapping and minimizing",
     ),
+    ("Te escucho.", "I'm listening."),
     ("Tema", "Theme"),
     ("Temperatura", "Temperature"),
     ("Terminal (Ctrl+Alt+T)", "Terminal (Ctrl+Alt+T)"),
@@ -878,6 +879,7 @@ static EN: &[(&str, &str)] = &[
     ("sá", "sa"),
     ("texto", "text"),
     ("vi", "fr"),
+    ("voz", "voice"),
     (
         "¿Qué querés que haga la computadora?",
         "What do you want the computer to do?",
@@ -1587,6 +1589,7 @@ static PT: &[(&str, &str)] = &[
         "También al maximizar, acoplar y minimizar",
         "Também ao maximizar, encaixar e minimizar",
     ),
+    ("Te escucho.", "Estou ouvindo."),
     ("Tema", "Tema"),
     ("Temperatura", "Temperatura"),
     ("Terminal (Ctrl+Alt+T)", "Terminal (Ctrl+Alt+T)"),
@@ -1687,6 +1690,7 @@ static PT: &[(&str, &str)] = &[
     ("sá", "sá"),
     ("texto", "texto"),
     ("vi", "sx"),
+    ("voz", "voz"),
     (
         "¿Qué querés que haga la computadora?",
         "O que você quer que o computador faça?",

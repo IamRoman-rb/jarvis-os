@@ -120,3 +120,53 @@ async def test_abrir_un_proyecto_muestra_el_avance_y_pide_confirmar(tmp_path) ->
     assert seen[0] == "inicio: jarvis-os: Seguí con lo que estábamos trabajando."
     assert "texto: No toqué nada." in seen
     writer.close()
+
+
+class FakeVoice:
+    """Sin micrófono: `hear` simula que Roman dijo algo; `speak` anota y da dos niveles."""
+
+    def __init__(self) -> None:
+        self.spoken: list[str] = []
+        self.listening = False
+        self.on_heard = lambda text: None
+
+    def listen_now(self) -> None:
+        self.listening = True
+
+    def speak(self, text, on_level) -> None:  # type: ignore[no-untyped-def]
+        self.spoken.append(text)
+        on_level(40)
+        on_level(0)
+
+    def run(self, on_heard, on_listening) -> None:  # type: ignore[no-untyped-def]
+        self.on_heard = on_heard
+
+    def stop(self) -> None:
+        pass
+
+
+async def test_la_voz_manda_lo_oido_y_dice_la_respuesta(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from jarvis.service.server import Host
+    from jarvis.service.voicehub import VoiceHub
+
+    voice = FakeVoice()
+    hub = VoiceHub(voice, asyncio.get_running_loop())
+    hub.start()
+    host = Host(projects=tmp_path, voice=hub)
+    server = await start(0, TOKEN, lambda s: ScriptedBrain(s, delay=0.0), host)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(encode({"t": "hola", "token": TOKEN}))
+    assert (await read(reader)) == {"t": "listo", "voz": True}
+    await asyncio.sleep(0.05)  # el hilo de la voz registra su callback
+    voice.on_heard("hola jarvis")
+    assert await read(reader) == {"t": "oido", "texto": "hola jarvis"}
+    writer.write(encode({"t": "escuchar"}))
+    writer.write(encode({"t": "pedido", "id": 9, "texto": "hola jarvis", "origen": "voz"}))
+    while (await read(reader))["t"] != "fin":
+        pass
+    assert await read(reader) == {"t": "voz", "nivel": 40}
+    assert await read(reader) == {"t": "voz", "nivel": 0}
+    assert voice.spoken == ["Hola, Roman. Sistema en línea y cerebro conectado."]
+    assert voice.listening, "Win+J pide escuchar sin la palabra de activación"
+    writer.close()

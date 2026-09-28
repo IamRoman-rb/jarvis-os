@@ -34,6 +34,8 @@ pub struct Assistant {
     chars: usize,
     /// Ya se avisó que terminó de hablar (para [`take_finished`](Self::take_finished)).
     finished_reported: bool,
+    /// Nivel del audio real (la voz del anfitrión, 0..=100) y hasta cuándo vale.
+    audio: (u8, u64),
 }
 
 impl Assistant {
@@ -59,7 +61,7 @@ impl Assistant {
     }
 
     pub fn is_speaking(&self, now: u64) -> bool {
-        !self.text.is_empty() && now < self.speech_end()
+        (!self.text.is_empty() && now < self.speech_end()) || now < self.audio.1
     }
 
     /// Cuántas letras ya se "dijeron" (y se ven en pantalla).
@@ -86,8 +88,17 @@ impl Assistant {
         false
     }
 
+    /// El nivel del audio que está sonando (0..=100): mientras llega, manda sobre la
+    /// envolvente sintética. Si deja de llegar, a los 200 ms se vuelve a la sintética.
+    pub fn set_audio_level(&mut self, level: u8, now: u64) {
+        self.audio = (level.min(100), now + 200);
+    }
+
     /// Envolvente de voz en Q14 (0..=ONE).
     pub fn level(&self, now: u64) -> i32 {
+        if now < self.audio.1 {
+            return self.audio.0 as i32 * ONE / 100;
+        }
         if self.text.is_empty() {
             return 0;
         }
@@ -138,6 +149,18 @@ impl Assistant {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn el_audio_real_manda_mientras_llega() {
+        let mut a = super::Assistant::new();
+        a.set_audio_level(50, 1000);
+        assert_eq!(a.level(1100), super::ONE / 2);
+        assert_eq!(
+            a.level(1300),
+            0,
+            "sin audio nuevo, vuelve a la envolvente (en silencio)"
+        );
+    }
+
     use super::*;
 
     #[test]

@@ -1296,6 +1296,8 @@ impl<D: BlockDevice> Desktop<D> {
                 Key::Home => self.wm.minimize_others(),
                 Key::Char('e' | 'E') => self.launch(app(AppKind::Files), now_ms, clock),
                 Key::Char('r' | 'R') => self.launch(app(AppKind::Console), now_ms, clock),
+                // Win+J: hablarle a JARVIS sin decir "hey jarvis".
+                Key::Char('j' | 'J') => self.out.brain.push(crate::brain::BrainOp::Listen),
                 Key::Char('i' | 'I') => self.launch(app(AppKind::Settings), now_ms, clock),
                 Key::Enter => self.launch(app(AppKind::Terminal), now_ms, clock),
                 Key::Char('x' | 'X') => self.toggle_overlay(Overlay::Menu(panels::quick_links())),
@@ -1958,6 +1960,24 @@ impl<D: BlockDevice> Desktop<D> {
                     self.say(&first, now_ms);
                 }
                 BrainEvent::Error(_) | BrainEvent::Confirm { .. } => {}
+                BrainEvent::VoiceLevel(n) => self.assistant.set_audio_level(*n, now_ms),
+                BrainEvent::Listening(true) => self.say(tr("Te escucho."), now_ms),
+                BrainEvent::Listening(false) => {}
+                BrainEvent::Heard(text) => {
+                    let clock = self.last_clock;
+                    if self.window_of(AppKind::Console).is_none() {
+                        self.open(Launch::App(AppKind::Console), now_ms, clock);
+                    }
+                    let tasks = self.tasks();
+                    let mut ctx = ctx!(self, now_ms, clock, &tasks);
+                    for s in &mut self.slots {
+                        if let crate::apps::App::Console(c) = &mut s.app {
+                            ctx.out.app = app_tag(AppKind::Console);
+                            c.heard(text, &mut ctx);
+                            s.content_dirty = true;
+                        }
+                    }
+                }
                 BrainEvent::Project { name, ev, text } => {
                     // La ventana Proyecto se abre sola al empezar.
                     if ev == "inicio" && self.window_of(AppKind::Project).is_none() {

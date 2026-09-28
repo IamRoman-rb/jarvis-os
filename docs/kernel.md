@@ -38,6 +38,9 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   "Abrí jarvis-os y seguí con lo que estábamos": JARVIS abre un **agente de código** (el de Claude
   Code) en esa carpeta del anfitrión, retoma la última conversación y muestra su avance en la
   ventana **Proyecto**; cada edición (nivel 2) y cada comando (nivel 3) se confirman.
+  **Por voz**: "JARVIS, …" (o Win+J; "JARVIS" solo contesta "¿Sí?" y espera la orden) con el micrófono del anfitrión; lo que entiende se trata
+  como si se hubiera escrito, y la respuesta se dice en voz alta mientras la esfera se mueve con
+  el audio real (`uv sync --extra voice` y `uv run jarvis voz instalar`, ~590 MB de modelos). El micrófono queda siempre abierto: cada frase se transcribe local y solo las que empiezan con "JARVIS" son órdenes; nada sale de la PC.
 - **Sincronización entre máquinas**: la carpeta `/Sincronizado` se copia sola entre dos (o más)
   JARVIS, aunque estén en redes distintas. En Configuración → Sincronización se genera un código
   en una y se escribe en la otra; las dos se conectan a un **relé** (`cargo xtask relay`) que solo
@@ -173,6 +176,7 @@ cargo test               # tests en el host: FAT32, red, escritorio, terminal y 
 | Win+← / Win+→ · Win+Shift+↑ | acoplar a la mitad izquierda / derecha · estirar a lo alto |
 | Win+Z | distribuciones: mitades, tercios, 2/3 + 1/3, cuartos, grande + dos, columna central (las demás ventanas completan) |
 | Win+Shift+T · Win+Shift+C | mosaico con todas las ventanas · cascada |
+| Win+J | hablarle a JARVIS sin decir "JARVIS" (micrófono del anfitrión) |
 | Win+P · Win+Shift+← / → | monitores: solo 1, duplicar, extender, solo 2 · llevar la ventana al otro monitor |
 | arrastrar contra un borde / esquina | mitad / cuarto (arriba: maximizar) |
 | Win+Ctrl+D · Win+Ctrl+← / → · Win+Ctrl+F4 | escritorio virtual nuevo · cambiar · cerrarlo |

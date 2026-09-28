@@ -20,6 +20,7 @@ from typing import Any
 from jarvis.agent.brain import Brain, BrainError
 from jarvis.projects import ProjectError, ProjectRunner, list_projects, resolve_project
 from jarvis.protocol import MAX_LINE, Message, ProtocolError, decode, encode
+from jarvis.service.voicehub import VoiceHub
 
 log = logging.getLogger("jarvis.serve")
 
@@ -41,6 +42,8 @@ class Host:
 
     projects: Path
     make_project: MakeProject | None = None
+    #: La voz del anfitrión (None = sin micrófono ni parlantes).
+    voice: VoiceHub | None = None
 
 
 class Session:
@@ -55,6 +58,7 @@ class Session:
         self.host = host
         self.project: ProjectRunner | None = None
         self.project_task: asyncio.Task[None] | None = None
+        self._background: set[asyncio.Task[None]] = set()
         self.brain: Brain | None = None
         self.current: asyncio.Task[None] | None = None
         self.current_id: int | None = None
@@ -143,13 +147,22 @@ class Session:
         self.writer.write(encode(msg))
         await self.writer.drain()
 
-    async def answer(self, req_id: int, text: str) -> None:
+    async def answer(self, req_id: int, text: str, by_voice: bool = False) -> None:
         if self.brain is None:
             return
+        full = ""
         try:
             async for delta in self.brain.reply(text):
+                full += delta
                 await self.send({"t": "texto", "id": req_id, "delta": delta})
             await self.send({"t": "fin", "id": req_id})
+            # Con voz, JARVIS siempre contesta en voz alta (se lo hayan pedido hablando o
+            # escribiendo).
+            voice = self.host.voice if self.host else None
+            if voice is not None:
+                task = asyncio.create_task(voice.speak(full))
+                self._background.add(task)
+                task.add_done_callback(self._background.discard)
         except asyncio.CancelledError:
             await self.send({"t": "fin", "id": req_id})
             raise
@@ -173,7 +186,8 @@ class Session:
                 raise ProtocolError("pedido sin id o sin texto")
             await self.cancel()
             self.current_id = req_id
-            self.current = asyncio.create_task(self.answer(req_id, text))
+            by_voice = msg.get("origen") == "voz"
+            self.current = asyncio.create_task(self.answer(req_id, text, by_voice))
         elif t == "cancelar":
             if msg.get("id") == self.current_id:
                 await self.cancel()
@@ -183,6 +197,19 @@ class Session:
             self._resolve(msg, msg.get("ok") is True)
         elif t == "proyecto_detener":
             await self.stop_project()
+        elif t == "decir":
+            # Una respuesta local de JARVIS-OS a una orden por voz: también en voz alta.
+            text = msg.get("texto")
+            voice = self.host.voice if self.host else None
+            if isinstance(text, str) and voice is not None:
+                task = asyncio.create_task(voice.speak(text))
+                self._background.add(task)
+                task.add_done_callback(self._background.discard)
+        elif t == "escuchar":
+            if self.host is not None and self.host.voice is not None:
+                self.host.voice.listen_now()
+            else:
+                await self.send({"t": "escuchando", "activo": False, "motivo": "sin voz"})
         else:
             log.info("mensaje desconocido: %s", t)
 
@@ -207,7 +234,9 @@ async def serve_connection(
             log.warning("token inválido desde %s", peer)
             return
         log.info("kernel conectado desde %s (%s)", peer, hello.get("equipo", "?"))
-        await session.send({"t": "listo"})
+        if host is not None and host.voice is not None:
+            host.voice.session = session
+        await session.send({"t": "listo", "voz": host is not None and host.voice is not None})
         while True:
             line = await reader.readline()
             if not line:
