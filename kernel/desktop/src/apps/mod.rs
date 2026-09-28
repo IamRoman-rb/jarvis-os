@@ -345,6 +345,28 @@ pub fn icon_of(kind: AppKind) -> Icon {
     }
 }
 
+/// Una app por cómo la nombra la gente ("navegador", "música", "configuración"…).
+pub fn app_by_name(name: &str) -> Option<AppKind> {
+    let n = name.trim().to_lowercase();
+    let n = n
+        .trim_start_matches("el ")
+        .trim_start_matches("la ")
+        .trim_start_matches("los ");
+    Some(match n {
+        "archivos" | "explorador" | "files" => AppKind::Files,
+        "monitor" | "estado" | "administrador" | "administrador de tareas" => AppKind::Monitor,
+        "musica" | "música" | "music" => AppKind::Music,
+        "navegador" | "web" | "brave" | "internet" | "browser" => AppKind::Brave,
+        "navegador-simple" | "navegador simple" => AppKind::Browser,
+        "editor" | "notas" | "bloc" | "bloc de notas" => AppKind::Editor,
+        "consola" | "console" => AppKind::Console,
+        "terminal" | "jsh" => AppKind::Terminal,
+        "configuracion" | "configuración" | "ajustes" | "settings" => AppKind::Settings,
+        "visor" | "imagenes" | "imágenes" => AppKind::Viewer,
+        _ => return None,
+    })
+}
+
 /// Nombre para mostrar (menú de inicio, Alt+Tab).
 pub fn name_of(kind: AppKind) -> &'static str {
     match kind {

@@ -455,6 +455,7 @@ static EN: &[(&str, &str)] = &[
     ("Inicio (Win)", "Start (Win)"),
     ("Instalar más programas", "Install more programs"),
     ("Invertir la rueda", "Invert the wheel"),
+    ("JARVIS QUIERE HACER ESTO", "JARVIS WANTS TO DO THIS"),
     ("JARVIS · escritorio (Win+D)", "JARVIS · desktop (Win+D)"),
     (
         "JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER",
@@ -586,6 +587,14 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Ninguna", "None"),
     (
+        "Nivel 2: Enter elige, Esc rechaza",
+        "Level 2: Enter chooses, Esc rejects",
+    ),
+    (
+        "Nivel 3: para permitir hace falta un clic (Esc rechaza)",
+        "Level 3: allowing takes a click (Esc rejects)",
+    ),
+    (
         "No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales.",
         "I don't understand that and the brain (Claude) is not connected: start JARVIS with \"cargo xtask run\", which launches it. Type \"ayuda\" for the local commands.",
     ),
@@ -620,6 +629,7 @@ static EN: &[(&str, &str)] = &[
     ("Octubre", "October"),
     ("PAPELERA", "TRASH"),
     ("PEGAR", "PASTE"),
+    ("PERMITIR", "ALLOW"),
     ("PIN INCORRECTO. PROBÁ OTRA VEZ.", "WRONG PIN. TRY AGAIN."),
     ("PIN de desbloqueo", "Unlock PIN"),
     ("PROBAR", "TEST"),
@@ -667,6 +677,7 @@ static EN: &[(&str, &str)] = &[
     ("Página de inicio de Brave", "Brave home page"),
     ("Páginas claras", "Light pages"),
     ("Qué hace con la ventana", "What it does to the window"),
+    ("RECHAZAR", "REJECT"),
     ("RED", "NETWORK"),
     ("REINICIAR", "RESTART"),
     ("RENDIMIENTO", "PERFORMANCE"),
@@ -1230,6 +1241,7 @@ static PT: &[(&str, &str)] = &[
     ("Inicio (Win)", "Iniciar (Win)"),
     ("Instalar más programas", "Instalar mais programas"),
     ("Invertir la rueda", "Inverter a roda"),
+    ("JARVIS QUIERE HACER ESTO", "JARVIS QUER FAZER ISTO"),
     (
         "JARVIS · escritorio (Win+D)",
         "JARVIS · área de trabalho (Win+D)",
@@ -1370,6 +1382,14 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Ninguna", "Nenhuma"),
     (
+        "Nivel 2: Enter elige, Esc rechaza",
+        "Nível 2: Enter escolhe, Esc recusa",
+    ),
+    (
+        "Nivel 3: para permitir hace falta un clic (Esc rechaza)",
+        "Nível 3: para permitir é preciso um clique (Esc recusa)",
+    ),
+    (
         "No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales.",
         "Não entendo isso e o cérebro (Claude) não está conectado: abra o JARVIS com \"cargo xtask run\", que o inicia. Digite \"ayuda\" para os comandos locais.",
     ),
@@ -1407,6 +1427,7 @@ static PT: &[(&str, &str)] = &[
     ("Octubre", "Outubro"),
     ("PAPELERA", "LIXEIRA"),
     ("PEGAR", "COLAR"),
+    ("PERMITIR", "PERMITIR"),
     (
         "PIN INCORRECTO. PROBÁ OTRA VEZ.",
         "PIN INCORRETO. TENTE DE NOVO.",
@@ -1457,6 +1478,7 @@ static PT: &[(&str, &str)] = &[
     ("Página de inicio de Brave", "Página inicial do Brave"),
     ("Páginas claras", "Páginas claras"),
     ("Qué hace con la ventana", "O que faz com a janela"),
+    ("RECHAZAR", "RECUSAR"),
     ("RED", "REDE"),
     ("REINICIAR", "REINICIAR"),
     ("RENDIMIENTO", "DESEMPENHO"),

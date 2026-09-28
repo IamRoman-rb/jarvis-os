@@ -828,6 +828,25 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("SESION_CERRADA", STEP)?;
     s.monitor("sendkey a")?;
     s.wait_for("SESION_INICIADA", STEP)?;
+    if brain.is_some() {
+        s.monitor("sendkey meta_l-r")?;
+        thread::sleep(Duration::from_millis(500));
+        // Cerebro: una acción de nivel 1 (sin confirmar) y una de nivel 3 (el diálogo; Esc rechaza).
+        s.type_text("abri el navegador y busca rust")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("CEREBRO_ACCION buscar_web", STEP)?;
+        s.wait_for("CEREBRO_ACCION_FIN 1 ok", STEP)?;
+        s.monitor("sendkey meta_l-r")?;
+        thread::sleep(Duration::from_millis(500));
+        s.type_text("borra /prueba")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("CEREBRO_CONFIRMAR 3", STEP)?;
+        thread::sleep(Duration::from_millis(500));
+        s.screenshot_head(&target_dir().join("jarvis-os-confirmar.png"), None)?;
+        s.monitor("sendkey esc")?;
+        s.wait_for("CEREBRO_CONFIRMACION 2 no", STEP)?;
+        s.wait_for("CEREBRO_RESPUESTA No lo hice", STEP)?;
+    }
     s.quit();
     drop(s);
     verify_dir_on_disk(disk, "prueba")?;

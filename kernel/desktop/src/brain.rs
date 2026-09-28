@@ -33,6 +33,20 @@ pub enum BrainEvent {
     Text(String),
     End,
     Error(String),
+    /// El cerebro pide ejecutar una tool (ya aprobada): el escritorio contesta con
+    /// [`BrainService::result`].
+    Action {
+        call: u32,
+        tool: String,
+        args: Vec<(String, String)>,
+    },
+    /// Pide confirmar una acción de nivel 2 o 3: el escritorio contesta con
+    /// [`BrainService::confirmation`].
+    Confirm {
+        call: u32,
+        level: u8,
+        desc: String,
+    },
 }
 
 /// Lo que la consola le pide al cerebro (por el [`Outbox`]).
@@ -235,6 +249,33 @@ impl BrainService {
         Some(events)
     }
 
+    /// El resultado de una acción.
+    pub fn result(&mut self, call: u32, ok: bool, datos: &str, out: &mut Outbox) {
+        self.logs.push(format!(
+            "CEREBRO_ACCION_FIN {call} {}",
+            if ok { "ok" } else { "error" }
+        ));
+        self.send(
+            out,
+            format!(
+                "{{\"t\":\"resultado\",\"llamada\":{call},\"ok\":{ok},\"datos\":{}}}",
+                quote(datos)
+            ),
+        );
+    }
+
+    /// Lo que Roman decidió en el diálogo de confirmación.
+    pub fn confirmation(&mut self, call: u32, ok: bool, out: &mut Outbox) {
+        self.logs.push(format!(
+            "CEREBRO_CONFIRMACION {call} {}",
+            if ok { "si" } else { "no" }
+        ));
+        self.send(
+            out,
+            format!("{{\"t\":\"confirmacion\",\"llamada\":{call},\"ok\":{ok}}}"),
+        );
+    }
+
     fn on_message(&mut self, msg: &Json, events: &mut Vec<BrainEvent>) {
         let t = msg.get("t").and_then(Json::str).unwrap_or("");
         let for_current = num(msg.get("id")).is_some_and(|id| Some(id) == self.current);
@@ -257,6 +298,46 @@ impl BrainService {
                     self.answer.replace('\n', " ")
                 ));
                 events.push(BrainEvent::End);
+            }
+            "accion" => {
+                let (Some(call), Some(tool)) =
+                    (num(msg.get("llamada")), msg.get("tool").and_then(Json::str))
+                else {
+                    return;
+                };
+                let args = match msg.get("args") {
+                    Some(Json::Obj(kv)) => kv
+                        .iter()
+                        .map(|(k, v)| {
+                            let v = match v {
+                                Json::Str(s) | Json::Num(s) => s.clone(),
+                                Json::Bool(b) => b.to_string(),
+                                _ => String::new(),
+                            };
+                            (k.clone(), v)
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                self.logs.push(format!("CEREBRO_ACCION {tool}"));
+                events.push(BrainEvent::Action {
+                    call,
+                    tool: tool.to_string(),
+                    args,
+                });
+            }
+            "confirmar" => {
+                let Some(call) = num(msg.get("llamada")) else {
+                    return;
+                };
+                let level = num(msg.get("nivel")).unwrap_or(3).clamp(2, 3) as u8;
+                let desc = msg.get("descripcion").and_then(Json::str).unwrap_or("?");
+                self.logs.push(format!("CEREBRO_CONFIRMAR {level} {desc}"));
+                events.push(BrainEvent::Confirm {
+                    call,
+                    level,
+                    desc: desc.to_string(),
+                });
             }
             "error" if for_current => {
                 self.current = None;

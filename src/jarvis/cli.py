@@ -30,6 +30,7 @@ def serve(
     """
     from jarvis.agent.brain import Brain, ClaudeBrain, ScriptedBrain
     from jarvis.config import Config
+    from jarvis.service.server import Session
     from jarvis.service.server import serve as run_server
 
     token = os.environ.get("JARVIS_CEREBRO_TOKEN", "")
@@ -39,8 +40,8 @@ def serve(
     config = Config.load()
     logging.basicConfig(level=logging.INFO, format="cerebro: %(message)s")
 
-    def make_brain() -> Brain:
-        return ScriptedBrain() if simulado else ClaudeBrain(config)
+    def make_brain(session: Session) -> Brain:
+        return ScriptedBrain(session) if simulado else ClaudeBrain(config, session)
 
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(run_server(puerto or config.puerto, token, make_brain))

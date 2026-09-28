@@ -254,17 +254,11 @@ impl Console {
                 };
                 self.answer(ctx, msg);
             }
-            "abrir" | "abri" | "abrí" | "open" => {
-                let kind = match arg.to_lowercase().as_str() {
-                    "archivos" | "explorador" => Some(AppKind::Files),
-                    "monitor" | "estado" | "administrador" => Some(AppKind::Monitor),
-                    "musica" | "música" => Some(AppKind::Music),
-                    "navegador" | "web" | "brave" | "internet" => Some(AppKind::Brave),
-        "navegador-simple" => Some(AppKind::Browser),
-                    "editor" | "notas" | "bloc" => Some(AppKind::Editor),
-                    "consola" => Some(AppKind::Console),
-                    _ => None,
-                };
+            // "abrir monitor" es local; "abrí el navegador y buscá…" es para Claude.
+            "abrir" | "abri" | "abrí" | "open"
+                if super::app_by_name(arg).is_some() || !ctx.stats.brain_online =>
+            {
+                let kind = super::app_by_name(arg);
                 match kind {
                     Some(k) => {
                         ctx.out.launch.push(Launch::App(k));
@@ -425,6 +419,11 @@ impl Console {
                     self.streaming = self.streaming.map(|n| n.saturating_sub(cut));
                 }
             }
+            BrainEvent::Action { tool, .. } => {
+                self.lines.push((Who::User, format!("  · {tool}")));
+                self.streaming = None;
+            }
+            BrainEvent::Confirm { .. } => {}
             BrainEvent::End => {
                 self.waiting = false;
                 self.streaming = None;
