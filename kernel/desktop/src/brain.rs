@@ -47,6 +47,12 @@ pub enum BrainEvent {
         level: u8,
         desc: String,
     },
+    /// Roman le habló a JARVIS (el micrófono del anfitrión): se trata como si lo hubiera escrito.
+    Heard(String),
+    /// Empezó (o terminó) a escuchar un pedido.
+    Listening(bool),
+    /// Nivel del audio de la respuesta que está sonando (0..=100): mueve la esfera.
+    VoiceLevel(u8),
     /// El avance del agente de un proyecto (para la ventana Proyecto).
     Project {
         name: String,
@@ -58,7 +64,10 @@ pub enum BrainEvent {
 /// Lo que la consola le pide al cerebro (por el [`Outbox`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BrainOp {
-    Ask(String),
+    /// Un pedido; `true` si vino de la voz (la respuesta se dice en voz alta).
+    Ask(String, bool),
+    /// Escuchar un pedido sin la palabra de activación (Win+J).
+    Listen,
     Cancel,
     /// Detener el agente del proyecto (Esc en la ventana Proyecto).
     StopProject,
@@ -175,16 +184,18 @@ impl BrainService {
             return false;
         }
         match op {
-            BrainOp::Ask(text) => {
+            BrainOp::Listen => self.send(out, "{\"t\":\"escuchar\"}".into()),
+            BrainOp::Ask(text, by_voice) => {
                 self.next_id += 1;
                 self.current = Some(self.next_id);
                 self.answer.clear();
                 self.send(
                     out,
                     format!(
-                        "{{\"t\":\"pedido\",\"id\":{},\"texto\":{},\"origen\":\"consola\"}}",
+                        "{{\"t\":\"pedido\",\"id\":{},\"texto\":{},\"origen\":\"{}\"}}",
                         self.next_id,
-                        quote(&text)
+                        quote(&text),
+                        if by_voice { "voz" } else { "consola" }
                     ),
                 );
             }
@@ -334,6 +345,23 @@ impl BrainService {
                     tool: tool.to_string(),
                     args,
                 });
+            }
+            "oido" => {
+                let text = msg.get("texto").and_then(Json::str).unwrap_or("").trim();
+                if !text.is_empty() {
+                    self.logs.push(format!("VOZ_OIDO {text}"));
+                    events.push(BrainEvent::Heard(text.to_string()));
+                }
+            }
+            "escuchando" => {
+                let on = matches!(msg.get("activo"), Some(Json::Bool(true)));
+                self.logs
+                    .push(format!("VOZ_ESCUCHANDO {}", if on { "si" } else { "no" }));
+                events.push(BrainEvent::Listening(on));
+            }
+            "voz" => {
+                let n = num(msg.get("nivel")).unwrap_or(0).min(100) as u8;
+                events.push(BrainEvent::VoiceLevel(n));
             }
             "proyecto" => {
                 let s = |k: &str| msg.get(k).and_then(Json::str).unwrap_or("").to_string();

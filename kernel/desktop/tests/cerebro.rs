@@ -273,3 +273,27 @@ fn un_proyecto_abre_su_ventana_y_esc_lo_detiene() {
     b.reply(r#"{"t":"proyecto","nombre":"jarvis-os","ev":"fin","texto":"Detenido."}"#);
     assert!(b.t.logs().iter().any(|l| l == "PROYECTO_FIN jarvis-os"));
 }
+
+#[test]
+fn lo_que_se_oye_se_trata_como_escrito() {
+    let mut b = connected();
+    // Una orden local, por voz.
+    b.reply(r#"{"t":"oido","texto":"abrir monitor"}"#);
+    assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
+    assert!(b.sent.is_empty(), "las órdenes locales no van al cerebro");
+    // Un pedido para Claude, por voz: va con origen voz (se contesta en voz alta).
+    b.reply(r#"{"t":"oido","texto":"contame un chiste"}"#);
+    assert!(
+        b.sent
+            .contains(r#""texto":"contame un chiste","origen":"voz""#),
+        "{}",
+        b.sent
+    );
+    assert!(b.console().contains("(voz) contame un chiste"));
+    b.reply(r#"{"t":"voz","nivel":60}"#);
+    // Win+J: escuchar sin la palabra de activación.
+    b.sent.clear();
+    b.t.combo(Mods::WIN, Key::Char('j'));
+    b.collect();
+    assert_eq!(b.sent, "{\"t\":\"escuchar\"}\n");
+}

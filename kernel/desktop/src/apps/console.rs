@@ -41,6 +41,8 @@ pub struct Console {
     scroll: usize,
     /// Esperando la respuesta del cerebro (Esc la corta).
     waiting: bool,
+    /// La orden que se está procesando vino de la voz.
+    by_voice: bool,
     /// La línea de la respuesta que se está armando (llega de a pedazos).
     streaming: Option<usize>,
 }
@@ -77,6 +79,7 @@ impl Console {
             history_pos: None,
             scroll: 0,
             waiting: false,
+            by_voice: false,
             streaming: None,
         }
     }
@@ -386,13 +389,27 @@ impl Console {
             _ if ctx.stats.brain_online => {
                 self.waiting = true;
                 self.streaming = None;
-                ctx.out.brain.push(crate::brain::BrainOp::Ask(cmd.to_string()));
+                ctx.out
+                    .brain
+                    .push(crate::brain::BrainOp::Ask(cmd.to_string(), self.by_voice));
             }
             _ => self.answer(
                 ctx,
                 tr("No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales."),
             ),
         }
+    }
+
+    /// Roman lo dijo en voz alta: como si lo hubiera escrito (una orden local o un pedido a
+    /// Claude, que responde también en voz alta).
+    pub fn heard<D: BlockDevice>(&mut self, text: &str, ctx: &mut Ctx<'_, D>) {
+        self.scroll = 0;
+        self.dirty = true;
+        self.say(Who::User, format!("({}) {text}", tr("voz")));
+        ctx.log.push(format!("CONSOLA_VOZ {text}"));
+        self.by_voice = true;
+        self.run(text, ctx);
+        self.by_voice = false;
     }
 
     /// Lo que llega del cerebro: la respuesta se va escribiendo a medida que llega.
@@ -423,7 +440,11 @@ impl Console {
                 self.lines.push((Who::User, format!("  · {tool}")));
                 self.streaming = None;
             }
-            BrainEvent::Confirm { .. } | BrainEvent::Project { .. } => {}
+            BrainEvent::Confirm { .. }
+            | BrainEvent::Project { .. }
+            | BrainEvent::Heard(_)
+            | BrainEvent::Listening(_)
+            | BrainEvent::VoiceLevel(_) => {}
             BrainEvent::End => {
                 self.waiting = false;
                 self.streaming = None;

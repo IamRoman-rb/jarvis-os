@@ -60,7 +60,9 @@ Kernel (desde kernel/):
 Cerebro (desde la raíz):
 - uv sync ; uv run pytest ; uv run ruff check . ; uv run mypy
 - jarvis serve [--simulado]: el cerebro para el kernel (ADR 0008). Lo levanta `cargo xtask run`
-  con un token por sesión (variable JARVIS_CEREBRO_TOKEN; el kernel lo recibe por fw_cfg)
+  con un token por sesión (variable JARVIS_CEREBRO_TOKEN; el kernel lo recibe por fw_cfg).
+  Voz: uv sync --extra voice ; uv run jarvis voz instalar (baja ~600 MB: preguntale antes a Roman) ;
+  uv run jarvis voz probar
 - uv run pytest -m live   (API real: solo si te lo pido)
 
 ## Reglas del kernel
