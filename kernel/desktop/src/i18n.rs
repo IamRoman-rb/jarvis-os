@@ -319,6 +319,7 @@ static EN: &[(&str, &str)] = &[
     ("Documentos", "Documents"),
     ("Duplicar", "Duplicate"),
     ("ENLACES RÁPIDOS (WIN+X)", "QUICK LINKS (WIN+X)"),
+    ("ESCUCHAR", "LISTEN"),
     ("ESTADO", "STATUS"),
     ("Editor de texto", "Text editor"),
     ("Ejecutar (consola JARVIS)", "Run (JARVIS console)"),
@@ -334,6 +335,7 @@ static EN: &[(&str, &str)] = &[
         "El archivo es muy grande: se muestra el principio.",
         "The file is too big: showing the beginning.",
     ),
+    ("El cerebro no está conectado", "The brain is not connected"),
     (
         "El cerebro no está conectado.",
         "The brain is not connected.",
@@ -384,6 +386,10 @@ static EN: &[(&str, &str)] = &[
         "Type to search apps or the web",
     ),
     ("Escritorio nuevo", "New desktop"),
+    (
+        "Escucha el micrófono de la PC: decí \"JARVIS, ...\" o Win+J",
+        "Listens to the PC microphone: say \"JARVIS, ...\" or Win+J",
+    ),
     (
         "Ese botón necesita JavaScript.",
         "That button needs JavaScript.",
@@ -438,6 +444,10 @@ static EN: &[(&str, &str)] = &[
     ("HUD de JARVIS", "JARVIS HUD"),
     ("HUD oscuro", "Dark HUD"),
     (
+        "Hablá: la barra se tiene que mover",
+        "Speak: the bar should move",
+    ),
+    (
         "Hay cambios sin guardar: Ctrl+S guarda; cerrá de nuevo para descartarlos.",
         "There are unsaved changes: Ctrl+S saves; close again to discard them.",
     ),
@@ -457,6 +467,10 @@ static EN: &[(&str, &str)] = &[
     ("Instalar más programas", "Install more programs"),
     ("Invertir la rueda", "Invert the wheel"),
     ("JARVIS QUIERE HACER ESTO", "JARVIS WANTS TO DO THIS"),
+    (
+        "JARVIS escucha la próxima frase (como Win+J)",
+        "JARVIS listens to the next phrase (like Win+J)",
+    ),
     ("JARVIS · escritorio (Win+D)", "JARVIS · desktop (Win+D)"),
     (
         "JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER",
@@ -547,6 +561,8 @@ static EN: &[(&str, &str)] = &[
         "Menús, ventanas y Configuración (la terminal sigue en castellano)",
         "Menus, windows and Settings (the terminal stays in Spanish)",
     ),
+    ("Micrófono", "Microphone"),
+    ("Micrófono de JARVIS-OS", "JARVIS-OS microphone"),
     ("Minimizar", "Minimize"),
     (
         "Minimizar, maximizar y cerrar",
@@ -595,6 +611,7 @@ static EN: &[(&str, &str)] = &[
         "Nivel 3: para permitir hace falta un clic (Esc rechaza)",
         "Level 3: allowing takes a click (Esc rejects)",
     ),
+    ("Nivel de entrada", "Input level"),
     (
         "No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales.",
         "I don't understand that and the brain (Claude) is not connected: start JARVIS with \"cargo xtask run\", which launches it. Type \"ayuda\" for the local commands.",
@@ -615,6 +632,10 @@ static EN: &[(&str, &str)] = &[
     ),
     ("No hay nada copiado.", "Nothing has been copied."),
     ("No hay notificaciones nuevas.", "No new notifications."),
+    (
+        "No hay placa de sonido con entrada (en QEMU la agrega cargo xtask run)",
+        "No sound card with an input (in QEMU, cargo xtask run adds one)",
+    ),
     ("No hay ventanas abiertas.", "No open windows."),
     (
         "No se cerró la sesión: hay cambios sin guardar.",
@@ -665,6 +686,7 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Privacidad y seguridad", "Privacy & security"),
     ("Probando...", "Testing..."),
+    ("Probar", "Test"),
     ("Probar el parlante", "Test the speaker"),
     ("Probar la conexión", "Test the connection"),
     ("Procesador", "Processor"),
@@ -744,6 +766,10 @@ static EN: &[(&str, &str)] = &[
     ("Sin placa de red", "No network adapter"),
     ("Sin sensor térmico.", "No thermal sensor."),
     ("Sin título", "Untitled"),
+    (
+        "Sin voz: uv sync --extra voice y uv run jarvis voz instalar",
+        "No voice: uv sync --extra voice and uv run jarvis voz instalar",
+    ),
     ("Sincronización", "Sync"),
     ("Sistema", "System"),
     (
@@ -841,6 +867,7 @@ static EN: &[(&str, &str)] = &[
     ("Versión", "Version"),
     ("Violeta", "Violet"),
     ("Visor de imágenes", "Image viewer"),
+    ("Voz de JARVIS", "JARVIS voice"),
     ("Vuelve a arrancar la máquina", "Reboots the machine"),
     ("Win+Abajo", "Win+Down"),
     ("Win+Arriba", "Win+Up"),
@@ -852,11 +879,15 @@ static EN: &[(&str, &str)] = &[
     ("Win+Izq.", "Win+Left"),
     ("Zona horaria", "Time zone"),
     ("Zoom", "Zoom"),
+    ("activa", "on"),
+    ("apagada", "off"),
     ("archivo", "file"),
     ("archivo comprimido", "archive"),
     ("carpeta", "folder"),
     ("conectado", "connected"),
     ("código", "code"),
+    ("detectado, recibe audio", "detected, receiving audio"),
+    ("detectado, sin audio todavía", "detected, no audio yet"),
     ("do", "su"),
     ("en ejecución", "running"),
     (
@@ -864,13 +895,18 @@ static EN: &[(&str, &str)] = &[
         "on an Intel PC it is read from the CPU.",
     ),
     ("enviados", "sent"),
+    ("estéreo", "stereo"),
     ("imagen", "image"),
     ("ju", "th"),
     ("lu", "mo"),
     ("ma", "tu"),
     ("mi", "we"),
     ("minimizada", "minimized"),
+    ("mono", "mono"),
+    ("nivel", "level"),
+    ("no detectado", "not detected"),
     ("papelera", "trash"),
+    ("pico", "peak"),
     ("recibidos", "received"),
     ("sin conectar", "not connected"),
     ("sin disco", "no disk"),
@@ -1115,6 +1151,7 @@ static PT: &[(&str, &str)] = &[
     ("Documentos", "Documentos"),
     ("Duplicar", "Duplicar"),
     ("ENLACES RÁPIDOS (WIN+X)", "LINKS RÁPIDOS (WIN+X)"),
+    ("ESCUCHAR", "OUVIR"),
     ("ESTADO", "ESTADO"),
     ("Editor de texto", "Editor de texto"),
     ("Ejecutar (consola JARVIS)", "Executar (console JARVIS)"),
@@ -1129,6 +1166,10 @@ static PT: &[(&str, &str)] = &[
     (
         "El archivo es muy grande: se muestra el principio.",
         "O arquivo é muito grande: mostrando o começo.",
+    ),
+    (
+        "El cerebro no está conectado",
+        "O cérebro não está conectado",
     ),
     (
         "El cerebro no está conectado.",
@@ -1180,6 +1221,10 @@ static PT: &[(&str, &str)] = &[
         "Digite para buscar apps ou na web",
     ),
     ("Escritorio nuevo", "Nova área de trabalho"),
+    (
+        "Escucha el micrófono de la PC: decí \"JARVIS, ...\" o Win+J",
+        "Ouve o microfone do PC: diga \"JARVIS, ...\" ou Win+J",
+    ),
     (
         "Ese botón necesita JavaScript.",
         "Esse botão precisa de JavaScript.",
@@ -1234,6 +1279,10 @@ static PT: &[(&str, &str)] = &[
     ("HUD de JARVIS", "HUD do JARVIS"),
     ("HUD oscuro", "HUD escuro"),
     (
+        "Hablá: la barra se tiene que mover",
+        "Fale: a barra tem que se mexer",
+    ),
+    (
         "Hay cambios sin guardar: Ctrl+S guarda; cerrá de nuevo para descartarlos.",
         "Há alterações não salvas: Ctrl+S salva; feche de novo para descartá-las.",
     ),
@@ -1253,6 +1302,10 @@ static PT: &[(&str, &str)] = &[
     ("Instalar más programas", "Instalar mais programas"),
     ("Invertir la rueda", "Inverter a roda"),
     ("JARVIS QUIERE HACER ESTO", "JARVIS QUER FAZER ISTO"),
+    (
+        "JARVIS escucha la próxima frase (como Win+J)",
+        "JARVIS ouve a próxima frase (como Win+J)",
+    ),
     (
         "JARVIS · escritorio (Win+D)",
         "JARVIS · área de trabalho (Win+D)",
@@ -1352,6 +1405,8 @@ static PT: &[(&str, &str)] = &[
         "Menús, ventanas y Configuración (la terminal sigue en castellano)",
         "Menus, janelas e Configurações (o terminal continua em espanhol)",
     ),
+    ("Micrófono", "Microfone"),
+    ("Micrófono de JARVIS-OS", "Microfone do JARVIS-OS"),
     ("Minimizar", "Minimizar"),
     (
         "Minimizar, maximizar y cerrar",
@@ -1400,6 +1455,7 @@ static PT: &[(&str, &str)] = &[
         "Nivel 3: para permitir hace falta un clic (Esc rechaza)",
         "Nível 3: para permitir é preciso um clique (Esc recusa)",
     ),
+    ("Nivel de entrada", "Nível de entrada"),
     (
         "No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales.",
         "Não entendo isso e o cérebro (Claude) não está conectado: abra o JARVIS com \"cargo xtask run\", que o inicia. Digite \"ayuda\" para os comandos locais.",
@@ -1420,6 +1476,10 @@ static PT: &[(&str, &str)] = &[
     ),
     ("No hay nada copiado.", "Nada foi copiado."),
     ("No hay notificaciones nuevas.", "Nenhuma notificação nova."),
+    (
+        "No hay placa de sonido con entrada (en QEMU la agrega cargo xtask run)",
+        "Não há placa de som com entrada (no QEMU, cargo xtask run adiciona uma)",
+    ),
     ("No hay ventanas abiertas.", "Nenhuma janela aberta."),
     (
         "No se cerró la sesión: hay cambios sin guardar.",
@@ -1473,6 +1533,7 @@ static PT: &[(&str, &str)] = &[
     ("Pidiendo dirección (DHCP)...", "Pedindo endereço (DHCP)..."),
     ("Privacidad y seguridad", "Privacidade e segurança"),
     ("Probando...", "Testando..."),
+    ("Probar", "Testar"),
     ("Probar el parlante", "Testar o alto-falante"),
     ("Probar la conexión", "Testar a conexão"),
     ("Procesador", "Processador"),
@@ -1555,6 +1616,10 @@ static PT: &[(&str, &str)] = &[
     ("Sin placa de red", "Sem placa de rede"),
     ("Sin sensor térmico.", "Sem sensor térmico."),
     ("Sin título", "Sem título"),
+    (
+        "Sin voz: uv sync --extra voice y uv run jarvis voz instalar",
+        "Sem voz: uv sync --extra voice e uv run jarvis voz instalar",
+    ),
     ("Sincronización", "Sincronização"),
     ("Sistema", "Sistema"),
     (
@@ -1652,6 +1717,7 @@ static PT: &[(&str, &str)] = &[
     ("Versión", "Versão"),
     ("Violeta", "Violeta"),
     ("Visor de imágenes", "Visualizador de imagens"),
+    ("Voz de JARVIS", "Voz do JARVIS"),
     ("Vuelve a arrancar la máquina", "Reinicia a máquina"),
     ("Win+Abajo", "Win+Baixo"),
     ("Win+Arriba", "Win+Cima"),
@@ -1663,11 +1729,15 @@ static PT: &[(&str, &str)] = &[
     ("Win+Izq.", "Win+Esq."),
     ("Zona horaria", "Fuso horário"),
     ("Zoom", "Zoom"),
+    ("activa", "ativa"),
+    ("apagada", "desligada"),
     ("archivo", "arquivo"),
     ("archivo comprimido", "arquivo compactado"),
     ("carpeta", "pasta"),
     ("conectado", "conectado"),
     ("código", "código"),
+    ("detectado, recibe audio", "detectado, recebendo áudio"),
+    ("detectado, sin audio todavía", "detectado, sem áudio ainda"),
     ("do", "do"),
     ("en ejecución", "em execução"),
     (
@@ -1675,13 +1745,18 @@ static PT: &[(&str, &str)] = &[
         "num PC Intel é lido da CPU.",
     ),
     ("enviados", "enviados"),
+    ("estéreo", "estéreo"),
     ("imagen", "imagem"),
     ("ju", "qi"),
     ("lu", "se"),
     ("ma", "te"),
     ("mi", "qa"),
     ("minimizada", "minimizada"),
+    ("mono", "mono"),
+    ("nivel", "nível"),
+    ("no detectado", "não detectado"),
     ("papelera", "lixeira"),
+    ("pico", "pico"),
     ("recibidos", "recebidos"),
     ("sin conectar", "desconectado"),
     ("sin disco", "sem disco"),

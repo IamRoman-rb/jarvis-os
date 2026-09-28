@@ -52,6 +52,10 @@ pub struct SystemStats {
     pub sync_counts: (u32, u32),
     /// El cerebro (Claude, en el anfitrión) está conectado.
     pub brain_online: bool,
+    /// El cerebro tiene voz (micrófono y parlantes del anfitrión).
+    pub brain_voice: bool,
+    /// El micrófono de JARVIS-OS (virtio-sound), si el kernel encontró uno.
+    pub mic: Option<crate::audio::MicInfo>,
 }
 
 /// Últimos `N` valores (una muestra por segundo), para los gráficos.

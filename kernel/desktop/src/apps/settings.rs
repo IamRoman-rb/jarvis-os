@@ -57,9 +57,10 @@ pub enum Section {
     Security,
     Firewall,
     Sync,
+    Microphone,
 }
 
-pub const SECTIONS: [Section; 17] = [
+pub const SECTIONS: [Section; 18] = [
     Section::System,
     Section::Displays,
     Section::Personalization,
@@ -77,6 +78,7 @@ pub const SECTIONS: [Section; 17] = [
     Section::Security,
     Section::Firewall,
     Section::Sync,
+    Section::Microphone,
 ];
 
 impl Section {
@@ -99,6 +101,7 @@ impl Section {
             Section::Security => tr("Privacidad y seguridad"),
             Section::Firewall => tr("Firewall"),
             Section::Sync => tr("Sincronización"),
+            Section::Microphone => tr("Micrófono"),
         }
     }
 
@@ -121,6 +124,7 @@ impl Section {
             Section::Security => Icon::Lock,
             Section::Firewall => Icon::Globe,
             Section::Sync => Icon::Folder,
+            Section::Microphone => Icon::Mic,
         }
     }
 }
@@ -164,6 +168,7 @@ pub enum Opt {
     BraveDefault,
     BraveServer,
     SyncNewCode,
+    MicListen,
     SyncCode,
     SyncRelay,
     BraveToken,
@@ -688,6 +693,76 @@ impl Settings {
                         Button(tr("PROBAR"))
                     ),
                 ]
+            }
+            Section::Microphone => {
+                let (detail, value) = match &stats.mic {
+                    Some(m) => (
+                        format!(
+                            "{} · {} Hz · {}",
+                            m.device,
+                            m.rate,
+                            if m.channels == 1 {
+                                tr("mono")
+                            } else {
+                                tr("estéreo")
+                            }
+                        ),
+                        if m.receiving {
+                            tr("detectado, recibe audio")
+                        } else {
+                            tr("detectado, sin audio todavía")
+                        },
+                    ),
+                    None => (
+                        tr("No hay placa de sonido con entrada (en QEMU la agrega cargo xtask run)")
+                            .into(),
+                        tr("no detectado"),
+                    ),
+                };
+                let mut rows = alloc::vec![Row::new(
+                    Opt::Info,
+                    tr("Micrófono de JARVIS-OS"),
+                    detail,
+                    Value(value.into())
+                )];
+                if let Some(m) = &stats.mic {
+                    rows.push(Row::new(
+                        Opt::Info,
+                        tr("Nivel de entrada"),
+                        tr("Hablá: la barra se tiene que mover"),
+                        Usage(
+                            m.level as u32,
+                            format!("{} {} · {} {}", tr("nivel"), m.level, tr("pico"), m.peak),
+                        ),
+                    ));
+                }
+                let voice = if !stats.brain_online {
+                    tr("El cerebro no está conectado")
+                } else if stats.brain_voice {
+                    tr("Escucha el micrófono de la PC: decí \"JARVIS, ...\" o Win+J")
+                } else {
+                    tr("Sin voz: uv sync --extra voice y uv run jarvis voz instalar")
+                };
+                rows.push(Row::new(
+                    Opt::Info,
+                    tr("Voz de JARVIS"),
+                    String::from(voice),
+                    Value(
+                        if stats.brain_online && stats.brain_voice {
+                            tr("activa")
+                        } else {
+                            tr("apagada")
+                        }
+                        .into(),
+                    ),
+                ));
+                rows.push(Row::new(
+                    Opt::MicListen,
+                    tr("Probar"),
+                    tr("JARVIS escucha la próxima frase (como Win+J)"),
+                    Button(tr("ESCUCHAR")),
+                ));
+                rows
             }
             Section::Sync => {
                 use crate::sync::Status;
@@ -1514,6 +1589,10 @@ impl Settings {
             Opt::DisplayPrimary => c.display_primary = 1 - c.display_primary.min(1),
             Opt::Identify => {
                 ctx.out.identify = true;
+                return;
+            }
+            Opt::MicListen => {
+                ctx.out.brain.push(crate::brain::BrainOp::Listen);
                 return;
             }
             Opt::SyncNewCode => {

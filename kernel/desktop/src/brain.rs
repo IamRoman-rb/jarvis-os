@@ -86,6 +86,8 @@ pub struct BrainService {
     backoff: u64,
     next_id: u32,
     current: Option<u32>,
+    /// El cerebro tiene voz (lo dice en `listo`).
+    pub voice: bool,
     /// La respuesta en curso (para la esfera y el mensaje del escritorio).
     pub answer: String,
     pub status: Status,
@@ -105,6 +107,7 @@ impl Default for BrainService {
             backoff: 1000,
             next_id: 0,
             current: None,
+            voice: false,
             answer: String::new(),
             status: Status::Off,
             logs: Vec::new(),
@@ -308,6 +311,7 @@ impl BrainService {
         match t {
             "listo" => {
                 self.ready = true;
+                self.voice = matches!(msg.get("voz"), Some(Json::Bool(true)));
                 self.status = Status::Online;
                 self.backoff = 1000;
                 self.logs.push("CEREBRO_CONECTADO".into());
