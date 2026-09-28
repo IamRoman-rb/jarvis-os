@@ -434,6 +434,20 @@ firmware UEFI (OVMF en QEMU)
   así la tarea de la red no toca los puertos del CMOS a la vez que el reloj del escritorio. Sin
   hora válida o sin entropía suficiente, TLS no arranca: es preferible a aceptar certificados
   vencidos o usar claves adivinables.
+- **HTTPS directo** (`kernel/net`): el cliente TLS se sienta entre el socket de smoltcp y el
+  HTTP. Lo que llega por TCP entra a `receive` y sale descifrado (`take_plaintext`) hacia la
+  respuesta; lo que TLS quiere mandar (el ClientHello con el pedido ya encolado detrás, las
+  claves, el Finished) se junta en un buffer de salida y se manda **en la misma vuelta**: el
+  saludo son varias idas y vueltas, y esperar al siguiente `poll` las haría más lentas. El fin de
+  la respuesta es el `close_notify` o el FIN de TCP (muchos servidores no mandan el primero; el
+  HTTP dice su largo igual). Si TCP se corta antes de terminar el saludo, es un error. Las
+  imágenes y los nombres `.jarvis` siguen yendo al puente (las convierte; el repositorio vive
+  ahí), y el interruptor "HTTPS por el puente" de Configuración deja el camino viejo de
+  respaldo. El handshake corre en la tarea de la red, cuya pila pasó a 512 KiB. Un certificado
+  vencido o de una autoridad desconocida corta la descarga: la página de error lo dice y no hay
+  "continuar de todos modos". Se prueba en memoria (`net/tests/https.rs`: un servidor rustls con
+  *ring* sobre la placa loopback, con un certificado para 127.0.0.1) y contra sitios reales en
+  `cargo xtask test` con `JARVIS_TEST_INTERNET=1` (example.org llega; expired.badssl.com no).
 
 ### K9: multitarea
 - **Una tarea es una pila y un `rsp` guardado**. Cambiar de tarea (`jarvis_switch`, 14
@@ -734,7 +748,7 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K7** ✅ | **JARVIS con Claude** (ADR 0008): la consola le habla a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code) y la esfera pulsa con la respuesta ✅; acciones en JARVIS-OS con 3 niveles de permiso ✅; "abrí tal proyecto y seguí" ✅; **voz** con el micrófono y los parlantes del anfitrión (adelantada de K12) ✅; micrófono virtio-sound ✅; cuenta de Claude e inicio de sesión con Google desde Configuración ✅ | Protocolos, agentes, permisos, voz |
 | **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
 | **K9** ✅ | Multitarea: planificador con prioridades y desalojo, tareas del kernel con pila propia (escritorio, red, ociosa), disco y red por interrupciones | Cambio de contexto, sincronización |
-| K10 | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo; decodificadores PNG (propio) y JPEG (`zune-jpeg`) | Criptografía, certificados, compresión |
+| K10 | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo ✅; decodificadores PNG (propio) y JPEG (`zune-jpeg`) | Criptografía, certificados, compresión |
 | K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
 | K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |

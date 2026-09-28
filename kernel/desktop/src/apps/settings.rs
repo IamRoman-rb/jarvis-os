@@ -184,6 +184,7 @@ pub enum Opt {
     Search,
     LightPages,
     Images,
+    HttpsBridge,
     Reader,
     Sounds,
     TestSound,
@@ -688,10 +689,10 @@ impl Settings {
                         ))
                     ),
                     Row::new(
-                        Opt::Info,
-                        "HTTPS",
-                        tr("El kernel todavía no tiene TLS: usa el puente del anfitrión"),
-                        Value("10.0.2.2:8118".into())
+                        Opt::HttpsBridge,
+                        tr("HTTPS por el puente"),
+                        tr("El kernel cifra él mismo; con esto, lo hace el anfitrión"),
+                        on(c.https_bridge)
                     ),
                     Row::new(
                         Opt::TestNet,
@@ -1705,6 +1706,7 @@ impl Settings {
             }
             Opt::LightPages => c.light_pages = !c.light_pages,
             Opt::Images => c.load_images = !c.load_images,
+            Opt::HttpsBridge => c.https_bridge = !c.https_bridge,
             Opt::Reader => c.reader_mode = !c.reader_mode,
             Opt::Sounds => c.sounds = !c.sounds,
             Opt::TestSound => {

@@ -87,8 +87,7 @@ pub fn init() -> Report {
     }
 }
 
-/// La configuración de los clientes TLS, si `init` pudo armarla.
-#[allow(dead_code)] // la usa la red (siguiente etapa de K10)
+/// La configuración de los clientes TLS, si `init` pudo armarla (la usa la tarea de la red).
 pub fn config() -> Option<Arc<ClientConfig>> {
     CONFIG.get().cloned()
 }

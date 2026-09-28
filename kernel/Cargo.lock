@@ -889,6 +889,8 @@ name = "jarvis-net"
 version = "0.1.0"
 dependencies = [
  "jarvis-desktop",
+ "jarvis-tls",
+ "rustls",
  "smoltcp",
 ]
 

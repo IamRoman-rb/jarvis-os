@@ -4,10 +4,12 @@
 //! redirecciones (301, 302…) las maneja [`Fetch`]: dice a dónde conectarse y, con cada
 //! respuesta, si terminó o hay que ir a otra dirección.
 //!
-//! HTTPS: el cifrado TLS todavía no está en el kernel. Esas páginas se piden a un **puente en el
-//! anfitrión** (lo levanta `cargo xtask run`), con la dirección completa en el pedido, como a
-//! un proxy HTTP: `GET https://sitio/camino HTTP/1.1`. El puente hace el TLS y devuelve la
-//! respuesta en texto plano.
+//! HTTPS: desde K10 el kernel hace el TLS él mismo ([`Target::Tls`], ADR 0009). Si no puede (sin
+//! entropía o sin hora) o si el usuario lo eligió en Configuración, esas páginas se piden a un
+//! **puente en el anfitrión** (lo levanta `cargo xtask run`), con la dirección completa en el
+//! pedido, como a un proxy HTTP: `GET https://sitio/camino HTTP/1.1`. El puente hace el TLS y
+//! devuelve la respuesta en texto plano. Las imágenes y los nombres `.jarvis` van siempre al
+//! puente (las convierte a BMP; el repositorio de paquetes vive ahí).
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -37,7 +39,10 @@ pub fn max_body(kind: FetchKind) -> usize {
 pub enum Target {
     /// Directo al servidor (HTTP): hay que resolver el nombre con DNS.
     Direct { host: String, port: u16 },
-    /// Al puente del anfitrión (HTTPS).
+    /// Directo al servidor, con TLS (HTTPS hecho por el kernel): `host` es el nombre que tiene que
+    /// estar en el certificado.
+    Tls { host: String, port: u16 },
+    /// Al puente del anfitrión (HTTPS de respaldo, imágenes y `.jarvis`).
     Proxy,
 }
 
@@ -179,6 +184,8 @@ fn dechunk(mut b: &[u8]) -> Result<Vec<u8>, String> {
 pub struct Fetch {
     pub url: Url,
     pub kind: FetchKind,
+    /// El kernel hace el TLS (si no, HTTPS va por el puente).
+    pub tls: bool,
     redirects: u32,
 }
 
@@ -194,11 +201,17 @@ impl Fetch {
     }
 
     pub fn start_kind(url: &str, kind: FetchKind) -> (Fetch, Step) {
+        Self::start_with(url, kind, false)
+    }
+
+    /// Con `tls`, el HTTPS lo hace el kernel ([`Target::Tls`]) en vez del puente.
+    pub fn start_with(url: &str, kind: FetchKind, tls: bool) -> (Fetch, Step) {
         match Url::parse(url) {
             Some(u) => {
                 let f = Fetch {
                     url: u,
                     kind,
+                    tls,
                     redirects: 0,
                 };
                 let step = f.connect();
@@ -213,6 +226,7 @@ impl Fetch {
                         path: String::new(),
                     },
                     kind,
+                    tls,
                     redirects: 0,
                 },
                 Step::Failed(format!("dirección inválida: {url}")),
@@ -227,6 +241,13 @@ impl Fetch {
         match self.url.scheme {
             Scheme::Http if !bridge => Step::Connect(Connect {
                 target: Target::Direct {
+                    host: self.url.host.clone(),
+                    port: self.url.port,
+                },
+                request: request_kind(&self.url, false, self.kind),
+            }),
+            Scheme::Https if self.tls && !bridge => Step::Connect(Connect {
+                target: Target::Tls {
                     host: self.url.host.clone(),
                     port: self.url.port,
                 },
@@ -286,6 +307,28 @@ mod tests {
         assert_eq!(parse_response(raw).unwrap().body, b"JARVIS");
         assert!(parse_response(b"basura").is_err());
         assert!(parse_response(b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\nxx").is_err());
+    }
+
+    #[test]
+    fn https_con_tls_propio_va_directo() {
+        let (_, step) = Fetch::start_with("https://example.com/a", FetchKind::Page, true);
+        let Step::Connect(c) = step else { panic!() };
+        assert_eq!(
+            c.target,
+            Target::Tls {
+                host: "example.com".into(),
+                port: 443
+            }
+        );
+        // Pedido de servidor común, no de proxy.
+        assert!(c.request.starts_with(b"GET /a HTTP/1.1\r\n"));
+        // Las imágenes y los nombres .jarvis siguen yendo al puente.
+        let (_, step) = Fetch::start_with("https://example.com/a.png", FetchKind::Image, true);
+        let Step::Connect(c) = step else { panic!() };
+        assert_eq!(c.target, Target::Proxy);
+        let (_, step) = Fetch::start_with("https://paquetes.jarvis/x", FetchKind::Page, true);
+        let Step::Connect(c) = step else { panic!() };
+        assert_eq!(c.target, Target::Proxy);
     }
 
     #[test]

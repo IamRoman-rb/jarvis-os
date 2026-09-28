@@ -531,6 +531,7 @@ fn run(
                 );
             }
         }
+        nettask::set_https_bridge(desktop.config().https_bridge);
         // Un solo aviso por cuadro a la tarea de la red (si hubo pedidos).
         nettask::kick();
         // Otro reparto de los monitores (Win+P, Configuración → Pantallas).

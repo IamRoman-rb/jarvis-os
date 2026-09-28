@@ -364,8 +364,8 @@ static EN: &[(&str, &str)] = &[
     ("El doble de tamaño", "Twice the size"),
     ("El foco sigue al mouse", "Focus follows mouse"),
     (
-        "El kernel todavía no tiene TLS: usa el puente del anfitrión",
-        "The kernel has no TLS yet: it uses the host bridge",
+        "El kernel cifra él mismo; con esto, lo hace el anfitrión",
+        "The kernel encrypts by itself; with this on, the host does it",
     ),
     (
         "El mismo en las dos máquinas (vacío = no sincroniza)",
@@ -459,6 +459,7 @@ static EN: &[(&str, &str)] = &[
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "CPU, memory, disk and network charts at the bottom left",
     ),
+    ("HTTPS por el puente", "HTTPS through the bridge"),
     ("HUD de JARVIS", "JARVIS HUD"),
     ("HUD oscuro", "Dark HUD"),
     (
@@ -1233,8 +1234,8 @@ static PT: &[(&str, &str)] = &[
     ("El doble de tamaño", "O dobro do tamanho"),
     ("El foco sigue al mouse", "O foco segue o mouse"),
     (
-        "El kernel todavía no tiene TLS: usa el puente del anfitrión",
-        "O kernel ainda não tem TLS: usa a ponte do anfitrião",
+        "El kernel cifra él mismo; con esto, lo hace el anfitrión",
+        "O kernel cifra sozinho; com isto, quem cifra é o anfitrião",
     ),
     (
         "El mismo en las dos máquinas (vacío = no sincroniza)",
@@ -1328,6 +1329,7 @@ static PT: &[(&str, &str)] = &[
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "Gráficos de CPU, memória, disco e rede no canto inferior esquerdo",
     ),
+    ("HTTPS por el puente", "HTTPS pela ponte"),
     ("HUD de JARVIS", "HUD do JARVIS"),
     ("HUD oscuro", "HUD escuro"),
     (

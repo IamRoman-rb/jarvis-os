@@ -107,8 +107,9 @@ Cerebro (desde la raíz):
     GET. Además del HTTPS, sirve el repositorio de paquetes (solo lectura, sin salir de
     kernel/paquetes/), convierte imágenes y SVG a BMP (ADR 0005) y pasa solo dos cabeceras más
     (las de la API de snaps, ADR 0006). Cambiar eso (otros métodos, otra interfaz, otras
-    carpetas, otras cabeceras) requiere un ADR. El HTTPS y la conversión se van con TLS y
-    decodificadores en el kernel (roadmap K10, ADR 0009 propuesto). El puente de Brave (xtask/src/brave.rs, puerto
+    carpetas, otras cabeceras) requiere un ADR. Desde K10 el HTTPS lo hace el kernel (ADR 0009);
+    el del puente queda de respaldo (Configuración → Red → "HTTPS por el puente", o si el kernel
+    no tiene entropía u hora). La conversión se va con los decodificadores en el kernel. El puente de Brave (xtask/src/brave.rs, puerto
     8119) y el relé de sincronización (puerto 8120) son servicios aparte con protocolo propio
     (ADR 0007): el de Brave escucha fuera de 127.0.0.1 solo con `--red` y un token; el relé
     nunca ve contenido sin cifrar. Las conexiones largas (`Outbox::connect`) pasan por el

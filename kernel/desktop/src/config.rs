@@ -239,6 +239,8 @@ pub struct Config {
     /// Páginas con fondo claro (como un navegador común) u oscuro (el estilo del HUD).
     pub light_pages: bool,
     pub load_images: bool,
+    /// HTTPS por el puente del anfitrión en vez del TLS del kernel (ADR 0009, punto 6).
+    pub https_bridge: bool,
     /// Modo lectura: sin menús ni formularios, solo el contenido.
     pub reader_mode: bool,
     // Brave (ADR 0007)
@@ -304,6 +306,7 @@ impl Default for Config {
             search: SearchEngine::DuckDuckGo,
             light_pages: true,
             load_images: true,
+            https_bridge: false,
             reader_mode: false,
             brave_server: "10.0.2.2:8119".into(),
             brave_token: String::new(),
@@ -424,6 +427,7 @@ impl Config {
                 }
                 "paginas_claras" => c.light_pages = yes(v),
                 "imagenes" => c.load_images = yes(v),
+                "https_puente" => c.https_bridge = yes(v),
                 "modo_lectura" => c.reader_mode = yes(v),
                 "brave_servidor" if parse_server(v).is_some() => c.brave_server = v.into(),
                 "brave_token" if v.len() <= 64 && !v.contains(char::is_whitespace) => {
@@ -505,6 +509,7 @@ impl Config {
             format!("buscador={}", self.search.name()),
             format!("paginas_claras={}", yn(self.light_pages)),
             format!("imagenes={}", yn(self.load_images)),
+            format!("https_puente={}", yn(self.https_bridge)),
             format!("modo_lectura={}", yn(self.reader_mode)),
             format!("brave_servidor={}", self.brave_server),
             format!("brave_token={}", self.brave_token),

@@ -810,6 +810,22 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey ret")?;
     s.wait_for("FIREWALL_BLOQUEO terminal example.com", STEP)?;
     s.wait_for("TERMINAL_FIN", STEP)?;
+    // K10: HTTPS con el TLS del kernel, contra sitios de verdad (hace falta internet, por eso
+    // es opcional). Uno válido tiene que llegar; uno con el certificado vencido, no.
+    if std::env::var_os("JARVIS_TEST_INTERNET").is_some() {
+        s.saw_or_wait("RED_HTTPS TLS del kernel", STEP)?;
+        s.type_text("wget https://example.org/")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("RED_RESPUESTA 200 https://example.org/", STEP)?;
+        s.wait_for("TERMINAL_FIN", STEP)?;
+        s.type_text("wget https://expired.badssl.com/")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for(
+            "RED_ERROR conexión segura: el certificado del sitio no es válido",
+            STEP,
+        )?;
+        s.wait_for("TERMINAL_FIN", STEP)?;
+    }
     // Configuración (Win+I).
     s.monitor("sendkey meta_l-i")?;
     s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
