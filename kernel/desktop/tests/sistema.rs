@@ -328,3 +328,61 @@ fn firewall_desde_la_configuracion_bloquea_una_app() {
             .any(|l| l.contains("FIREWALL_BLOQUEO navegador example.com"))
     );
 }
+
+#[test]
+fn la_barra_lateral_de_configuracion_se_desplaza_con_la_rueda() {
+    let mut t = Driver::new();
+    t.combo(Mods::WIN, Key::Char('i'));
+    let r = t.window(AppKind::Settings);
+    let x = r.x + 60;
+    // Dónde queda cada sección clickeando la barra lateral de abajo hacia arriba.
+    let sections_at = |t: &mut Driver| {
+        let mut seen = Vec::new();
+        for y in (r.y + 80..r.y + r.h - 4).step_by(17) {
+            t.click_at(x, y, 400);
+            seen.push(settings_section(t));
+        }
+        seen
+    };
+    let before = sections_at(&mut t);
+    assert!(
+        !before.iter().any(|s| s == "Sincronización"),
+        "con 17 secciones la última no entra: {before:?}"
+    );
+    t.move_to(x, r.y + 300, false);
+    t.wheel(3);
+    let after = sections_at(&mut t);
+    assert!(
+        after.iter().any(|s| s == "Sincronización"),
+        "después de la rueda se llega a la última: {after:?}"
+    );
+}
+
+#[test]
+fn los_botones_de_la_ventana_cambian_de_lado_desde_su_menu() {
+    use jarvis_desktop::input::{Event, MousePacket};
+    let mut t = Driver::new();
+    t.d.open(Launch::App(AppKind::Monitor), t.now, CLOCK);
+    let r = t.window(AppKind::Monitor);
+    assert!(!t.d.config().buttons_left);
+    // Clic derecho en la barra de título (lejos de los botones): el menú de la ventana.
+    t.move_to(r.x + r.w / 2, r.y + 12, false);
+    t.now += 10;
+    t.d.handle(
+        Event::Mouse(MousePacket {
+            right: true,
+            ..Default::default()
+        }),
+        t.now,
+        CLOCK,
+    );
+    t.d.handle(Event::Mouse(MousePacket::default()), t.now + 5, CLOCK);
+    assert_eq!(t.d.overlay_name(), "ventana");
+    // Maximizar, Minimizar, Acoplar ×2 y "Botones a la izquierda".
+    t.keys(&[Key::Down, Key::Down, Key::Down, Key::Down, Key::Enter]);
+    assert!(t.d.config().buttons_left, "quedan a la izquierda");
+    // Y con Alt+Espacio vuelven.
+    t.combo(Mods::ALT, Key::Char(' '));
+    t.keys(&[Key::Down, Key::Down, Key::Down, Key::Down, Key::Enter]);
+    assert!(!t.d.config().buttons_left);
+}

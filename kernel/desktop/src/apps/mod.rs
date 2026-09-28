@@ -249,6 +249,7 @@ impl App {
             App::Console(a) => a.wheel(delta),
             App::Terminal(a) => a.wheel(delta),
             App::Brave(a) => a.wheel(delta, ctx),
+            App::Settings(a) => a.wheel(delta, content, ctx.stats),
             _ => {}
         }
     }
@@ -296,13 +297,14 @@ impl App {
     /// ¿Quiere los movimientos del mouse y el "soltar"? (Brave: la página los necesita para
     /// los menús que se abren al pasar y para arrastrar.)
     pub fn wants_pointer(&self) -> bool {
-        matches!(self, App::Brave(_) | App::Editor(_))
+        matches!(self, App::Brave(_) | App::Editor(_) | App::Settings(_))
     }
 
     pub fn pointer<D: BlockDevice>(&mut self, p: Pointer, content: Rect, ctx: &mut Ctx<'_, D>) {
         match self {
             App::Brave(b) => b.pointer(p, content, ctx),
             App::Editor(e) => e.pointer(p, content),
+            App::Settings(s) => s.pointer(p),
             _ => {}
         }
     }

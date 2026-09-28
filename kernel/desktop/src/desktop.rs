@@ -1371,7 +1371,8 @@ impl<D: BlockDevice> Desktop<D> {
                         && let Some(w) = self.wm.get(id)
                     {
                         let at = (w.rect.x + 8, w.rect.y + 30);
-                        let menu = panels::window_menu(id, at, w.maximized);
+                        let menu =
+                            panels::window_menu(id, at, w.maximized, self.config.buttons_left);
                         self.set_overlay(Overlay::Menu(menu));
                     }
                 }
@@ -1448,6 +1449,11 @@ impl<D: BlockDevice> Desktop<D> {
             Action::Maximize(id) => self.wm.toggle_maximize(id),
             Action::Snap(id, side) => self.wm.snap(id, side),
             Action::Close(id) => self.close_window(id, now_ms, clock),
+            Action::ButtonsSide => {
+                let mut cfg = self.config.clone();
+                cfg.buttons_left = !cfg.buttons_left;
+                self.apply_config(cfg, now_ms);
+            }
         }
     }
 
@@ -2546,6 +2552,14 @@ impl<D: BlockDevice> Desktop<D> {
                 self.wm.activate(id);
             }
             match part {
+                // Clic derecho en la barra de título: el menú de la ventana (como Alt+Espacio).
+                Part::Title if right => {
+                    if let Some(w) = self.wm.get(id) {
+                        let menu =
+                            panels::window_menu(id, (x, y), w.maximized, self.config.buttons_left);
+                        self.set_overlay(Overlay::Menu(menu));
+                    }
+                }
                 Part::Title if double => match self.config.title_double {
                     TitleDouble::Maximize => self.wm.toggle_maximize(id),
                     TitleDouble::Minimize => self.wm.minimize(id),

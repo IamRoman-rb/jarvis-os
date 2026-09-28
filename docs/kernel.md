@@ -167,7 +167,7 @@ cargo test               # tests en el host: FAT32, red, escritorio, terminal y 
 | Win+P · Win+Shift+← / → | monitores: solo 1, duplicar, extender, solo 2 · llevar la ventana al otro monitor |
 | arrastrar contra un borde / esquina | mitad / cuarto (arriba: maximizar) |
 | Win+Ctrl+D · Win+Ctrl+← / → · Win+Ctrl+F4 | escritorio virtual nuevo · cambiar · cerrarlo |
-| Alt+Espacio | menú de la ventana (restaurar, minimizar, maximizar, acoplar, cerrar) |
+| Alt+Espacio · clic derecho en la barra de título | menú de la ventana (restaurar, minimizar, maximizar, acoplar, botones a la izquierda o derecha, cerrar) |
 | Alt+F4 · Ctrl+W | cerrar la ventana (Ctrl+W si la app no lo usa); sin ventanas, Alt+F4 ofrece apagar |
 | F11 | maximizar la ventana |
 | Win+X | enlaces rápidos (apps, monitor, configuración, terminal, apagar…) |
