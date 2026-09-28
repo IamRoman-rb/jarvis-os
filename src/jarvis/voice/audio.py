@@ -129,7 +129,8 @@ class Segmenter:
         self.total_ms = 0
 
     def threshold(self) -> float:
-        return max(400.0, self.noise * 3)
+        # Micrófonos con poca ganancia dan ~5 de ruido y ~150-600 hablando a distancia normal.
+        return max(120.0, self.noise * 4)
 
     def feed(self, pcm: bytes) -> bytes | None:
         """Agrega un pedazo; devuelve una frase completa cuando termina."""
@@ -153,3 +154,15 @@ class Segmenter:
             self.pre = bytearray()
             return phrase
         return None
+
+
+def jarvis_effect(pcm: bytes, rate: int) -> bytes:
+    """El toque de IA de la voz "jarvis": un eco muy corto (8 ms) que le da un brillo metálico
+    sin tapar las palabras. (El tono más grave sale de reproducirla un poco más lenta.)"""
+    a = array.array("h")
+    a.frombytes(pcm[: len(pcm) // 2 * 2])
+    d = rate * 8 // 1000
+    out = array.array("h", a)
+    for i in range(d, len(a)):
+        out[i] = max(-32768, min(32767, int(a[i] * 0.75 + a[i - d] * 0.35)))
+    return out.tobytes()

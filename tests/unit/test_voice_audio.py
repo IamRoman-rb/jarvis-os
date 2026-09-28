@@ -58,3 +58,13 @@ def test_el_segmentador_corta_en_el_silencio() -> None:
     for _ in range(6):
         out = out or s.feed(tone(100, 80))
     assert out is not None and len(out) > 0
+
+
+def test_el_efecto_de_ia_no_cambia_el_largo_ni_satura() -> None:
+    from jarvis.voice.audio import jarvis_effect
+
+    pcm = tone(30000, 100)
+    out = jarvis_effect(pcm, RATE)
+    assert len(out) == len(pcm)
+    assert out != pcm
+    assert max(abs(x) for x in array.array("h", out)) <= 32767

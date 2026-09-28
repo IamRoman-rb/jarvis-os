@@ -120,7 +120,11 @@ fn la_respuesta_llega_de_a_pedazos() {
 fn las_ordenes_locales_siguen_siendo_locales() {
     let mut b = connected();
     b.ask("abrir monitor");
-    assert!(b.sent.is_empty(), "no fue al cerebro: {}", b.sent);
+    assert!(!b.sent.contains("pedido"), "no fue al cerebro: {}", b.sent);
+    assert!(
+        b.sent.contains(r#""t":"decir""#),
+        "pero se dice en voz alta"
+    );
     assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
 }
 
@@ -280,7 +284,10 @@ fn lo_que_se_oye_se_trata_como_escrito() {
     // Una orden local, por voz.
     b.reply(r#"{"t":"oido","texto":"abrir monitor"}"#);
     assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
-    assert!(!b.sent.contains("pedido"), "las órdenes locales no van al cerebro");
+    assert!(
+        !b.sent.contains("pedido"),
+        "las órdenes locales no van al cerebro"
+    );
     assert!(
         b.sent.starts_with(r#"{"t":"decir","texto":"Abriendo"#),
         "pero la respuesta se dice en voz alta: {}",

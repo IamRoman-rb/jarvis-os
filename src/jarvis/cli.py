@@ -70,11 +70,12 @@ def serve(
 
 async def start_voice() -> "VoiceHub | None":
     """La voz del anfitrión, si están las bibliotecas y los modelos (si no, sigue sin voz)."""
+    from jarvis.config import Config
     from jarvis.service.voicehub import VoiceHub
     from jarvis.voice.engine import Voice, VoiceUnavailableError
 
     try:
-        voice = await asyncio.to_thread(Voice)
+        voice = await asyncio.to_thread(Voice, Config.load().voz)
     except VoiceUnavailableError as e:
         logging.getLogger("jarvis.voz").info("sin voz: %s", e)
         return None
@@ -96,12 +97,12 @@ def voz_instalar(si: bool = typer.Option(False, "--si", help="No preguntar.")) -
     """Baja los modelos de voz (~590 MB en total)."""
     import urllib.request
 
-    from jarvis.voice.engine import PIPER_URL, PIPER_VOICE, WHISPER_MODEL, models_dir
+    from jarvis.voice.engine import VOICES, WHISPER_MODEL, models_dir, voice_url
 
     typer.echo(
         "Voy a bajar:\n"
         f"  - Whisper {WHISPER_MODEL} (voz a texto): ~470 MB, de Hugging Face\n"
-        f"  - Piper {PIPER_VOICE} (texto a voz): ~115 MB, de Hugging Face\n"
+        "  - Piper, las voces jarvis (davefx) y daniela (texto a voz): ~180 MB, de Hugging Face\n"
         f"en {models_dir()} y en la caché de Hugging Face."
     )
     if not si and not typer.confirm("¿Sigo?"):
@@ -113,12 +114,44 @@ def voz_instalar(si: bool = typer.Option(False, "--si", help="No preguntar.")) -
         raise typer.Exit(2) from None
     WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
     models_dir().mkdir(parents=True, exist_ok=True)
-    for suffix in (".onnx", ".onnx.json"):
-        dest = models_dir() / f"{PIPER_VOICE}{suffix}"
-        if not dest.exists():
-            typer.echo(f"bajando {dest.name}...")
-            urllib.request.urlretrieve(PIPER_URL.removesuffix(".onnx") + suffix, dest)  # noqa: S310
+    for name, (model, _, _, _) in VOICES.items():
+        for suffix in (".onnx", ".onnx.json"):
+            dest = models_dir() / f"{model}{suffix}"
+            if not dest.exists():
+                typer.echo(f"bajando {dest.name} (voz {name})...")
+                url = voice_url(name).removesuffix(".onnx") + suffix
+                urllib.request.urlretrieve(url, dest)  # noqa: S310
     typer.echo('Listo: la próxima vez que arranques JARVIS, decí "JARVIS".')
+
+
+@voz_app.command("nivel")
+def voz_nivel(segundos: int = 10) -> None:
+    """Muestra el nivel del micrófono en vivo (para ver si llega tu voz)."""
+    import sounddevice as sd
+
+    from jarvis.voice.audio import FRAME, RATE, Segmenter, rms
+
+    seg = Segmenter()
+    typer.echo(f"micrófono: {sd.query_devices(kind='input')['name']} (hablá...)")
+    with sd.RawInputStream(samplerate=RATE, channels=1, dtype="int16", blocksize=FRAME) as mic:
+        for _ in range(segundos * RATE // FRAME):
+            data, _ = mic.read(FRAME)
+            e = rms(bytes(data))
+            seg.feed(bytes(data))
+            mark = "VOZ" if e >= seg.threshold() else "   "
+            typer.echo(
+                f"{mark} {int(e):6d} umbral {int(seg.threshold()):5d} "
+                + "#" * min(60, int(e) // 20)
+            )
+
+
+@voz_app.command("decir")
+def voz_decir(texto: str, voz: str = "") -> None:
+    """Dice un texto con la voz de JARVIS (para probar los parlantes y la voz)."""
+    from jarvis.config import Config
+    from jarvis.voice.engine import Voice
+
+    Voice(voz or Config.load().voz).speak(texto, lambda n: None)
 
 
 @voz_app.command("probar")

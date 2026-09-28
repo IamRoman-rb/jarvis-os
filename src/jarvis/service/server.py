@@ -156,9 +156,10 @@ class Session:
                 full += delta
                 await self.send({"t": "texto", "id": req_id, "delta": delta})
             await self.send({"t": "fin", "id": req_id})
-            # Si se lo pidieron con la voz, lo dice en voz alta.
+            # Con voz, JARVIS siempre contesta en voz alta (se lo hayan pedido hablando o
+            # escribiendo).
             voice = self.host.voice if self.host else None
-            if by_voice and voice is not None:
+            if voice is not None:
                 task = asyncio.create_task(voice.speak(full))
                 self._background.add(task)
                 task.add_done_callback(self._background.discard)

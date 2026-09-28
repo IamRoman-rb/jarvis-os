@@ -28,6 +28,8 @@ class Config:
     modelo: str | None = None
     proyectos: Path = field(default_factory=_default_projects)
     puerto: int = DEFAULT_PORT
+    #: La voz de JARVIS: "jarvis" (grave, con toque de IA) o "daniela".
+    voz: str = "jarvis"
 
     @staticmethod
     def path() -> Path:
@@ -50,4 +52,5 @@ class Config:
             modelo=modelo if isinstance(modelo, str) and modelo else None,
             proyectos=Path(proyectos) if isinstance(proyectos, str) else _default_projects(),
             puerto=puerto if isinstance(puerto, int) and 0 < puerto < 65536 else DEFAULT_PORT,
+            voz=str(data.get("voz", "jarvis")),
         )

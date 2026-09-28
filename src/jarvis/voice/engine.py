@@ -21,18 +21,27 @@ from typing import Any
 
 from platformdirs import user_data_path
 
-from jarvis.voice.audio import FRAME, RATE, Segmenter, level, split_wake
+from jarvis.voice.audio import FRAME, RATE, Segmenter, jarvis_effect, level, split_wake
 
 log = logging.getLogger("jarvis.voz")
 
 #: Cuánto espera la orden después de un "JARVIS" solo.
 ARMED_MS = 8_000
 WHISPER_MODEL = "small"
-PIPER_VOICE = "es_AR-daniela-high"
-PIPER_URL = (
-    "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_AR/daniela/high/"
-    f"{PIPER_VOICE}.onnx"
-)
+PIPER_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+#: Voces: nombre → (modelo de Piper, carpeta en el repositorio, efecto "IA", velocidad).
+#: "jarvis" es una voz masculina, grave y pausada con un leve brillo metálico: evoca a un
+#: asistente de película sin imitar la voz de ningún actor.
+VOICES: dict[str, tuple[str, str, bool, float]] = {
+    "jarvis": ("es_ES-davefx-medium", "es/es_ES/davefx/medium", True, 0.92),
+    "daniela": ("es_AR-daniela-high", "es/es_AR/daniela/high", False, 1.0),
+}
+DEFAULT_VOICE = "jarvis"
+
+
+def voice_url(name: str) -> str:
+    model, folder, _, _ = VOICES[name]
+    return f"{PIPER_BASE}{folder}/{model}.onnx"
 
 
 def models_dir() -> Path:
@@ -43,7 +52,7 @@ class VoiceUnavailableError(RuntimeError):
     """Faltan las bibliotecas o los modelos de voz."""
 
 
-def check() -> str | None:
+def check(voice: str = DEFAULT_VOICE) -> str | None:
     """`None` si la voz puede andar; si no, qué falta (para mostrarlo)."""
     try:
         import faster_whisper  # noqa: F401
@@ -51,7 +60,7 @@ def check() -> str | None:
         import sounddevice  # noqa: F401
     except ImportError as e:
         return f"falta {e.name}: corré `uv sync --extra voice`"
-    if not (models_dir() / f"{PIPER_VOICE}.onnx").exists():
+    if not (models_dir() / f"{VOICES.get(voice, VOICES[DEFAULT_VOICE])[0]}.onnx").exists():
         return "faltan los modelos: corré `uv run jarvis voz instalar`"
     return None
 
@@ -59,8 +68,9 @@ def check() -> str | None:
 class Voice:
     """Micrófono → texto, y texto → parlantes. Los callbacks se llaman desde el hilo del audio."""
 
-    def __init__(self) -> None:
-        problem = check()
+    def __init__(self, voice: str = DEFAULT_VOICE) -> None:
+        voice = voice if voice in VOICES else DEFAULT_VOICE
+        problem = check(voice)
         if problem:
             raise VoiceUnavailableError(problem)
         from faster_whisper import WhisperModel
@@ -73,7 +83,8 @@ class Voice:
             )
         except Exception:
             self._stt = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-        self._tts = PiperVoice.load(str(models_dir() / f"{PIPER_VOICE}.onnx"))
+        model, _, self._effect, self._speed = VOICES[voice]
+        self._tts = PiperVoice.load(str(models_dir() / f"{model}.onnx"))
         self._listen_now = threading.Event()
         self._speaking = threading.Event()
         self._stop = threading.Event()
@@ -107,6 +118,7 @@ class Voice:
                     on_listening(False)
                 if phrase is None:
                     continue
+                log.info("voz: frase de %d ms, transcribiendo", len(phrase) * 500 // RATE)
                 text = self.transcribe(phrase)
                 if not text:
                     continue
@@ -146,6 +158,10 @@ class Voice:
         self._speaking.set()
         try:
             rate, chunks = self._synthesize(text)
+            if self._effect:
+                chunks = [jarvis_effect(c, rate) for c in chunks]
+            # Más lenta = más grave y pausada.
+            rate = int(rate * self._speed)
             step = rate // 20 * 2  # 50 ms de audio de 16 bits
             with sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16") as out:
                 for pcm in chunks:
