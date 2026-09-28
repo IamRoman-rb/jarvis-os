@@ -49,16 +49,54 @@ pub fn fw_cfg() -> Option<String> {
     FW_CFG.lock().ok()?.clone()
 }
 
+/// Cierra los cerebros que quedaron de otra corrida (por ejemplo, si se cerró la terminal de
+/// golpe): son `jarvis serve` lanzados por xtask, nunca otro programa.
+fn kill_orphans() {
+    if !cfg!(windows) {
+        return;
+    }
+    let script = "Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'python.exe','jarvis.exe','uv.exe' -and $_.CommandLine -match 'jarvis(\\.exe)?\"? serve --puerto' } | ForEach-Object { $_.ProcessId }";
+    let Ok(out) = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+    else {
+        return;
+    };
+    for pid in String::from_utf8_lossy(&out.stdout).split_whitespace() {
+        if pid.parse::<u32>().is_ok() {
+            eprintln!("cerebro: cierro uno viejo que quedó abierto (proceso {pid})");
+            let _ = Command::new("taskkill")
+                .args(["/PID", pid, "/T", "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
+
+/// Un puerto libre, empezando por `port`.
+fn free_port(port: u16) -> u16 {
+    (port..port + 20)
+        .find(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok())
+        .unwrap_or(port)
+}
+
 /// Levanta `uv run jarvis serve` (con `simulated`, respuestas fijas sin Claude). Sin `uv` avisa
 /// y sigue: JARVIS arranca igual, con "CEREBRO sin conectar".
 pub fn start(port: u16, simulated: bool) -> Option<Brain> {
     let repo = workspace_root().parent()?.to_path_buf();
+    if !simulated {
+        kill_orphans();
+    }
+    let port = free_port(port);
     let token = token();
     let mut cmd = Command::new("uv");
     cmd.current_dir(&repo)
         .args(["run", "--quiet", "jarvis", "serve", "--puerto"])
         .arg(port.to_string())
         .env("JARVIS_CEREBRO_TOKEN", &token)
+        // Si xtask muere sin cerrarlo (Ctrl+C, cerrar la terminal), el cerebro se cierra solo.
+        .env("JARVIS_PADRE", std::process::id().to_string())
         .stdin(Stdio::null());
     if simulated {
         // Proyectos de mentira: el simulado no toca los de verdad.

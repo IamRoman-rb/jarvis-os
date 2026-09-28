@@ -12,6 +12,7 @@ import typer
 from jarvis import __version__
 
 if TYPE_CHECKING:
+    from jarvis.config import Config
     from jarvis.service.voicehub import VoiceHub
 
 app = typer.Typer(help="JARVIS: asistente de JARVIS-OS.", no_args_is_help=True)
@@ -46,7 +47,7 @@ def serve(
         typer.echo("falta JARVIS_CEREBRO_TOKEN (al menos 16 caracteres)", err=True)
         raise typer.Exit(2)
     config = Config.load()
-    logging.basicConfig(level=logging.INFO, format="cerebro: %(message)s")
+    setup_logging(config)
 
     def make_brain(session: Session) -> Brain:
         return ScriptedBrain(session) if simulado else ClaudeBrain(config, session)
@@ -60,12 +61,52 @@ def serve(
     host = Host(projects=root, make_project=make_project)
 
     async def main() -> None:
+        # Si muere el programa que lo lanzó (`cargo xtask run`), el cerebro también: si no,
+        # queda ocupando el puerto y la próxima vez JARVIS le habla a un cerebro viejo.
+        parent = os.environ.get("JARVIS_PADRE", "")
+        if parent.isdigit():
+            asyncio.get_running_loop().create_task(watch_parent(int(parent)))
         if not simulado and not sin_voz:
             host.voice = await start_voice()
         await run_server(puerto or config.puerto, token, make_brain, host)
 
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
+
+
+def setup_logging(config: "Config") -> None:
+    """A la consola y a `cerebro.log` (en la carpeta de logs del usuario), para diagnosticar
+    aunque la terminal que lo lanzó ya no esté."""
+    from logging.handlers import RotatingFileHandler
+
+    fmt = logging.Formatter("cerebro: %(message)s")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+    try:
+        config.log_dir().mkdir(parents=True, exist_ok=True)
+        f = RotatingFileHandler(
+            config.log_dir() / "cerebro.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"
+        )
+        f.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        root.addHandler(f)
+    except OSError:
+        pass
+    # El Agent SDK avisa que las tools de nivel 1 no pasan por can_use_tool: es a propósito.
+    import warnings
+
+    warnings.filterwarnings("ignore", message="can_use_tool will not be invoked")
+
+
+async def watch_parent(pid: int) -> None:
+    import psutil
+
+    while psutil.pid_exists(pid):  # noqa: ASYNC110 - no hay evento para "otro proceso murió"
+        await asyncio.sleep(2)
+    logging.getLogger("jarvis.serve").info("se cerró JARVIS (proceso %d): me cierro", pid)
+    os._exit(0)
 
 
 async def start_voice() -> "VoiceHub | None":
