@@ -345,10 +345,19 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     // informa el de su ventana al arrancar: 640×480). JARVIS_RESOLUCION=1920x1080 lo cambia.
     let monitors = monitor_count();
     let mut video = format!("virtio-vga,id=video,max_outputs={monitors}");
-    if !headless && let Some((w, h)) = host_resolution() {
+    // Sin ventana solo si se pide con JARVIS_RESOLUCION (así los tests siguen en 1280×800).
+    let forced = env::var("JARVIS_RESOLUCION").is_ok();
+    if (!headless || forced)
+        && let Some((w, h)) = host_resolution()
+    {
         video.push_str(&format!(",xres={w},yres={h}"));
-        // La ventana se ajusta a la pantalla (Ctrl+Alt+F: pantalla completa).
-        cmd.args(["-display", "gtk,zoom-to-fit=on"]);
+        // GTK igual informa el tamaño de su ventana; el kernel lee esta (ver kernel/src/fw_cfg.rs).
+        cmd.arg("-fw_cfg")
+            .arg(format!("name=opt/jarvis/resolucion,string={w}x{h}"));
+        if !headless {
+            // La ventana se ajusta a la pantalla (Ctrl+Alt+F: pantalla completa).
+            cmd.args(["-display", "gtk,zoom-to-fit=on"]);
+        }
     }
     cmd.args(["-vga", "none", "-device", &video]);
     // Placa de red virtio-net con la red "user" de QEMU: DHCP (10.0.2.15), DNS (10.0.2.3) y

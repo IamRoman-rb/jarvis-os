@@ -21,6 +21,7 @@ extern crate alloc;
 mod allocator;
 mod cpu;
 mod display;
+mod fw_cfg;
 mod gdt;
 mod interrupts;
 mod keyboard;
@@ -231,6 +232,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             );
         }
         outputs = found.iter().map(|o| (o.width, o.height)).collect();
+        // La placa informa el tamaño de la ventana de QEMU al arrancar (640×480 con GTK): si el
+        // anfitrión pasó la resolución de su monitor, manda esa.
+        if let Some((w, h)) = fw_cfg::resolution() {
+            serial_println!("PANTALLA resolución del anfitrión {w}x{h}");
+            for o in &mut outputs {
+                *o = (w, h);
+            }
+        }
     }
 
     let mouse = mouse::init();
