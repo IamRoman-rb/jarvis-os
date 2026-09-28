@@ -28,10 +28,12 @@ mod device;
 mod dirent;
 mod error;
 mod fat32;
+mod format;
 mod time;
 
 pub use cache::BlockCache;
 pub use device::{BlockDevice, IoError, MemDisk, SECTOR_SIZE};
 pub use error::{FsError, Result};
 pub use fat32::{DirEntry, FileSystem};
+pub use format::format_fat32;
 pub use time::Timestamp;

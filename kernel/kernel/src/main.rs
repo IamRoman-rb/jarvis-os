@@ -47,7 +47,7 @@ use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::info::{MemoryRegionKind, PixelFormat as BootPixelFormat};
 use bootloader_api::{BootInfo, entry_point};
 use jarvis_desktop::{Desktop, Event, MouseDecoder, NetInfo, Power, SystemStats};
-use jarvis_fs::{BlockCache, FileSystem};
+use jarvis_fs::{BlockCache, BlockDevice, FileSystem, IoError, MemDisk};
 use jarvis_gfx::clock::{DateTime, StrBuf};
 use jarvis_gfx::{Canvas, Color, PixelFormat, text};
 use jarvis_net::Net;
@@ -66,7 +66,63 @@ const REPORT_MS: u64 = 10_000;
 /// Sectores del disco que se guardan en RAM (512 KiB).
 const DISK_CACHE_SECTORS: usize = 1024;
 
-type Disk = BlockCache<VirtioBlk>;
+/// Disco en RAM del modo en vivo (arranque desde la ISO, sin disco virtio): 48 MiB.
+const LIVE_DISK_BYTES: usize = 48 * 1024 * 1024;
+
+/// El disco del sistema: el virtio (con caché) o, en modo en vivo, uno en RAM.
+enum Disk {
+    Virtio(BlockCache<VirtioBlk>),
+    Ram(MemDisk),
+}
+
+impl BlockDevice for Disk {
+    fn sector_count(&self) -> u64 {
+        match self {
+            Disk::Virtio(d) => d.sector_count(),
+            Disk::Ram(d) => d.sector_count(),
+        }
+    }
+    fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), IoError> {
+        match self {
+            Disk::Virtio(d) => d.read(lba, buf),
+            Disk::Ram(d) => d.read(lba, buf),
+        }
+    }
+    fn write(&mut self, lba: u64, buf: &[u8]) -> Result<(), IoError> {
+        match self {
+            Disk::Virtio(d) => d.write(lba, buf),
+            Disk::Ram(d) => d.write(lba, buf),
+        }
+    }
+}
+
+/// Modo en vivo: un FAT32 nuevo en RAM con las carpetas de siempre. Lo que se guarde se pierde
+/// al apagar (hasta que haya drivers de disco reales para instalar, K13).
+fn live_disk() -> Option<FileSystem<Disk>> {
+    let mut ram = MemDisk::new(alloc::vec![0u8; LIVE_DISK_BYTES]);
+    jarvis_fs::format_fat32(&mut ram, "JARVIS VIVO").ok()?;
+    let mut fs = FileSystem::mount(Disk::Ram(ram)).ok()?;
+    let now = jarvis_fs::Timestamp::EPOCH;
+    for dir in [
+        "/Documentos",
+        "/Descargas",
+        "/Imágenes",
+        "/Música",
+        "/Papelera",
+        "/Sincronizado",
+        "/Sistema",
+    ] {
+        let _ = fs.mkdir(dir, now);
+    }
+    let _ = fs.write_file(
+        "/Documentos/Bienvenida.txt",
+        "JARVIS-OS en modo en vivo: lo que guardes se pierde al apagar.
+"
+        .as_bytes(),
+        now,
+    );
+    Some(fs)
+}
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
@@ -126,13 +182,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Disco: virtio-blk + caché de sectores + FAT32. Si no hay disco, el sistema arranca igual.
     let disk = VirtioBlk::init(phys_offset).and_then(|blk| {
-        match FileSystem::mount(BlockCache::new(blk, DISK_CACHE_SECTORS)) {
+        match FileSystem::mount(Disk::Virtio(BlockCache::new(blk, DISK_CACHE_SECTORS))) {
             Ok(fs) => Some(fs),
             Err(e) => {
                 serial_println!("disco: no se pudo montar: {}", e);
                 None
             }
         }
+    });
+    let disk = disk.or_else(|| {
+        serial_println!("disco: no hay; modo en vivo (FAT32 en RAM)");
+        let fs = live_disk();
+        if fs.is_some() {
+            serial_println!("MODO_EN_VIVO");
+        }
+        fs
     });
     if let Some(fs) = &disk {
         serial_println!(

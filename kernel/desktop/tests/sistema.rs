@@ -76,8 +76,10 @@ fn la_configuracion_se_lee_al_arrancar() {
 fn pin_de_bloqueo() {
     let mut t = Driver::new();
     t.combo(Mods::WIN, Key::Char('i'));
-    // Firewall es la última sección (RePág desde Sistema da la vuelta) y antes está
-    // Privacidad y seguridad.
+    // Sincronización es la última sección (RePág desde Sistema da la vuelta); antes están
+    // Firewall y Privacidad y seguridad.
+    t.key(Key::PageUp);
+    assert_eq!(settings_section(&t), "Sincronización");
     t.key(Key::PageUp);
     assert_eq!(settings_section(&t), "Firewall");
     t.key(Key::PageUp);

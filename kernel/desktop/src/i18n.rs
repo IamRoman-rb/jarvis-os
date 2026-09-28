@@ -154,6 +154,10 @@ static EN: &[(&str, &str)] = &[
     ("Animaciones", "Animations"),
     ("Animación al abrir y cerrar", "Open and close animation"),
     ("Anotar lo bloqueado", "Log what's blocked"),
+    (
+        "Apagada: generá un código acá o escribí el de la otra máquina",
+        "Off: generate a code here or type the other machine's",
+    ),
     ("Apagar", "Shut down"),
     ("Apagar o reiniciar", "Shut down or restart"),
     (
@@ -230,6 +234,7 @@ static EN: &[(&str, &str)] = &[
     ("Canal 2 del PIT (8254)", "PIT channel 2 (8254)"),
     ("Captura (Impr Pant)", "Screenshot (PrtSc)"),
     ("Carga cancelada.", "Loading canceled."),
+    ("Carpeta", "Folder"),
     ("Carpeta vacía", "Empty folder"),
     ("Cerrar", "Close"),
     ("Cerrar sesión", "Sign out"),
@@ -247,6 +252,12 @@ static EN: &[(&str, &str)] = &[
         "Colors of the whole system: windows, menus and the desktop",
     ),
     ("Con varios monitores", "With several monitors"),
+    (
+        "Conectada al relé, esperando a la otra máquina",
+        "Connected to the relay, waiting for the other machine",
+    ),
+    ("Conectada con", "Connected with"),
+    ("Conectando al relé...", "Connecting to the relay..."),
     ("Conexiones entrantes", "Incoming connections"),
     ("Conexiones salientes", "Outgoing connections"),
     ("Configuración", "Settings"),
@@ -267,6 +278,8 @@ static EN: &[(&str, &str)] = &[
         "Cuánto se mueve la página con cada paso",
         "How far the page moves with each step",
     ),
+    ("Código de emparejado", "Pairing code"),
+    ("Código nuevo", "New code"),
     ("DESINSTALAR", "UNINSTALL"),
     ("DETENER", "STOP"),
     ("DISCO", "DISK"),
@@ -287,6 +300,10 @@ static EN: &[(&str, &str)] = &[
     ("Desvanecer", "Fade"),
     ("Diciembre", "December"),
     ("Dirección física (MAC)", "Physical address (MAC)"),
+    (
+        "Dirección y puerto (cargo xtask relay; en QEMU, 10.0.2.2:8120)",
+        "Address and port (cargo xtask relay; in QEMU, 10.0.2.2:8120)",
+    ),
     (
         "Dirección y puerto (en QEMU el anfitrión es 10.0.2.2)",
         "Address and port (in QEMU the host is 10.0.2.2)",
@@ -324,6 +341,10 @@ static EN: &[(&str, &str)] = &[
     (
         "El kernel todavía no tiene TLS: usa el puente del anfitrión",
         "The kernel has no TLS yet: it uses the host bridge",
+    ),
+    (
+        "El mismo en las dos máquinas (vacío = no sincroniza)",
+        "The same on both machines (empty = no sync)",
     ),
     (
         "El nombre de cada ventana en su barra de título",
@@ -397,7 +418,12 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Fondo de escritorio", "Desktop background"),
     ("Formato de 24 horas", "24-hour format"),
+    ("GENERAR", "GENERATE"),
     ("GUARDAR COMO", "SAVE AS"),
+    (
+        "Generalo en una máquina y escribilo en la otra",
+        "Generate it on one machine and type it on the other",
+    ),
     (
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "CPU, memory, disk and network charts at the bottom left",
@@ -491,6 +517,10 @@ static EN: &[(&str, &str)] = &[
         "What you type in the bar that isn't an address",
     ),
     ("Lo que no dice ninguna regla", "What no rule mentions"),
+    (
+        "Lo que pongas acá aparece en las otras máquinas",
+        "What you put here shows up on the other machines",
+    ),
     ("Los da el servidor DHCP", "Given by the DHCP server"),
     ("MEMORIA", "MEMORY"),
     ("MEMORIA (HEAP DEL NÚCLEO)", "MEMORY (KERNEL HEAP)"),
@@ -637,6 +667,7 @@ static EN: &[(&str, &str)] = &[
     ("Red e Internet", "Network & Internet"),
     ("Reiniciar", "Restart"),
     ("Reloj 24 h", "24 h clock"),
+    ("Relé", "Relay"),
     (
         "Resolución que eligió el firmware (UEFI GOP)",
         "Resolution chosen by the firmware (UEFI GOP)",
@@ -674,6 +705,10 @@ static EN: &[(&str, &str)] = &[
         "Otherwise, 12 hours with a.m. / p.m.",
     ),
     ("Siempre", "Always"),
+    (
+        "Sin conexión con el relé (reintenta sola)",
+        "No connection to the relay (retries on its own)",
+    ),
     ("Sin disco", "No disk"),
     ("Sin placa de red", "No network adapter"),
     ("Sin sensor térmico.", "No thermal sensor."),
@@ -793,6 +828,7 @@ static EN: &[(&str, &str)] = &[
         "en una PC Intel se lee de la CPU.",
         "on an Intel PC it is read from the CPU.",
     ),
+    ("enviados", "sent"),
     ("imagen", "image"),
     ("ju", "th"),
     ("lu", "mo"),
@@ -800,6 +836,7 @@ static EN: &[(&str, &str)] = &[
     ("mi", "we"),
     ("minimizada", "minimized"),
     ("papelera", "trash"),
+    ("recibidos", "received"),
     ("sin conectar", "not connected"),
     ("sin disco", "no disk"),
     ("sin placa", "no adapter"),
@@ -862,6 +899,10 @@ static PT: &[(&str, &str)] = &[
     ("Animaciones", "Animações"),
     ("Animación al abrir y cerrar", "Animação ao abrir e fechar"),
     ("Anotar lo bloqueado", "Registrar o bloqueado"),
+    (
+        "Apagada: generá un código acá o escribí el de la otra máquina",
+        "Desligada: gere um código aqui ou digite o da outra máquina",
+    ),
     ("Apagar", "Desligar"),
     ("Apagar o reiniciar", "Desligar ou reiniciar"),
     (
@@ -950,6 +991,7 @@ static PT: &[(&str, &str)] = &[
     ("Canal 2 del PIT (8254)", "Canal 2 do PIT (8254)"),
     ("Captura (Impr Pant)", "Captura (PrtSc)"),
     ("Carga cancelada.", "Carregamento cancelado."),
+    ("Carpeta", "Pasta"),
     ("Carpeta vacía", "Pasta vazia"),
     ("Cerrar", "Fechar"),
     ("Cerrar sesión", "Sair"),
@@ -967,6 +1009,12 @@ static PT: &[(&str, &str)] = &[
         "Cores de todo o sistema: janelas, menus e a área de trabalho",
     ),
     ("Con varios monitores", "Com vários monitores"),
+    (
+        "Conectada al relé, esperando a la otra máquina",
+        "Conectada ao relé, esperando a outra máquina",
+    ),
+    ("Conectada con", "Conectada com"),
+    ("Conectando al relé...", "Conectando ao relé..."),
     ("Conexiones entrantes", "Conexões de entrada"),
     ("Conexiones salientes", "Conexões de saída"),
     ("Configuración", "Configurações"),
@@ -990,6 +1038,8 @@ static PT: &[(&str, &str)] = &[
         "Cuánto se mueve la página con cada paso",
         "Quanto a página se move a cada passo",
     ),
+    ("Código de emparejado", "Código de pareamento"),
+    ("Código nuevo", "Código novo"),
     ("DESINSTALAR", "DESINSTALAR"),
     ("DETENER", "PARAR"),
     ("DISCO", "DISCO"),
@@ -1010,6 +1060,10 @@ static PT: &[(&str, &str)] = &[
     ("Desvanecer", "Esmaecer"),
     ("Diciembre", "Dezembro"),
     ("Dirección física (MAC)", "Endereço físico (MAC)"),
+    (
+        "Dirección y puerto (cargo xtask relay; en QEMU, 10.0.2.2:8120)",
+        "Endereço e porta (cargo xtask relay; no QEMU, 10.0.2.2:8120)",
+    ),
     (
         "Dirección y puerto (en QEMU el anfitrión es 10.0.2.2)",
         "Endereço e porta (no QEMU o anfitrião é 10.0.2.2)",
@@ -1047,6 +1101,10 @@ static PT: &[(&str, &str)] = &[
     (
         "El kernel todavía no tiene TLS: usa el puente del anfitrión",
         "O kernel ainda não tem TLS: usa a ponte do anfitrião",
+    ),
+    (
+        "El mismo en las dos máquinas (vacío = no sincroniza)",
+        "O mesmo nas duas máquinas (vazio = não sincroniza)",
     ),
     (
         "El nombre de cada ventana en su barra de título",
@@ -1120,7 +1178,12 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Fondo de escritorio", "Papel de parede"),
     ("Formato de 24 horas", "Formato de 24 horas"),
+    ("GENERAR", "GERAR"),
     ("GUARDAR COMO", "SALVAR COMO"),
+    (
+        "Generalo en una máquina y escribilo en la otra",
+        "Gere em uma máquina e digite na outra",
+    ),
     (
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "Gráficos de CPU, memória, disco e rede no canto inferior esquerdo",
@@ -1222,6 +1285,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Lo que no dice ninguna regla",
         "O que nenhuma regra menciona",
+    ),
+    (
+        "Lo que pongas acá aparece en las otras máquinas",
+        "O que você colocar aqui aparece nas outras máquinas",
     ),
     ("Los da el servidor DHCP", "Fornecidos pelo servidor DHCP"),
     ("MEMORIA", "MEMÓRIA"),
@@ -1375,6 +1442,7 @@ static PT: &[(&str, &str)] = &[
     ("Red e Internet", "Rede e Internet"),
     ("Reiniciar", "Reiniciar"),
     ("Reloj 24 h", "Relógio 24 h"),
+    ("Relé", "Relé"),
     (
         "Resolución que eligió el firmware (UEFI GOP)",
         "Resolução escolhida pelo firmware (UEFI GOP)",
@@ -1412,6 +1480,10 @@ static PT: &[(&str, &str)] = &[
         "Se não, 12 horas com a.m. / p.m.",
     ),
     ("Siempre", "Sempre"),
+    (
+        "Sin conexión con el relé (reintenta sola)",
+        "Sem conexão com o relé (tenta de novo sozinha)",
+    ),
     ("Sin disco", "Sem disco"),
     ("Sin placa de red", "Sem placa de rede"),
     ("Sin sensor térmico.", "Sem sensor térmico."),
@@ -1531,6 +1603,7 @@ static PT: &[(&str, &str)] = &[
         "en una PC Intel se lee de la CPU.",
         "num PC Intel é lido da CPU.",
     ),
+    ("enviados", "enviados"),
     ("imagen", "imagem"),
     ("ju", "qi"),
     ("lu", "se"),
@@ -1538,6 +1611,7 @@ static PT: &[(&str, &str)] = &[
     ("mi", "qa"),
     ("minimizada", "minimizada"),
     ("papelera", "lixeira"),
+    ("recibidos", "recebidos"),
     ("sin conectar", "desconectado"),
     ("sin disco", "sem disco"),
     ("sin placa", "sem placa"),

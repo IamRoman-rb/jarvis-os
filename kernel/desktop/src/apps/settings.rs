@@ -56,9 +56,10 @@ pub enum Section {
     Storage,
     Security,
     Firewall,
+    Sync,
 }
 
-pub const SECTIONS: [Section; 16] = [
+pub const SECTIONS: [Section; 17] = [
     Section::System,
     Section::Displays,
     Section::Personalization,
@@ -75,6 +76,7 @@ pub const SECTIONS: [Section; 16] = [
     Section::Storage,
     Section::Security,
     Section::Firewall,
+    Section::Sync,
 ];
 
 impl Section {
@@ -96,6 +98,7 @@ impl Section {
             Section::Storage => tr("Almacenamiento"),
             Section::Security => tr("Privacidad y seguridad"),
             Section::Firewall => tr("Firewall"),
+            Section::Sync => tr("Sincronización"),
         }
     }
 
@@ -117,6 +120,7 @@ impl Section {
             Section::Storage => Icon::Folder,
             Section::Security => Icon::Lock,
             Section::Firewall => Icon::Globe,
+            Section::Sync => Icon::Folder,
         }
     }
 }
@@ -159,6 +163,9 @@ pub enum Opt {
     TestNet,
     BraveDefault,
     BraveServer,
+    SyncNewCode,
+    SyncCode,
+    SyncRelay,
     BraveToken,
     BraveHome,
     Homepage,
@@ -669,6 +676,60 @@ impl Settings {
                         tr("Probar la conexión"),
                         test,
                         Button(tr("PROBAR"))
+                    ),
+                ]
+            }
+            Section::Sync => {
+                use crate::sync::Status;
+                let state = match stats.sync {
+                    _ if c.sync_code.is_empty() => {
+                        tr("Apagada: generá un código acá o escribí el de la otra máquina").into()
+                    }
+                    Some(Status::Online) => match &stats.sync_peer {
+                        Some(p) => format!(
+                            "{} {p} · {} {} · {} {}",
+                            tr("Conectada con"),
+                            stats.sync_counts.0,
+                            tr("enviados"),
+                            stats.sync_counts.1,
+                            tr("recibidos")
+                        ),
+                        None => tr("Conectada al relé, esperando a la otra máquina").into(),
+                    },
+                    Some(Status::Connecting) => tr("Conectando al relé...").into(),
+                    _ => tr("Sin conexión con el relé (reintenta sola)").into(),
+                };
+                alloc::vec![
+                    Row::new(Opt::Info, tr("Estado"), state, Value(String::new())),
+                    Row::new(
+                        Opt::Info,
+                        tr("Carpeta"),
+                        tr("Lo que pongas acá aparece en las otras máquinas"),
+                        Value(crate::sync::DIR.into())
+                    ),
+                    Row::new(
+                        Opt::SyncCode,
+                        tr("Código de emparejado"),
+                        tr("El mismo en las dos máquinas (vacío = no sincroniza)"),
+                        Text {
+                            value: c.sync_code.clone(),
+                            secret: false
+                        }
+                    ),
+                    Row::new(
+                        Opt::SyncNewCode,
+                        tr("Código nuevo"),
+                        tr("Generalo en una máquina y escribilo en la otra"),
+                        Button(tr("GENERAR"))
+                    ),
+                    Row::new(
+                        Opt::SyncRelay,
+                        tr("Relé"),
+                        tr("Dirección y puerto (cargo xtask relay; en QEMU, 10.0.2.2:8120)"),
+                        Text {
+                            value: c.sync_relay.clone(),
+                            secret: false
+                        }
                     ),
                 ]
             }
@@ -1292,6 +1353,8 @@ impl Settings {
             | Opt::Pin
             | Opt::FwAddSite
             | Opt::BraveServer
+            | Opt::SyncCode
+            | Opt::SyncRelay
             | Opt::BraveToken
             | Opt::BraveHome => {
                 if delta == 0 {
@@ -1300,6 +1363,8 @@ impl Settings {
                         Opt::User => (c.user.clone(), 24),
                         Opt::Homepage => (c.homepage.clone(), 200),
                         Opt::BraveServer => (c.brave_server.clone(), 100),
+                        Opt::SyncCode => (c.sync_code.clone(), 29),
+                        Opt::SyncRelay => (c.sync_relay.clone(), 100),
                         Opt::BraveToken => (c.brave_token.clone(), 64),
                         Opt::BraveHome => (c.brave_home.clone(), 200),
                         Opt::FwAddSite => (String::new(), 100),
@@ -1374,6 +1439,18 @@ impl Settings {
             Opt::Identify => {
                 ctx.out.identify = true;
                 return;
+            }
+            Opt::SyncNewCode => {
+                // Al azar: la hora, el tiempo desde el arranque y el nombre de la máquina.
+                let seed = format!("{:?}{}{}", ctx.clock, ctx.now_ms, c.hostname);
+                let (a, b) = (
+                    jarvis_sync::hash(seed.as_bytes()),
+                    jarvis_sync::hash(format!("{seed}+").as_bytes()),
+                );
+                let mut r = [0u8; 20];
+                r[..16].copy_from_slice(&a);
+                r[16..].copy_from_slice(&b[..4]);
+                c.sync_code = jarvis_sync::pair::new_code(&r);
             }
             Opt::StatusPanel => c.status_panel = !c.status_panel,
             Opt::Zone => c.utc_offset = (step(c.utc_offset as i32 + 12, 27) - 12) as i8,
@@ -1516,6 +1593,18 @@ impl Settings {
             }
             Opt::Homepage if !v.is_empty() => {
                 self.cfg.homepage = v;
+                true
+            }
+            Opt::SyncCode if v.trim().is_empty() => {
+                self.cfg.sync_code = String::new();
+                true
+            }
+            Opt::SyncCode if jarvis_sync::pair::normalize(&v).is_some() => {
+                self.cfg.sync_code = v.trim().to_uppercase();
+                true
+            }
+            Opt::SyncRelay if crate::config::parse_server(&v).is_some() => {
+                self.cfg.sync_relay = v;
                 true
             }
             Opt::BraveServer if crate::config::parse_server(&v).is_some() => {

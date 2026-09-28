@@ -358,6 +358,8 @@ pub struct Desktop<D: BlockDevice> {
     pin_wrong: bool,
     /// La última hora que llegó (para lo que pasa fuera de un evento, como una respuesta de red).
     last_clock: Option<DateTime>,
+    /// La carpeta /Sincronizado con otras máquinas (ADR 0007).
+    pub(crate) sync: crate::sync::SyncService,
     last_now: u64,
     /// Historial de avisos para el centro de notificaciones: (texto, error, hora).
     notices: Vec<(String, bool, String)>,
@@ -488,6 +490,7 @@ impl<D: BlockDevice> Desktop<D> {
             fw_blocked: Vec::new(),
             fw_blocked_streams: Vec::new(),
             last_clock: None,
+            sync: Default::default(),
             last_now: 0,
         }
     }
@@ -737,6 +740,21 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// Una conexión larga cambió (el kernel la atiende): se le avisa a quien la abrió.
     pub fn stream_event(&mut self, id: u32, event: StreamEvent) {
+        if let Some(fs) = self.fs.as_mut()
+            && self.sync.stream_event(
+                id,
+                &event,
+                fs,
+                self.last_now,
+                self.last_clock,
+                &mut self.out,
+            )
+        {
+            self.logs.append(&mut self.sync.logs);
+            let clock = self.last_clock;
+            self.process_outbox(self.last_now, clock);
+            return;
+        }
         match &event {
             StreamEvent::Connected => self.logs.push(format!("CONEXION_ABIERTA {id}")),
             StreamEvent::Closed(None) => self.logs.push(format!("CONEXION_CERRADA {id}")),
@@ -763,9 +781,25 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// El kernel mide la máquina una vez por segundo.
     pub fn set_stats(&mut self, stats: SystemStats) {
+        if let Some(fs) = self.fs.as_mut() {
+            let (code, relay, name) = (
+                self.config.sync_code.clone(),
+                self.config.sync_relay.clone(),
+                self.config.hostname.clone(),
+            );
+            let (now, clock) = (self.last_now, self.last_clock);
+            self.sync
+                .configure(&code, &relay, &name, fs, now, clock, &mut self.out);
+            self.sync.tick(fs, now, clock, &mut self.out);
+            self.logs.append(&mut self.sync.logs);
+            self.process_outbox(now, clock);
+        }
         self.history.push(&stats);
         self.stats = stats;
         self.stats.displays = self.outputs.clone();
+        self.stats.sync = Some(self.sync.status);
+        self.stats.sync_peer = self.sync.peer.clone();
+        self.stats.sync_counts = (self.sync.sent, self.sync.received);
         self.stats_version += 1;
         for s in &mut self.slots {
             if s.app.kind() == AppKind::Monitor {

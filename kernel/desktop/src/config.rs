@@ -249,6 +249,11 @@ pub struct Config {
     pub brave_home: String,
     /// El navegador principal es Brave (si no, el navegador simple de JARVIS).
     pub brave_default: bool,
+    // Sincronización (ADR 0007)
+    /// El código de emparejado (vacío = no sincroniza). El mismo en las dos máquinas.
+    pub sync_code: String,
+    /// Dónde está el relé: `host:puerto`.
+    pub sync_relay: String,
     // Cuentas y seguridad
     pub user: String,
     pub hostname: String,
@@ -304,6 +309,8 @@ impl Default for Config {
             brave_token: String::new(),
             brave_home: "https://search.brave.com/".into(),
             brave_default: true,
+            sync_code: String::new(),
+            sync_relay: "10.0.2.2:8120".into(),
             user: "roman".into(),
             hostname: "jarvis".into(),
             pin: String::new(),
@@ -424,6 +431,10 @@ impl Config {
                 }
                 "brave_inicio" if !v.is_empty() => c.brave_home = v.into(),
                 "navegador_principal" => c.brave_default = v != "simple",
+                "sync_codigo" if v.is_empty() || jarvis_sync::pair::normalize(v).is_some() => {
+                    c.sync_code = v.into()
+                }
+                "sync_rele" if parse_server(v).is_some() => c.sync_relay = v.into(),
                 "usuario" if valid_name(v) => c.user = v.into(),
                 "equipo" if valid_name(v) => c.hostname = v.into(),
                 "pin" if v.chars().all(|ch| ch.is_ascii_digit()) && v.len() <= 8 => {
@@ -506,6 +517,8 @@ impl Config {
                     "simple"
                 }
             ),
+            format!("sync_codigo={}", self.sync_code),
+            format!("sync_rele={}", self.sync_relay),
             format!("usuario={}", self.user),
             format!("equipo={}", self.hostname),
             format!("pin={}", self.pin),
@@ -616,6 +629,8 @@ mod tests {
             brave_server: "brave.casa.lan:9000".into(),
             brave_token: "secreto123".into(),
             brave_default: false,
+            sync_code: "ABCDE-FGHJK-LMNPQ-RSTUV".into(),
+            sync_relay: "rele.ejemplo.com:443".into(),
             theme: ThemeKind::Light,
             accent: 3,
             ui_large: true,
