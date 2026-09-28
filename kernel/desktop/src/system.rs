@@ -46,6 +46,10 @@ pub struct SystemStats {
     pub temp_c: Option<u8>,
     /// Tamaño de cada monitor que tiene la placa de video (vacío = solo la pantalla del firmware).
     pub displays: Vec<(u32, u32)>,
+    /// La sincronización: estado, la otra máquina y cuántos archivos fueron y vinieron.
+    pub sync: Option<crate::sync::Status>,
+    pub sync_peer: Option<String>,
+    pub sync_counts: (u32, u32),
 }
 
 /// Últimos `N` valores (una muestra por segundo), para los gráficos.

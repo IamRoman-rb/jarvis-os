@@ -40,6 +40,8 @@ pub enum Action {
     Snap(WinId, Side),
     Close(WinId),
     NewDesktop,
+    /// Pasar los botones de la barra de título al otro lado (para todas las ventanas).
+    ButtonsSide,
 }
 
 #[derive(Clone, Debug)]
@@ -189,7 +191,7 @@ pub fn quick_links() -> Menu {
 }
 
 /// Alt+Espacio: el menú de la ventana.
-pub fn window_menu(id: WinId, at: (i32, i32), maximized: bool) -> Menu {
+pub fn window_menu(id: WinId, at: (i32, i32), maximized: bool, buttons_left: bool) -> Menu {
     let mut items = Vec::new();
     if maximized {
         items.push(MenuItem::new(
@@ -223,6 +225,16 @@ pub fn window_menu(id: WinId, at: (i32, i32), maximized: bool) -> Menu {
         tr("Win+Der."),
         None,
         Action::Snap(id, Side::Right),
+    ));
+    items.push(MenuItem::new(
+        if buttons_left {
+            tr("Botones a la derecha")
+        } else {
+            tr("Botones a la izquierda")
+        },
+        "",
+        None,
+        Action::ButtonsSide,
     ));
     items.push(MenuItem::new(
         tr("Cerrar"),

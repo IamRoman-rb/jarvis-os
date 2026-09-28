@@ -358,6 +358,8 @@ pub struct Desktop<D: BlockDevice> {
     pin_wrong: bool,
     /// La última hora que llegó (para lo que pasa fuera de un evento, como una respuesta de red).
     last_clock: Option<DateTime>,
+    /// La carpeta /Sincronizado con otras máquinas (ADR 0007).
+    pub(crate) sync: crate::sync::SyncService,
     last_now: u64,
     /// Historial de avisos para el centro de notificaciones: (texto, error, hora).
     notices: Vec<(String, bool, String)>,
@@ -488,6 +490,7 @@ impl<D: BlockDevice> Desktop<D> {
             fw_blocked: Vec::new(),
             fw_blocked_streams: Vec::new(),
             last_clock: None,
+            sync: Default::default(),
             last_now: 0,
         }
     }
@@ -737,6 +740,21 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// Una conexión larga cambió (el kernel la atiende): se le avisa a quien la abrió.
     pub fn stream_event(&mut self, id: u32, event: StreamEvent) {
+        if let Some(fs) = self.fs.as_mut()
+            && self.sync.stream_event(
+                id,
+                &event,
+                fs,
+                self.last_now,
+                self.last_clock,
+                &mut self.out,
+            )
+        {
+            self.logs.append(&mut self.sync.logs);
+            let clock = self.last_clock;
+            self.process_outbox(self.last_now, clock);
+            return;
+        }
         match &event {
             StreamEvent::Connected => self.logs.push(format!("CONEXION_ABIERTA {id}")),
             StreamEvent::Closed(None) => self.logs.push(format!("CONEXION_CERRADA {id}")),
@@ -763,9 +781,25 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// El kernel mide la máquina una vez por segundo.
     pub fn set_stats(&mut self, stats: SystemStats) {
+        if let Some(fs) = self.fs.as_mut() {
+            let (code, relay, name) = (
+                self.config.sync_code.clone(),
+                self.config.sync_relay.clone(),
+                self.config.hostname.clone(),
+            );
+            let (now, clock) = (self.last_now, self.last_clock);
+            self.sync
+                .configure(&code, &relay, &name, fs, now, clock, &mut self.out);
+            self.sync.tick(fs, now, clock, &mut self.out);
+            self.logs.append(&mut self.sync.logs);
+            self.process_outbox(now, clock);
+        }
         self.history.push(&stats);
         self.stats = stats;
         self.stats.displays = self.outputs.clone();
+        self.stats.sync = Some(self.sync.status);
+        self.stats.sync_peer = self.sync.peer.clone();
+        self.stats.sync_counts = (self.sync.sent, self.sync.received);
         self.stats_version += 1;
         for s in &mut self.slots {
             if s.app.kind() == AppKind::Monitor {
@@ -1337,7 +1371,8 @@ impl<D: BlockDevice> Desktop<D> {
                         && let Some(w) = self.wm.get(id)
                     {
                         let at = (w.rect.x + 8, w.rect.y + 30);
-                        let menu = panels::window_menu(id, at, w.maximized);
+                        let menu =
+                            panels::window_menu(id, at, w.maximized, self.config.buttons_left);
                         self.set_overlay(Overlay::Menu(menu));
                     }
                 }
@@ -1414,6 +1449,11 @@ impl<D: BlockDevice> Desktop<D> {
             Action::Maximize(id) => self.wm.toggle_maximize(id),
             Action::Snap(id, side) => self.wm.snap(id, side),
             Action::Close(id) => self.close_window(id, now_ms, clock),
+            Action::ButtonsSide => {
+                let mut cfg = self.config.clone();
+                cfg.buttons_left = !cfg.buttons_left;
+                self.apply_config(cfg, now_ms);
+            }
         }
     }
 
@@ -2512,6 +2552,14 @@ impl<D: BlockDevice> Desktop<D> {
                 self.wm.activate(id);
             }
             match part {
+                // Clic derecho en la barra de título: el menú de la ventana (como Alt+Espacio).
+                Part::Title if right => {
+                    if let Some(w) = self.wm.get(id) {
+                        let menu =
+                            panels::window_menu(id, (x, y), w.maximized, self.config.buttons_left);
+                        self.set_overlay(Overlay::Menu(menu));
+                    }
+                }
                 Part::Title if double => match self.config.title_double {
                     TitleDouble::Maximize => self.wm.toggle_maximize(id),
                     TitleDouble::Minimize => self.wm.minimize(id),

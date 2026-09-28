@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
+
+# El kernel compila sin SSE/AVX: el cifrado de la sincronización (ADR 0007) usa las versiones por
+# software de ChaCha20 y Poly1305 (las de AVX2 no compilan para este target).
+[target.x86_64-unknown-none]
+rustflags = ["--cfg", "chacha20_force_soft", "--cfg", "poly1305_force_soft"]

@@ -21,7 +21,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod brave;
+mod iso;
 mod puente;
+mod sincro;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -42,8 +44,12 @@ fn main() -> ExitCode {
         }
         "brave" => brave_cmd(),
         "pantallas" => build().and_then(|img| screens(&img, &fresh_disk("disco-pantallas.img")?)),
+        "relay" => sincro::relay_cmd(),
+        "iso" => build().and_then(|img| iso_cmd(&img)),
+        "run2" => build().and_then(|img| sincro::run2(&img)),
+        "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|screenshot|pantallas|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -260,7 +266,15 @@ fn ovmf() -> Result<(PathBuf, Option<PathBuf>)> {
     );
     let vars = match vars_src {
         Some(src) => {
-            let dst = target_dir().join("ovmf-vars.fd");
+            // Una copia por QEMU abierto (run2 y la prueba de sincronización abren dos a la vez, y
+            // QEMU bloquea el archivo).
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dst = target_dir().join(if n == 0 {
+                "ovmf-vars.fd".to_string()
+            } else {
+                format!("ovmf-vars-{}.fd", n + 1)
+            });
             fs::copy(&src, &dst).map_err(|e| format!("no pude copiar {}: {e}", src.display()))?;
             Some(dst)
         }
@@ -310,26 +324,40 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         cmd.arg("-drive")
             .arg(format!("if=pflash,format=raw,file={}", vars.display()));
     }
-    cmd.arg("-drive")
-        .arg(format!("format=raw,file={}", image.display()));
-    // Disco de datos: virtio-blk con la interfaz legacy (por puertos de E/S), que es la que
-    // implementa el driver del kernel.
-    cmd.arg("-drive")
-        .arg(format!(
-            "if=none,id=disco,format=raw,file={}",
-            disk.display()
-        ))
-        .args(["-device", "virtio-blk-pci,drive=disco,disable-modern=on"]);
+    if image.extension().is_some_and(|e| e == "iso") {
+        // Desde la ISO, como un CD y sin disco: modo en vivo (el disco se ignora).
+        cmd.arg("-cdrom").arg(image);
+    } else {
+        cmd.arg("-drive")
+            .arg(format!("format=raw,file={}", image.display()));
+        // Disco de datos: virtio-blk con la interfaz legacy (por puertos de E/S), que es la que
+        // implementa el driver del kernel.
+        cmd.arg("-drive")
+            .arg(format!(
+                "if=none,id=disco,format=raw,file={}",
+                disk.display()
+            ))
+            .args(["-device", "virtio-blk-pci,drive=disco,disable-modern=on"]);
+    }
     // Placa de video: virtio-vga (una virtio-gpu que arranca como VGA común, así el firmware
     // tiene dónde dibujar) con una salida por monitor del anfitrión. JARVIS_MONITORES la cambia.
     // Con ventana, cada salida arranca del tamaño del monitor del anfitrión (sin esto, QEMU
     // informa el de su ventana al arrancar: 640×480). JARVIS_RESOLUCION=1920x1080 lo cambia.
     let monitors = monitor_count();
     let mut video = format!("virtio-vga,id=video,max_outputs={monitors}");
-    if !headless && let Some((w, h)) = host_resolution() {
+    // Sin ventana solo si se pide con JARVIS_RESOLUCION (así los tests siguen en 1280×800).
+    let forced = env::var("JARVIS_RESOLUCION").is_ok();
+    if (!headless || forced)
+        && let Some((w, h)) = host_resolution()
+    {
         video.push_str(&format!(",xres={w},yres={h}"));
-        // La ventana se ajusta a la pantalla (Ctrl+Alt+F: pantalla completa).
-        cmd.args(["-display", "gtk,zoom-to-fit=on"]);
+        // GTK igual informa el tamaño de su ventana; el kernel lee esta (ver kernel/src/fw_cfg.rs).
+        cmd.arg("-fw_cfg")
+            .arg(format!("name=opt/jarvis/resolucion,string={w}x{h}"));
+        if !headless {
+            // La ventana se ajusta a la pantalla (Ctrl+Alt+F: pantalla completa).
+            cmd.args(["-display", "gtk,zoom-to-fit=on"]);
+        }
     }
     cmd.args(["-vga", "none", "-device", &video]);
     // Placa de red virtio-net con la red "user" de QEMU: DHCP (10.0.2.15), DNS (10.0.2.3) y
@@ -408,6 +436,34 @@ fn monitor_count() -> u32 {
         })
         .unwrap_or(1)
         .clamp(1, 4)
+}
+
+/// `cargo xtask iso`: arma la ISO; `--probar` la arranca sin ventana y espera el escritorio en
+/// modo en vivo; `--abrir` la abre con ventana.
+fn iso_cmd(image: &Path) -> Result<()> {
+    let iso = iso::build(image)?;
+    println!("iso: {}", iso.display());
+    if env::args().any(|a| a == "--probar") {
+        boot_iso(&iso)?;
+    } else if env::args().any(|a| a == "--abrir") {
+        let status = qemu(&iso, Path::new(""), false)?
+            .status()
+            .map_err(|e| format!("no pude abrir QEMU: {e}"))?;
+        if !status.success() {
+            return Err(format!("QEMU terminó con {status}"));
+        }
+    }
+    Ok(())
+}
+
+/// Arranca la ISO como un CD, sin disco, y espera el escritorio en modo en vivo.
+fn boot_iso(iso: &Path) -> Result<()> {
+    let mut s = Session::start(iso, Path::new(""))?;
+    s.wait_for("MODO_EN_VIVO", BOOT_TIMEOUT)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.quit();
+    println!("ok: la ISO arranca (modo en vivo, FAT32 en RAM)");
+    Ok(())
 }
 
 fn run(image: &Path, disk: &Path) -> Result<()> {
@@ -769,7 +825,8 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
             "sin Brave en el anfitrión: aviso"
         }
     );
-    Ok(())
+    // Y una vez desde la ISO, como un CD y sin disco.
+    boot_iso(&iso::build(image)?)
 }
 
 fn open_fatfs(disk: &Path) -> Result<fs::File> {

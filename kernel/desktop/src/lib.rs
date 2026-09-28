@@ -25,6 +25,7 @@ pub mod look;
 pub mod panels;
 pub mod remote;
 pub mod shell;
+pub mod sync;
 pub mod system;
 pub mod term;
 pub mod text_input;

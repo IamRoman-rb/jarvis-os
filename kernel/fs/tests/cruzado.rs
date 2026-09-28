@@ -663,3 +663,34 @@ fn archivos_grandes_en_pocos_pedidos_y_con_fragmentos() {
     let free = with_ours(img.clone(), |fs| fs.free_bytes()).0;
     check_consistency(&img, free);
 }
+
+#[test]
+fn nuestro_formato_lo_lee_fatfs_y_viceversa() {
+    // 48 MiB: el disco en RAM del modo en vivo.
+    let mut disk = MemDisk::new(vec![0xAAu8; 48 * 1024 * 1024]);
+    jarvis_fs::format_fat32(&mut disk, "Jarvis Vivo").unwrap();
+    let img = disk.into_inner();
+    // Nuestro FAT32 lo monta, crea carpetas y archivos.
+    let (_, img) = with_ours(img, |fs| {
+        assert_eq!(fs.label(), "JARVIS VIVO");
+        fs.mkdir("/Sincronizado", NOW).unwrap();
+        fs.write_file("/Sincronizado/a.txt", &pattern(70_000, 3), NOW)
+            .unwrap();
+    });
+    // fatfs lo reconoce como FAT32 y lee lo mismo; y escribe algo que leemos nosotros.
+    let (_, img) = with_fatfs(img, |fs| {
+        assert_eq!(fs.fat_type(), FatType::Fat32);
+        assert_eq!(fatfs_read(fs, "/Sincronizado/a.txt"), pattern(70_000, 3));
+        let mut f = fs.root_dir().create_file("de-fatfs.txt").unwrap();
+        f.write_all(b"hola").unwrap();
+    });
+    let (free, img) = with_ours(img, |fs| {
+        assert_eq!(fs.read_file("/de-fatfs.txt").unwrap(), b"hola");
+        fs.free_bytes()
+    });
+    assert!(fats_match(&img));
+    assert_eq!(
+        free,
+        raw_free_clusters(&img) * 512 * geometry(&img).spc as u64
+    );
+}

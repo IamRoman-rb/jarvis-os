@@ -56,9 +56,10 @@ pub enum Section {
     Storage,
     Security,
     Firewall,
+    Sync,
 }
 
-pub const SECTIONS: [Section; 16] = [
+pub const SECTIONS: [Section; 17] = [
     Section::System,
     Section::Displays,
     Section::Personalization,
@@ -75,6 +76,7 @@ pub const SECTIONS: [Section; 16] = [
     Section::Storage,
     Section::Security,
     Section::Firewall,
+    Section::Sync,
 ];
 
 impl Section {
@@ -96,6 +98,7 @@ impl Section {
             Section::Storage => tr("Almacenamiento"),
             Section::Security => tr("Privacidad y seguridad"),
             Section::Firewall => tr("Firewall"),
+            Section::Sync => tr("Sincronización"),
         }
     }
 
@@ -117,6 +120,7 @@ impl Section {
             Section::Storage => Icon::Folder,
             Section::Security => Icon::Lock,
             Section::Firewall => Icon::Globe,
+            Section::Sync => Icon::Folder,
         }
     }
 }
@@ -159,6 +163,9 @@ pub enum Opt {
     TestNet,
     BraveDefault,
     BraveServer,
+    SyncNewCode,
+    SyncCode,
+    SyncRelay,
     BraveToken,
     BraveHome,
     Homepage,
@@ -233,6 +240,12 @@ pub struct Settings {
     pub section: Section,
     cfg: Config,
     selected: usize,
+    /// La primera sección visible de la barra lateral (cuando no entran todas).
+    side_scroll: usize,
+    /// Mostrar la sección activa en la barra lateral en el próximo dibujo.
+    side_follow: bool,
+    /// Dónde está el mouse (para saber qué lista mueve la rueda).
+    hover: (i32, i32),
     /// Campo que se está editando (y su texto).
     editing: Option<(Opt, TextInput)>,
     /// Imágenes que se pueden usar de fondo (se buscan al entrar a Personalización).
@@ -263,6 +276,9 @@ impl Settings {
             packages: Vec::new(),
             storage: Vec::new(),
             confirm_trash: false,
+            side_scroll: 0,
+            side_follow: true,
+            hover: (0, 0),
             tone_until: None,
             net_test: None,
             screen: (0, 0),
@@ -290,6 +306,7 @@ impl Settings {
     pub fn enter<D: BlockDevice>(&mut self, section: Section, ctx: &mut Ctx<'_, D>) {
         self.section = section;
         self.selected = 0;
+        self.side_follow = true;
         self.editing = None;
         self.confirm_trash = false;
         self.dirty = true;
@@ -672,6 +689,60 @@ impl Settings {
                     ),
                 ]
             }
+            Section::Sync => {
+                use crate::sync::Status;
+                let state = match stats.sync {
+                    _ if c.sync_code.is_empty() => {
+                        tr("Apagada: generá un código acá o escribí el de la otra máquina").into()
+                    }
+                    Some(Status::Online) => match &stats.sync_peer {
+                        Some(p) => format!(
+                            "{} {p} · {} {} · {} {}",
+                            tr("Conectada con"),
+                            stats.sync_counts.0,
+                            tr("enviados"),
+                            stats.sync_counts.1,
+                            tr("recibidos")
+                        ),
+                        None => tr("Conectada al relé, esperando a la otra máquina").into(),
+                    },
+                    Some(Status::Connecting) => tr("Conectando al relé...").into(),
+                    _ => tr("Sin conexión con el relé (reintenta sola)").into(),
+                };
+                alloc::vec![
+                    Row::new(Opt::Info, tr("Estado"), state, Value(String::new())),
+                    Row::new(
+                        Opt::Info,
+                        tr("Carpeta"),
+                        tr("Lo que pongas acá aparece en las otras máquinas"),
+                        Value(crate::sync::DIR.into())
+                    ),
+                    Row::new(
+                        Opt::SyncCode,
+                        tr("Código de emparejado"),
+                        tr("El mismo en las dos máquinas (vacío = no sincroniza)"),
+                        Text {
+                            value: c.sync_code.clone(),
+                            secret: false
+                        }
+                    ),
+                    Row::new(
+                        Opt::SyncNewCode,
+                        tr("Código nuevo"),
+                        tr("Generalo en una máquina y escribilo en la otra"),
+                        Button(tr("GENERAR"))
+                    ),
+                    Row::new(
+                        Opt::SyncRelay,
+                        tr("Relé"),
+                        tr("Dirección y puerto (cargo xtask relay; en QEMU, 10.0.2.2:8120)"),
+                        Text {
+                            value: c.sync_relay.clone(),
+                            secret: false
+                        }
+                    ),
+                ]
+            }
             Section::Browser => alloc::vec![
                 Row::new(
                     Opt::BraveDefault,
@@ -979,13 +1050,43 @@ impl Settings {
 
     // --- diseño -------------------------------------------------------------------------------
 
-    fn section_rect(r: Rect, i: usize) -> Rect {
-        Rect::new(
-            r.x + 10,
-            r.y + 64 + i as i32 * SECTION_H,
-            SIDEBAR_W - 20,
-            SECTION_H - 4,
-        )
+    /// Cuántas secciones entran en la barra lateral.
+    fn side_visible(r: Rect) -> usize {
+        ((r.h - 64 - 8) / SECTION_H).max(1) as usize
+    }
+
+    /// El lugar de la sección `i` en la barra lateral, si está a la vista.
+    fn section_rect(&self, r: Rect, i: usize) -> Option<Rect> {
+        let slot = i.checked_sub(self.side_scroll)?;
+        (slot < Self::side_visible(r)).then(|| {
+            Rect::new(
+                r.x + 10,
+                r.y + 64 + slot as i32 * SECTION_H,
+                SIDEBAR_W - 24,
+                SECTION_H - 4,
+            )
+        })
+    }
+
+    fn clamp_side_scroll(&mut self, r: Rect) {
+        let visible = Self::side_visible(r);
+        self.side_scroll = self.side_scroll.min(SECTIONS.len().saturating_sub(visible));
+    }
+
+    /// La rueda: sobre la barra lateral mueve las secciones; sobre el panel, las opciones.
+    pub fn wheel(&mut self, delta: i32, content: Rect, stats: &crate::system::SystemStats) {
+        self.dirty = true;
+        if self.hover.0 < content.x + SIDEBAR_W {
+            self.side_scroll = (self.side_scroll as i32 + delta).max(0) as usize;
+            self.clamp_side_scroll(content);
+        } else {
+            let n = self.rows(stats).len();
+            self.selected = (self.selected as i32 + delta).clamp(0, n as i32 - 1).max(0) as usize;
+        }
+    }
+
+    pub fn pointer(&mut self, p: super::Pointer) {
+        self.hover = (p.x, p.y);
     }
 
     fn panel(r: Rect) -> Rect {
@@ -1024,8 +1125,35 @@ impl Settings {
             tr("CONFIGURACIÓN"),
             &label(theme::cyan()),
         );
+        let side_visible = Self::side_visible(r);
+        if self.side_follow {
+            self.side_follow = false;
+            let i = SECTIONS
+                .iter()
+                .position(|s| *s == self.section)
+                .unwrap_or(0);
+            if i < self.side_scroll {
+                self.side_scroll = i;
+            } else if i >= self.side_scroll + side_visible {
+                self.side_scroll = i + 1 - side_visible;
+            }
+        }
+        self.clamp_side_scroll(r);
+        if SECTIONS.len() > side_visible {
+            scrollbar(
+                c,
+                r.x + SIDEBAR_W - 10,
+                r.y + 64,
+                side_visible as i32 * SECTION_H - 4,
+                SECTIONS.len(),
+                side_visible,
+                self.side_scroll,
+            );
+        }
         for (i, s) in SECTIONS.iter().enumerate() {
-            let sr = Self::section_rect(r, i);
+            let Some(sr) = self.section_rect(r, i) else {
+                continue;
+            };
             let active = *s == self.section;
             if active {
                 rounded_rect(c, sr.x, sr.y, sr.w, sr.h, 4, selected_bg(), 255);
@@ -1108,6 +1236,15 @@ impl Settings {
             self.draw_control(c, row, cr, sel);
         }
         if rows.len() > visible {
+            scrollbar(
+                c,
+                p.x + p.w - 12,
+                p.y + HEADER_H,
+                visible as i32 * ROW_H - 6,
+                rows.len(),
+                visible,
+                first,
+            );
             let hint = trf(
                 "{} de {} · flechas para ver más",
                 &[&(self.selected + 1).to_string(), &rows.len().to_string()],
@@ -1292,6 +1429,8 @@ impl Settings {
             | Opt::Pin
             | Opt::FwAddSite
             | Opt::BraveServer
+            | Opt::SyncCode
+            | Opt::SyncRelay
             | Opt::BraveToken
             | Opt::BraveHome => {
                 if delta == 0 {
@@ -1300,6 +1439,8 @@ impl Settings {
                         Opt::User => (c.user.clone(), 24),
                         Opt::Homepage => (c.homepage.clone(), 200),
                         Opt::BraveServer => (c.brave_server.clone(), 100),
+                        Opt::SyncCode => (c.sync_code.clone(), 29),
+                        Opt::SyncRelay => (c.sync_relay.clone(), 100),
                         Opt::BraveToken => (c.brave_token.clone(), 64),
                         Opt::BraveHome => (c.brave_home.clone(), 200),
                         Opt::FwAddSite => (String::new(), 100),
@@ -1374,6 +1515,18 @@ impl Settings {
             Opt::Identify => {
                 ctx.out.identify = true;
                 return;
+            }
+            Opt::SyncNewCode => {
+                // Al azar: la hora, el tiempo desde el arranque y el nombre de la máquina.
+                let seed = format!("{:?}{}{}", ctx.clock, ctx.now_ms, c.hostname);
+                let (a, b) = (
+                    jarvis_sync::hash(seed.as_bytes()),
+                    jarvis_sync::hash(format!("{seed}+").as_bytes()),
+                );
+                let mut r = [0u8; 20];
+                r[..16].copy_from_slice(&a);
+                r[16..].copy_from_slice(&b[..4]);
+                c.sync_code = jarvis_sync::pair::new_code(&r);
             }
             Opt::StatusPanel => c.status_panel = !c.status_panel,
             Opt::Zone => c.utc_offset = (step(c.utc_offset as i32 + 12, 27) - 12) as i8,
@@ -1518,6 +1671,18 @@ impl Settings {
                 self.cfg.homepage = v;
                 true
             }
+            Opt::SyncCode if v.trim().is_empty() => {
+                self.cfg.sync_code = String::new();
+                true
+            }
+            Opt::SyncCode if jarvis_sync::pair::normalize(&v).is_some() => {
+                self.cfg.sync_code = v.trim().to_uppercase();
+                true
+            }
+            Opt::SyncRelay if crate::config::parse_server(&v).is_some() => {
+                self.cfg.sync_relay = v;
+                true
+            }
             Opt::BraveServer if crate::config::parse_server(&v).is_some() => {
                 self.cfg.brave_server = v;
                 true
@@ -1615,9 +1780,10 @@ impl Settings {
         if self.editing.is_some() {
             self.finish_edit(ctx);
         }
-        if let Some(i) =
-            (0..SECTIONS.len()).find(|&i| Self::section_rect(content, i).contains(x, y))
-        {
+        if let Some(i) = (0..SECTIONS.len()).find(|&i| {
+            self.section_rect(content, i)
+                .is_some_and(|sr| sr.contains(x, y))
+        }) {
             self.enter(SECTIONS[i], ctx);
             return;
         }
@@ -1738,4 +1904,24 @@ fn folder_sizes<D: BlockDevice>(fs: &mut FileSystem<D>) -> Vec<(String, u64)> {
         .collect();
     out.sort_by_key(|b| core::cmp::Reverse(b.1));
     out
+}
+
+/// Una barra de desplazamiento vertical: el riel y la parte visible.
+fn scrollbar(
+    c: &mut Canvas<'_>,
+    x: i32,
+    y: i32,
+    h: i32,
+    total: usize,
+    visible: usize,
+    first: usize,
+) {
+    if total == 0 || h <= 0 {
+        return;
+    }
+    rounded_rect(c, x, y, 4, h, 2, theme::panel_rim(), 255);
+    let thumb = (h * visible as i32 / total as i32).clamp(16, h);
+    let span = total.saturating_sub(visible).max(1) as i32;
+    let ty = y + (h - thumb) * first.min(total - visible.min(total)) as i32 / span;
+    rounded_rect(c, x, ty, 4, thumb, 2, theme::cyan().scale(170), 255);
 }

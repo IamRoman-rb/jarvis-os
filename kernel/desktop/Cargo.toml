@@ -11,6 +11,7 @@ jarvis-fs = { path = "../fs" }
 jarvis-gfx = { path = "../gfx" }
 # Mosaicos de Brave comprimidos (ADR 0007). Sin std: el kernel los descomprime.
 lz4_flex = { version = "0.11", default-features = false }
+jarvis-sync = { path = "../sync" }
 
 [dev-dependencies]
 fatfs = "0.3.6"

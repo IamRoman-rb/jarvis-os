@@ -29,6 +29,13 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   anfitrión sin ventana y JARVIS-OS lo muestra en una ventana propia, con pestañas, barra de
   dirección, atrás/adelante, mouse, rueda y teclado. Se instala con `cargo xtask brave
   --instalar`. El navegador propio de K3–K5 queda como "Navegador simple".
+- **Sincronización entre máquinas**: la carpeta `/Sincronizado` se copia sola entre dos (o más)
+  JARVIS, aunque estén en redes distintas. En Configuración → Sincronización se genera un código
+  en una y se escribe en la otra; las dos se conectan a un **relé** (`cargo xtask relay`) que solo
+  ve bytes cifrados. Si las dos cambian el mismo archivo, gana el cambio más nuevo y el otro queda
+  como `nombre (conflicto de PC2).ext`; un borrado remoto va a la Papelera.
+- **ISO**: `cargo xtask iso` arma `target/jarvis-os.iso`, que arranca como CD (UEFI). Sin disco,
+  arranca en **modo en vivo**: un FAT32 en RAM de 48 MiB (lo que se guarda se pierde al apagar).
 - **Varios monitores**: con la placa virtio-gpu (QEMU la trae con una salida por monitor de la
   PC), extender, duplicar o usar uno solo (Win+P o Configuración → Pantallas); el segundo a la
   derecha o abajo, y cuál es el principal. Win+Shift+←/→ lleva una ventana al otro monitor;
@@ -103,6 +110,10 @@ cargo xtask test         # sin ventana, de punta a punta (lo usa la CI)
 cargo xtask screenshot   # capturas del escritorio, las apps y los menús (en target/)
 cargo xtask disk --reset # vuelve el disco a su contenido inicial (kernel/rootfs/)
 cargo xtask vdi          # target/jarvis-os.vdi para bootear en VirtualBox (VM con EFI)
+cargo xtask relay        # el relé de la sincronización (--publico para abrirlo a la red)
+cargo xtask run2         # dos JARVIS (PC1 y PC2, cada uno con su disco) unidos por el relé
+cargo xtask sincronizar  # prueba: dos QEMU se emparejan, se mandan archivos, renombre → Papelera
+cargo xtask iso          # target/jarvis-os.iso (--probar: la arranca sin ventana; --abrir: con ventana)
 cargo xtask pantallas    # dos monitores: extender, mover una ventana, Win+P, duplicar (capturas)
 cargo xtask brave --instalar           # instala Brave en el anfitrión (winget)
 cargo xtask brave --probar https://…   # prueba el puente de Brave sin QEMU (target/brave-prueba.png)
@@ -156,7 +167,7 @@ cargo test               # tests en el host: FAT32, red, escritorio, terminal y 
 | Win+P · Win+Shift+← / → | monitores: solo 1, duplicar, extender, solo 2 · llevar la ventana al otro monitor |
 | arrastrar contra un borde / esquina | mitad / cuarto (arriba: maximizar) |
 | Win+Ctrl+D · Win+Ctrl+← / → · Win+Ctrl+F4 | escritorio virtual nuevo · cambiar · cerrarlo |
-| Alt+Espacio | menú de la ventana (restaurar, minimizar, maximizar, acoplar, cerrar) |
+| Alt+Espacio · clic derecho en la barra de título | menú de la ventana (restaurar, minimizar, maximizar, acoplar, botones a la izquierda o derecha, cerrar) |
 | Alt+F4 · Ctrl+W | cerrar la ventana (Ctrl+W si la app no lo usa); sin ventanas, Alt+F4 ofrece apagar |
 | F11 | maximizar la ventana |
 | Win+X | enlaces rápidos (apps, monitor, configuración, terminal, apagar…) |
@@ -358,6 +369,24 @@ firmware UEFI (OVMF en QEMU)
   que dura necesita una cola de salida con tope (si el otro lado no lee, es un error y no se come
   la memoria) y un cierre en dos pasos: en smoltcp, sacar el socket enseguida después de
   `close()` hacía que el FIN no saliera nunca.
+- **Sincronización = estado por archivo, no un registro de eventos**: cada archivo guarda su hash,
+  un **reloj de Lamport** (un contador que salta al máximo visto + 1: ordena cambios de máquinas
+  sin relojes de pared confiables) y su **origen**, la versión en la que las dos coincidieron. Un
+  cambio que llega con un origen distinto de la versión local, si la local también cambió, es un
+  conflicto; las dos máquinas deciden lo mismo sin hablar (gana el reloj más alto; empate, el id
+  de máquina). El motor (`kernel/sync/`) no sabe de discos ni de red: se prueba entero en el host
+  con dos máquinas simuladas.
+- **Cifrado autenticado en vez de TLS**: las dos puntas comparten el código de emparejado, así que
+  alcanza con HKDF (código → id de grupo + clave) y ChaCha20-Poly1305 con un nonce de id de
+  máquina + contador; un contador repetido se descarta. El kernel compila sin SSE/AVX: las crates
+  de cifrado van con sus versiones por software (`--cfg chacha20_force_soft` en `.cargo/config.toml`;
+  la de AVX2 hacía fallar a LLVM).
+- **El relé no guarda nada**: reenvía a quien esté conectado. Un manifiesto mandado antes de que la
+  otra máquina llegue se pierde, así que al recibir el de una máquina nueva se contesta con el
+  propio (lo encontró la prueba con dos QEMU, no los tests en memoria).
+- **El Torito**: una ISO 9660 mínima (descriptores, tabla de rutas, raíz) con un catálogo que
+  apunta a una imagen FAT "sin emulación" para EFI: la partición EFI que ya genera el bootloader,
+  sacada de la tabla GPT. El firmware la monta y ejecuta `EFI/BOOT/BOOTX64.EFI`.
 - **virtio moderno**: el disco y la red usan la interfaz vieja (por puertos). La placa de video solo
   existe en la moderna, con los registros en memoria: su dirección sale de la lista de
   "capacidades" PCI, y hay que mapearla **sin caché** (`paging.rs`), porque un registro de un
@@ -536,6 +565,9 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
+**Dónde estamos:** K0–K6 terminados; sigue K7 (el puente con el cerebro). Son 7 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
+K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los anteriores juntos.
+
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
 | **K0** ✅ | Arranca en QEMU y dibuja el HUD | Arranque UEFI, framebuffer, E/S por puertos, `no_std` |
@@ -544,7 +576,7 @@ terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con
 | **K3** ✅ | **Escritorio y red**: ventanas y atajos como Windows, monitor, apps, virtio-net + TCP/IP, navegador | Composición, gestores de ventanas, redes, HTTP/HTML |
 | **K4** ✅ | **Terminal y sistema**: shell `jsh`, `apt`, Configuración, más atajos, escritorios virtuales, navegador con CSS e imágenes, teclado latinoamericano | Intérpretes, gestión de paquetes, CSS y la cascada |
 | **K5** ✅ | **Motor web y sistema**: maquetación en cajas (flex, grid, tablas, flotantes), fuente proporcional, SVG y transparencias, YouTube sin JavaScript, firewall (`ufw`), `snap`, `winget`, idiomas, barra de arriba y transiciones de ventanas | Motores de maquetación, tipografía, filtrado de red, internacionalización, animación |
-| **K6** 🚧 | **Brave y sistema**: conexiones TCP largas, Brave remoto (DevTools + mosaicos), temperatura, cerrar sesión y suspender, personalización en capas, sincronización de carpetas entre máquinas (relé + ChaCha20-Poly1305) e ISO | Protocolos binarios, control de flujo, relojes lógicos, criptografía autenticada, El Torito |
+| **K6** ✅ | **Brave y sistema**: conexiones TCP largas ✅, Brave remoto (DevTools + mosaicos) ✅, temperatura, cerrar sesión y suspender ✅, personalización en capas ✅, selección múltiple y distribuciones de ventanas ✅, varios monitores (virtio-gpu) ✅, sincronización de carpetas entre máquinas (relé + ChaCha20-Poly1305) ✅ e ISO con modo en vivo ✅ | Protocolos binarios, control de flujo, relojes lógicos, criptografía autenticada, El Torito |
 | K7 | **Puente con el cerebro**: la consola de JARVIS le habla a Claude (por la red, al `jarvis` del anfitrión) y la esfera pulsa con la respuesta | Protocolos, el sistema "piensa" |
 | K8 | Paginación propia (tablas de páginas del kernel, no las del bootloader) | Memoria virtual, allocators de frames |
 | K9 | Multitarea: scheduler y tareas del kernel. Disco y red por interrupciones | Cambio de contexto, sincronización |
