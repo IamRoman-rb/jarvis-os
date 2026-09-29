@@ -10,3 +10,4 @@ fondos|1.0|Tres fondos de pantalla (se eligen en Configuraci√≥n > Personalizaci√
 manual|1.0|El manual de JARVIS-OS en /Documentos||6 KB
 esenciales|1.0|Instala de una vez neofetch, cowsay, fortune y calc|neofetch,cowsay,fortune,calc|1 KB
 programas-linux|1.0|Programas de Linux de verdad (K11): hola-linux, eco, pruebas y red||2 MB
+js|1.0|Interprete de JavaScript (motor Boa): js, js archivo.js o js -e codigo. Un programa de Linux (K11)||6 MB

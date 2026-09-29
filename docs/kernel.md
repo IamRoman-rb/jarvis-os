@@ -402,7 +402,7 @@ firmware UEFI (OVMF en QEMU)
 
 ## Lo que se aprendió (y por qué el código es así)
 
-### K11: espacio de usuario (en curso)
+### K11: espacio de usuario
 
 - **Un proceso es una tarea con otra PML4.** Los primeros 512 GiB (la entrada 0 de la PML4) son
   del programa; las otras 511 entradas se copian de la PML4 del kernel, así el kernel está en
@@ -443,6 +443,16 @@ firmware UEFI (OVMF en QEMU)
 - **Sockets con firewall.** `connect` es una conexión larga del `Outbox` (ADR 0007) a nombre de la
   app `programas`: pasa por las reglas de `ufw` como todo lo demás, y un bloqueo llega al
   programa como `EACCES` ("Permission denied").
+- **Un intérprete de JavaScript, sin escribirlo.** `js` es el motor Boa (Rust) compilado como
+  cualquier otro programa de Linux: 5,7 MB, se instala con `apt install js` y corre código
+  suelto (`js -e`), archivos y una consola interactiva cuya entrada es la Terminal. No pidió
+  ninguna llamada al sistema nueva: esa es la gracia de implementar la ABI de Linux en vez de
+  una propia. Se compila sin Temporal ni Intl (los datos de zonas horarias e idiomas pesan
+  megas).
+- **Qué queda para más adelante** (ADR 0010): bibliotecas dinámicas (`ld.so`), hilos (`clone` y
+  `futex` de verdad), `fork`/`exec` desde un programa, señales entregadas al programa, `pipe`,
+  UDP (y con eso el DNS de musl: hoy `connect` necesita una IP) y programas de Windows. Brave
+  nativo necesita todo eso más un servidor gráfico.
 
 ### K10: TLS y decodificadores en el kernel
 
@@ -804,7 +814,7 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K10 terminados; K11 (espacio de usuario) en curso. Son 11 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
+**Dónde estamos:** K0–K11 terminados; sigue K12 (audio y video). Son 12 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
 K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los anteriores juntos.
 
 | Hito | Qué se logra | Qué se aprende |
@@ -820,7 +830,7 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
 | **K9** ✅ | Multitarea: planificador con prioridades y desalojo, tareas del kernel con pila propia (escritorio, red, ociosa), disco y red por interrupciones | Cambio de contexto, sincronización |
 | **K10** ✅ | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo ✅; decodificadores PNG (propio) y JPEG (`zune-jpeg`) ✅ | Criptografía, certificados, compresión |
-| K11 | Espacio de usuario (ADR 0010): ring 3, syscalls, cargador ELF ✅. Los primeros programas de Linux estáticos ✅; sockets (y el firewall en la pila de red) ✅; un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
+| **K11** ✅ | Espacio de usuario (ADR 0010): ring 3, syscalls, cargador ELF ✅. Los primeros programas de Linux estáticos ✅; sockets (y el firewall en la pila de red) ✅; un intérprete de JavaScript (Boa, `apt install js`) ✅. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
 | K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |
 | K14 | **Wi-Fi**: un driver de placa real (firmware del fabricante), 802.11 y WPA2. La sincronización no cambia: ya funciona entre redes distintas | Redes inalámbricas, criptografía de enlace |

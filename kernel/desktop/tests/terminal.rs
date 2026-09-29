@@ -45,7 +45,8 @@ fn serve(t: &mut Driver) {
             return;
         }
         for r in reqs {
-            let resp = if let Some(program) = r.url.strip_prefix("http://paquetes.jarvis/usuario/") {
+            let resp = if let Some(program) = r.url.strip_prefix("http://paquetes.jarvis/usuario/")
+            {
                 // Los programas de Linux compilados (K11): en el test, un ELF mínimo.
                 assert!(!program.contains('/'));
                 Ok(HttpResponse {
@@ -128,6 +129,10 @@ Installers:
         return None;
     };
     Some(body.as_bytes().to_vec())
+}
+
+fn fatfs_exists_in(t: &mut Driver, path: &str) -> bool {
+    t.d.fs_mut().is_some_and(|fs| fs.stat(path).is_ok())
 }
 
 /// Un ELF de Linux x86-64 mínimo (estático, o dinámico si se le da un intérprete).
@@ -459,8 +464,9 @@ fn programas_de_linux_en_la_terminal() {
 
     let mut t = Driver::new();
     open_terminal(&mut t);
-    let out = run(&mut t, "apt install programas-linux");
+    let out = run(&mut t, "apt install programas-linux js");
     assert!(out.contains("Listo"), "{out}");
+    assert!(fatfs_exists_in(&mut t, "/Programas/bin/js"));
     assert!(run(&mut t, "file /Programas/bin/eco").contains("enlazado estáticamente"));
 
     t.type_text("hola-linux uno dos");
@@ -477,8 +483,7 @@ fn programas_de_linux_en_la_terminal() {
     // La salida aparece a medida que llega.
     t.d.proc_event(ProcEvent::Output {
         pid,
-        data: b"Hola desde Linux
-".to_vec(),
+        data: b"Hola desde Linux\n".to_vec(),
     });
     assert!(screen(&t).contains("Hola desde Linux"));
     // Un archivo que escribe el programa queda en el disco; borrarlo lo manda a la Papelera.
@@ -499,8 +504,7 @@ fn programas_de_linux_en_la_terminal() {
     t.frame();
     assert_eq!(
         t.d.take_proc_replies(),
-        [(pid, ProcReply::Line(b"Roman
-".to_vec()))]
+        [(pid, ProcReply::Line(b"Roman\n".to_vec()))]
     );
     t.d.proc_event(ProcEvent::Exited {
         pid,

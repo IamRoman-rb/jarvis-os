@@ -16,3 +16,9 @@ panic = "abort"
 strip = true
 lto = true
 codegen-units = 1
+
+[dependencies]
+# El intérprete de JavaScript (`js`): el motor Boa, escrito en Rust.
+# Sin Temporal ni Intl (datos de zonas horarias e idiomas: megas que no hacen falta) ni fetch.
+boa_engine = { version = "0.22", default-features = false }
+boa_runtime = { version = "0.22", default-features = false }

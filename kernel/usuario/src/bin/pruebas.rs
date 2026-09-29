@@ -63,7 +63,10 @@ fn memory() -> Result<(), String> {
         *b = (i >> 12) as u8;
     }
     let sum: u64 = big.iter().step_by(4096).map(|&b| b as u64).sum();
-    check(sum == (0..8192u64).map(|i| i & 0xFF).sum::<u64>(), "32 MiB de memoria")?;
+    check(
+        sum == (0..8192u64).map(|i| i & 0xFF).sum::<u64>(),
+        "32 MiB de memoria",
+    )?;
     drop(big);
     // Muchas asignaciones chicas (brk).
     let v: Vec<String> = (0..20_000).map(|i| format!("cadena {i}")).collect();
@@ -74,7 +77,11 @@ fn memory() -> Result<(), String> {
     // Una recursión que usa la pila (páginas que aparecen al primer uso).
     fn depth(n: u32) -> u32 {
         let buf = [n as u8; 512];
-        if n == 0 { buf[0] as u32 } else { depth(n - 1) + buf[511] as u32 / 256 }
+        if n == 0 {
+            buf[0] as u32
+        } else {
+            depth(n - 1) + buf[511] as u32 / 256
+        }
     }
     check(depth(4000) == 0, "4000 llamadas anidadas (2 MiB de pila)")?;
     Ok(())

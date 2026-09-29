@@ -236,7 +236,7 @@ fn build() -> Result<PathBuf> {
 
 /// Los programas de Linux de `kernel/usuario/` (K11): se compilan para musl (estáticos) y quedan
 /// en `target/usuario/`, de donde los sirve el puente (`http://paquetes.jarvis/usuario/`).
-const USER_PROGRAMS: [&str; 4] = ["hola-linux", "eco", "pruebas", "red"];
+const USER_PROGRAMS: [&str; 5] = ["hola-linux", "eco", "pruebas", "red", "js"];
 
 fn build_user() -> Result<PathBuf> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -905,6 +905,28 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("FIREWALL_BLOQUEO programas 10.0.2.2", STEP)?;
     s.wait_for("RED_PROGRAMA_ERROR", STEP)?;
     s.wait_for("TERMINAL_FIN 1", STEP)?;
+    // Un intérprete de JavaScript (Boa) como programa de Linux: código suelto, un archivo y la
+    // consola interactiva (lo tipeado es su entrada estándar).
+    s.type_text("apt install js")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO js", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("js -e \"Array.from('abc', c => c.toUpperCase()).join('-')\"")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("A-B-C", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("echo \"console.log('desde un archivo', 6 * 7)\" > prueba.js && js prueba.js")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("desde un archivo 42", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("js")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("JavaScript (motor Boa)", STEP)?;
+    s.type_text("let x = 20; (x + 22) * 1000 + 7")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("42007", STEP)?;
+    s.monitor("sendkey ctrl-d")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
     // K10: un PNG y un JPEG progresivo del repositorio, sin convertir: los decodifica el
     // kernel (el visor, con jarvis-image).
     for file in ["fondos/aurora.png", "pruebas/aurora-progresivo.jpg"] {

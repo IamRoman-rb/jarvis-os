@@ -37,7 +37,8 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (brk, mmap, páginas al primer uso) y llamadas al sistema; no_std, sobre un trait
                    `System` (kernel/process.rs lo implementa; los tests, uno de mentira)
     - usuario/     programas de Linux de prueba (otro workspace, para x86_64-unknown-linux-musl):
-                   hola-linux, eco, pruebas, red. `cargo xtask usuario` → target/usuario/
+                   hola-linux, eco, pruebas, red y js (JavaScript con el motor Boa).
+                   `cargo xtask usuario` → target/usuario/
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - sync/        sincronización de /Sincronizado: emparejado (HKDF), cifrado (ChaCha20-Poly1305),
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red
@@ -69,7 +70,7 @@ Kernel (desde kernel/):
 - Sincronización:   cargo xtask relay | run2 | sincronizar (dos QEMU + relé; verifica los discos con fatfs)
 - ISO:              cargo xtask iso [--probar|--abrir] (El Torito; sin disco → modo en vivo, FAT32 en RAM)
 - Programas Linux:  cargo xtask usuario (compila kernel/usuario/ → target/usuario/; run y test lo hacen
-                    solos). En JARVIS-OS: apt install programas-linux ; hola-linux ; pruebas
+                    solos). En JARVIS-OS: apt install programas-linux js ; hola-linux ; js
 - Monitores:        cargo xtask pantallas (dos monitores, capturas por salida); JARVIS_MONITORES=N en run/test
 - Captura:          cargo xtask screenshot     (escritorio, apps y menús en target/: miralas si tocás la UI)
 - Vista previa web: JARVIS_URL=https://… cargo test -p jarvis-desktop --test vista_previa -- --ignored
@@ -79,6 +80,7 @@ Kernel (desde kernel/):
                     JARVIS_URL=config:N abre la Configuración)
 - Lint:             cargo fmt --all && cargo clippy --workspace --exclude jarvis-kernel --all-targets -- -D warnings
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
+                    (y en usuario/: cargo fmt && cargo clippy --release -- -D warnings)
 Cerebro (desde la raíz):
 - uv sync ; uv run pytest ; uv run ruff check . ; uv run mypy
 - jarvis serve [--simulado]: el cerebro para el kernel (ADR 0008). Lo levanta `cargo xtask run`
