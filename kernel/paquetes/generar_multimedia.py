@@ -263,7 +263,9 @@ def video() -> bytes:
     vstrh = b"vidsMJPG" + struct.pack("<10I", 0, 0, 0, 1, fps, 0, len(frames), 0, 0, 0) + bytes(8)
     vstrf = struct.pack("<IiiHH4sI4I", 40, w, h, 1, 24, b"MJPG", w * h * 3, 0, 0, 0, 0)
     astrh = b"auds" + bytes(16) + struct.pack("<II", 1, RATE) + bytes(24)
-    movi = b"".join(chunk(b"00dc", f) + chunk(b"01wb", a) for f, a in zip(frames, audio))
+    movi = b"".join(
+        chunk(b"00dc", f) + chunk(b"01wb", a) for f, a in zip(frames, audio, strict=True)
+    )
     hdrl = lst(
         b"hdrl",
         chunk(b"avih", avih),
