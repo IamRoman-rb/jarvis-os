@@ -1,0 +1,16 @@
+"Primero resolvé el problema. Después escribí el código." -- John Johnson
+"Hablar es barato. Mostrame el código." -- Linus Torvalds
+"La simplicidad es un requisito previo para la confiabilidad." -- Edsger Dijkstra
+"Los programas deben escribirse para que los lean personas, y solo de paso para que los ejecuten máquinas." -- Abelson y Sussman
+"Todo problema en informática se resuelve con otro nivel de indirección." -- David Wheeler
+"Un sistema operativo es lo que queda cuando sacás todas las aplicaciones." -- anónimo
+"UNIX es simple. Solo hace falta un genio para entender su simplicidad." -- Dennis Ritchie
+"Si la depuración es sacar errores, programar debe ser ponerlos." -- Edsger Dijkstra
+"Cualquier tonto escribe código que entiende una computadora. Los buenos programadores escriben código que entienden las personas." -- Martin Fowler
+"Nunca confíes en una computadora que no puedas tirar por la ventana." -- Steve Wozniak
+"El mejor rendimiento de todos es el del código que no se ejecuta." -- anónimo
+"Hacelo andar, hacelo bien, hacelo rápido. En ese orden." -- Kent Beck
+"Un kernel propio en Rust empieza con un solo píxel en la pantalla." -- JARVIS
+"Los errores de un solo bit no existen: siempre son dos, y el segundo es el que no viste." -- anónimo
+"Sin tests, refactorizar es solo cambiar cosas de lugar y rezar." -- anónimo
+"La memoria es un recurso finito; los punteros colgantes, infinitos." -- anónimo

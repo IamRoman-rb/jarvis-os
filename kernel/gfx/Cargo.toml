@@ -1,0 +1,16 @@
+[package]
+name = "jarvis-gfx"
+description = "Gráficos del HUD de JARVIS-OS: dibujo puro, sin hardware, testeable en el host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fontdue = { version = "0.9.4", default-features = false, features = ["hashbrown"] }
+hashbrown = "0.15"
+libm = "0.2.16"
+noto-sans-mono-bitmap = { version = "0.3.2", default-features = false, features = ["regular", "bold", "light", "size_16", "size_20", "size_24", "size_32", "unicode-basic-latin", "unicode-latin-1-supplement"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "jarvis-net"
+description = "Red de JARVIS-OS: pila TCP/IP (smoltcp), DHCP, DNS y descargas HTTP. no_std, testeable en el host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+jarvis-desktop = { path = "../desktop" }
+smoltcp = { version = "0.12", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp", "socket-dhcpv4", "socket-dns", "dns-max-server-count-4", "dns-max-result-count-4"] }
+
+[lints]
+workspace = true
+

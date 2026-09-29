@@ -1,0 +1,4 @@
+# Excepción al "*.key" de la raíz: claves de los servidores de PRUEBA de los tests de TLS (las
+# carga el servidor de referencia). No protegen nada real. Las de las autoridades no se suben:
+# generar.sh las rehace junto con todo lo demás.
+!srv-*.key

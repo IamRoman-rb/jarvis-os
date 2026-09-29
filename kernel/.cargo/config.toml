@@ -1,0 +1,14 @@
+[alias]
+xtask = "run --package xtask --"
+
+# El kernel compila sin SSE/AVX: la criptografía (sincronización, ADR 0007; TLS, ADR 0009) usa las
+# versiones por software de ChaCha20, Poly1305, AES, POLYVAL (GCM) y curve25519 (las de SSE/AVX/
+# AES-NI no compilan para este target). SHA-2 se fuerza con un feature en tls/Cargo.toml.
+[target.x86_64-unknown-none]
+rustflags = [
+    "--cfg", "chacha20_force_soft",
+    "--cfg", "poly1305_force_soft",
+    "--cfg", "aes_force_soft",
+    "--cfg", "polyval_force_soft",
+    "--cfg", 'curve25519_dalek_backend="serial"',
+]

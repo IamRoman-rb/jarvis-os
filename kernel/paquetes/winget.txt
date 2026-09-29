@@ -1,0 +1,26 @@
+# Programas conocidos para `winget search` (Id|nombre|descripción).
+# Los Id son los del repositorio oficial (github.com/microsoft/winget-pkgs).
+7zip.7zip|7-Zip|Compresor de archivos (zip, 7z, rar)
+Notepad++.Notepad++|Notepad++|Editor de texto y código
+PuTTY.PuTTY|PuTTY|Cliente SSH y telnet
+voidtools.Everything|Everything|Busca archivos por nombre al instante
+VideoLAN.VLC|VLC media player|Reproductor de video y música
+Mozilla.Firefox|Mozilla Firefox|Navegador web
+Google.Chrome|Google Chrome|Navegador web
+Brave.Brave|Brave|Navegador web con bloqueo de anuncios
+Microsoft.VisualStudioCode|Visual Studio Code|Editor de código
+Git.Git|Git|Control de versiones
+Python.Python.3.12|Python 3.12|Lenguaje de programación
+WinSCP.WinSCP|WinSCP|Transferencia de archivos (SFTP, FTP)
+SumatraPDF.SumatraPDF|SumatraPDF|Lector de PDF liviano
+qBittorrent.qBittorrent|qBittorrent|Cliente de torrents
+Audacity.Audacity|Audacity|Editor de audio
+KDE.Krita|Krita|Pintura digital
+Inkscape.Inkscape|Inkscape|Dibujo vectorial (SVG)
+OBSProject.OBSStudio|OBS Studio|Grabar la pantalla y transmitir
+TheDocumentFoundation.LibreOffice|LibreOffice|Oficina: textos, planillas, presentaciones
+CPUID.CPU-Z|CPU-Z|Información del procesador y la memoria
+Greenshot.Greenshot|Greenshot|Capturas de pantalla
+Telegram.TelegramDesktop|Telegram|Mensajería
+Discord.Discord|Discord|Chat de voz y texto
+Valve.Steam|Steam|Tienda de juegos

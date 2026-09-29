@@ -70,6 +70,11 @@ strict = true
 mypy_path = "src"
 packages = ["jarvis"]
 
+# La voz es un extra (`uv sync --extra voice`): sin él, estos módulos no están instalados.
+[[tool.mypy.overrides]]
+module = ["numpy", "sounddevice", "openwakeword", "openwakeword.*", "faster_whisper", "piper"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

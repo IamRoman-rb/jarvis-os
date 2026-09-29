@@ -23,3 +23,29 @@ jobs:
         run: uv run mypy
       - name: Tests (sin API real)
         run: uv run pytest
+
+  kernel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kernel
+    steps:
+      - uses: actions/checkout@v7
+      - name: QEMU y firmware UEFI
+        working-directory: .
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+      - name: Toolchain (fijado en kernel/rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - name: Formato
+        run: cargo fmt --all --check
+      - name: Clippy (host y kernel)
+        run: |
+          cargo clippy --workspace --exclude jarvis-kernel --all-targets -- -D warnings
+          cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
+      - name: Tests (FAT32 contra fatfs, escritorio, red con loopback, gráficos)
+        run: cargo test
+      - name: De punta a punta en QEMU (teclado, mouse, ventanas, disco y red)
+        run: cargo xtask test

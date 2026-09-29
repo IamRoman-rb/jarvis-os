@@ -1,0 +1,2 @@
+Paquete "esenciales" de JARVIS-OS: instala neofetch, cowsay, fortune y calc.
+Probá: neofetch · fortune | cowsay · calc 6 x 7

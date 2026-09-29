@@ -1,6 +1,6 @@
 # ADR 0001 — Base Debian 13 y Python como lenguaje principal
 
-- **Estado:** aceptada
+- **Estado:** reemplazada por el [ADR 0003](0003-kernel-propio-rust.md) (kernel propio en Rust). Lo de Python sigue vigente para el cerebro.
 - **Fecha:** 2026-09-22
 
 ## Contexto

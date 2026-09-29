@@ -1,0 +1,2 @@
+fortune.sh -> /Programas/bin/fortune
+frases.txt -> /Programas/share/fortune/frases.txt
