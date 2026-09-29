@@ -1,0 +1,5 @@
+# Programas de Linux (ELF estaticos) compilados desde kernel/usuario/ (K11, ADR 0010).
+usuario:hola-linux -> /Programas/bin/hola-linux
+usuario:eco -> /Programas/bin/eco
+usuario:pruebas -> /Programas/bin/pruebas
+usuario:red -> /Programas/bin/red

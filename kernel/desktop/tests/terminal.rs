@@ -45,7 +45,16 @@ fn serve(t: &mut Driver) {
             return;
         }
         for r in reqs {
-            let resp = if let Some(path) = r.url.strip_prefix("http://paquetes.jarvis/") {
+            let resp = if let Some(program) = r.url.strip_prefix("http://paquetes.jarvis/usuario/") {
+                // Los programas de Linux compilados (K11): en el test, un ELF mínimo.
+                assert!(!program.contains('/'));
+                Ok(HttpResponse {
+                    status: 200,
+                    content_type: "application/octet-stream".into(),
+                    url: r.url.clone(),
+                    body: tiny_elf(None),
+                })
+            } else if let Some(path) = r.url.strip_prefix("http://paquetes.jarvis/") {
                 let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../paquetes")
                     .join(path);
@@ -119,6 +128,36 @@ Installers:
         return None;
     };
     Some(body.as_bytes().to_vec())
+}
+
+/// Un ELF de Linux x86-64 mínimo (estático, o dinámico si se le da un intérprete).
+fn tiny_elf(interp: Option<&str>) -> Vec<u8> {
+    let mut b = vec![0u8; 0x200];
+    b[..4].copy_from_slice(b"ELF");
+    b[4] = 2;
+    b[5] = 1;
+    b[6] = 1;
+    b[16..18].copy_from_slice(&2u16.to_le_bytes());
+    b[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
+    b[24..32].copy_from_slice(&0x40_0100u64.to_le_bytes());
+    b[32..40].copy_from_slice(&64u64.to_le_bytes());
+    b[54..56].copy_from_slice(&56u16.to_le_bytes());
+    let n: u16 = if interp.is_some() { 2 } else { 1 };
+    b[56..58].copy_from_slice(&n.to_le_bytes());
+    // PT_LOAD R-X del archivo entero en 0x400000.
+    b[64..68].copy_from_slice(&1u32.to_le_bytes());
+    b[68..72].copy_from_slice(&5u32.to_le_bytes());
+    b[80..88].copy_from_slice(&0x40_0000u64.to_le_bytes());
+    b[96..104].copy_from_slice(&0x200u64.to_le_bytes());
+    b[104..112].copy_from_slice(&0x200u64.to_le_bytes());
+    if let Some(i) = interp {
+        let h = 64 + 56;
+        b[h..h + 4].copy_from_slice(&3u32.to_le_bytes());
+        b[h + 8..h + 16].copy_from_slice(&0x180u64.to_le_bytes());
+        b[h + 32..h + 40].copy_from_slice(&(i.len() as u64 + 1).to_le_bytes());
+        b[0x180..0x180 + i.len()].copy_from_slice(i.as_bytes());
+    }
+    b
 }
 
 /// Un .exe de Windows mínimo (cabeceras MZ y PE de 64 bits, programa de consola).
@@ -409,4 +448,115 @@ fn ps_muestra_las_tareas_del_kernel() {
     let out = run(&mut t, "kill 3");
     assert!(out.contains("es una tarea del kernel"), "{out}");
     assert!(run(&mut t, "kill 77").contains("no existe ese proceso"));
+}
+
+/// K11: la Terminal lanza un programa de Linux (instalado con apt) y hace de su consola. Acá el
+/// kernel está simulado: el test hace lo que harían el proceso y el kernel.
+#[test]
+fn programas_de_linux_en_la_terminal() {
+    use jarvis_desktop::procs::{ProcEvent, ProcReply};
+    use jarvis_linux::sys::{FileOp, FileReply};
+
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let out = run(&mut t, "apt install programas-linux");
+    assert!(out.contains("Listo"), "{out}");
+    assert!(run(&mut t, "file /Programas/bin/eco").contains("enlazado estáticamente"));
+
+    t.type_text("hola-linux uno dos");
+    t.key(Key::Enter);
+    let reqs = t.d.take_requests();
+    assert_eq!(reqs.spawn.len(), 1);
+    let sp = &reqs.spawn[0];
+    let pid = sp.pid;
+    assert_eq!(sp.path, "/Programas/bin/hola-linux");
+    assert_eq!(sp.argv, ["hola-linux", "uno", "dos"]);
+    assert!(sp.image.starts_with(b"ELF"));
+    assert!(sp.envp.iter().any(|e| e == "USER=roman"), "{:?}", sp.envp);
+
+    // La salida aparece a medida que llega.
+    t.d.proc_event(ProcEvent::Output {
+        pid,
+        data: b"Hola desde Linux
+".to_vec(),
+    });
+    assert!(screen(&t).contains("Hola desde Linux"));
+    // Un archivo que escribe el programa queda en el disco; borrarlo lo manda a la Papelera.
+    t.d.proc_event(ProcEvent::File {
+        pid,
+        op: FileOp::Write("/Documentos/k11.txt".into(), b"desde el anillo 3".to_vec()),
+    });
+    assert_eq!(
+        t.d.take_proc_replies(),
+        [(pid, ProcReply::File(FileReply::Done))]
+    );
+    // Lee una línea: la respuesta espera a que se tipee.
+    t.d.proc_event(ProcEvent::ReadLine { pid, max: 100 });
+    assert!(t.d.take_proc_replies().is_empty());
+    t.type_text("Roman");
+    t.key(Key::Enter);
+    assert!(screen(&t).contains("Roman"), "lo tipeado se ve");
+    t.frame();
+    assert_eq!(
+        t.d.take_proc_replies(),
+        [(pid, ProcReply::Line(b"Roman
+".to_vec()))]
+    );
+    t.d.proc_event(ProcEvent::Exited {
+        pid,
+        code: 0,
+        why: None,
+    });
+    assert!(t.logs().iter().any(|l| l == "TERMINAL_FIN 0"));
+
+    // Ctrl+C le pide al kernel que lo termine; la shell sigue cuando llega su fin.
+    t.type_text("eco");
+    t.key(Key::Enter);
+    let pid = t.d.take_requests().spawn[0].pid;
+    t.combo(
+        Mods {
+            ctrl: true,
+            ..Mods::NONE
+        },
+        Key::Char('c'),
+    );
+    assert_eq!(t.d.take_requests().kill, [pid]);
+    t.d.proc_event(ProcEvent::Exited {
+        pid,
+        code: 130,
+        why: None,
+    });
+    assert!(t.logs().iter().any(|l| l == "TERMINAL_FIN 130"));
+    // Una violación de segmento se muestra.
+    t.type_text("pruebas segv");
+    t.key(Key::Enter);
+    let pid = t.d.take_requests().spawn[0].pid;
+    t.d.proc_event(ProcEvent::Exited {
+        pid,
+        code: 139,
+        why: Some("Violacion de segmento".into()),
+    });
+    assert!(screen(&t).contains("Violacion de segmento"));
+    t.d.proc_event(ProcEvent::File {
+        pid: 999,
+        op: FileOp::Remove("/Documentos/k11.txt".into()),
+    });
+    assert_eq!(
+        t.d.take_proc_replies(),
+        [(999, ProcReply::File(FileReply::Done))]
+    );
+
+    // Uno dinámico no se lanza: se explica por qué.
+    t.d.fs_mut()
+        .unwrap()
+        .write_file(
+            "/Documentos/dinamico",
+            &tiny_elf(Some("/lib64/ld-linux-x86-64.so.2")),
+            jarvis_fs::Timestamp::EPOCH,
+        )
+        .unwrap();
+    let out = run(&mut t, "/Documentos/dinamico");
+    assert!(out.contains("bibliotecas dinámicas"), "{out}");
+    assert!(t.d.take_requests().spawn.is_empty());
+    assert!(fatfs_exists(t.d, "/Papelera/k11.txt"));
 }

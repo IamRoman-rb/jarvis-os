@@ -355,6 +355,10 @@ firmware UEFI (OVMF en QEMU)
             ├─ nettask.rs     la tarea de la red: colas de pedidos y respuestas con el escritorio
             ├─ entropy.rs     entropía (K10): RDSEED/RDRAND y variación del TSC → generador global
             ├─ tls.rs         TLS (K10): une jarvis-tls con la entropía y la hora; prueba al arrancar
+            ├─ syscall.rs     syscall/sysret (K11): MSR, la entrada, SSE y el salto al anillo 3
+            ├─ process.rs     procesos (K11): crear, llamadas, fallos de página, terminar
+            ├─ tareas "proceso" (anillo 3): un programa de Linux cada una, con su PML4
+            │    └─ jarvis-linux   ELF, pila inicial, memoria y llamadas al sistema de Linux
             ├─ time.rs        reloj en ms con el TSC
             ├─ queue.rs       cola de bytes sin locks (interrupción → bucle)
             ├─ keyboard.rs    teclado PS/2 → teclas y modificadores (Alt, Ctrl, Win, AltGr),
@@ -392,10 +396,53 @@ firmware UEFI (OVMF en QEMU)
 | `image` (`jarvis-image`) | Imágenes (K10): inflate (DEFLATE + zlib) y PNG propios (todos los tipos de color y profundidades, paletas, `tRNS`, Adam7, CRC y Adler-32), JPEG con `zune-jpeg` (progresivos incluidos), topes de tamaño y achicado por promedio. | 13 tests, los de PNG **cruzados contra la crate `png`** (todas las combinaciones de color, bits y filtro; entrelazado; cortado en cada byte) y los de JPEG contra `image`; y `cargo xtask test` (el visor abre un PNG y un JPEG progresivo en el kernel) |
 | `mem` (`jarvis-mem`) | Memoria: allocator de marcos físicos (mapa de bits), tablas de páginas de 4 niveles (mapear, traducir, desmapear, recorrer; páginas de 4 KiB, 2 MiB y 1 GiB) y segmentos del ELF del kernel para W^X. Sobre un trait `PhysMem`. | 8 tests sobre una RAM de mentira (copiar una jerarquía da las mismas traducciones) y `cargo xtask test` (el kernel arranca con sus tablas y verifica W^X) |
 | `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
+| `linux` (`jarvis-linux`) | La ABI de Linux x86_64 (K11): cargador de ELF (estáticos y static-pie), pila inicial con el vector auxiliar, zonas de memoria (brk, mmap, mprotect, páginas al primer uso) y ~90 llamadas al sistema (archivos, directorios, consola, tiempo, azar, sockets TCP, señales mínimas). Sobre un trait `System`. | 20 tests: un proceso de mentira de punta a punta (cargar, archivos, directorios, memoria, punteros del kernel → EFAULT, sockets) y `cargo xtask test` (programas de verdad, compilados con musl) |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K11: espacio de usuario (en curso)
+
+- **Un proceso es una tarea con otra PML4.** Los primeros 512 GiB (la entrada 0 de la PML4) son
+  del programa; las otras 511 entradas se copian de la PML4 del kernel, así el kernel está en
+  todos los espacios. Truco necesario: al arrancar se crean **todas** esas entradas (511 tablas
+  vacías, 2 MiB): si el kernel agregara una después, los procesos que ya existen no la verían.
+  El bootloader dejaba en la entrada 0 el código con el que salta al kernel (mapeado
+  "identidad", virtual = física): ya no se usa y se descarta.
+- **Entrar y salir del anillo 3.** La primera vez se "vuelve" de una interrupción que nunca
+  pasó: `iretq` con los selectores de usuario (RPL 3). Después, el programa entra al kernel con
+  `syscall`, que salta a LSTAR **sin cambiar de pila**: lo primero es pasar a la pila del kernel
+  de esa tarea. Las interrupciones que llegan con el programa corriendo usan `rsp0` de la TSS.
+  Las dos cosas cambian con cada tarea, igual que CR3, FS (el TLS del programa, `arch_prctl`) y
+  los registros XMM (`fxsave`/`fxrstor`: el kernel no usa SSE, los programas sí). El orden de la
+  GDT no es libre: `sysret` calcula los selectores sumando 8 y 16 al de STAR.
+- **Nunca creerle a un puntero del programa.** `read(fd, buf, n)` con `buf` apuntando al kernel
+  sería una forma de pisarlo. El kernel no usa esos punteros: recorre las tablas del proceso,
+  exige el bit USER (y WRITABLE para escribir) y copia por el mapeo de la RAM. Si la página no
+  está todavía pero es de una zona válida, se asigna y se reintenta; si no, `EFAULT`.
+- **Memoria al primer uso.** `mmap` de 1 GiB o una pila de 8 MiB no gastan nada: solo se anota la
+  zona. La página aparece cuando el programa la toca (fallo de página → ¿es de una zona? → una
+  página en cero). El malloc de musl me enseñó que las zonas se superponen de formas
+  inesperadas: pone una página de guarda (`mmap` PROT_NONE fijo) en el medio de su heap, y un
+  `brk` que rehacía toda la zona del heap la pisaba (el programa moría en la asignación 20000).
+- **Los procesos no tocan el disco.** El FAT32 y la Terminal son de la tarea del escritorio: un
+  `open` deja un pedido en una cola, despierta al escritorio (`EV_PROC`) y espera la respuesta,
+  como un microkernel con su servidor de archivos. Un archivo se lee entero al abrirlo y se
+  escribe entero al cerrarlo; `unlink` lo manda a la Papelera. El escritorio dejó de dormir
+  "hasta el próximo cuadro": duerme hasta el cuadro **o** hasta que un programa pida algo.
+- **Un programa que se porta mal termina él, no el sistema.** Un fallo de página inválido, una
+  instrucción ilegal o una división por cero en el anillo 3 terminan el proceso con la señal de
+  Linux (139 = SIGSEGV, como en bash). Ctrl+C marca al proceso; se termina en su próxima
+  llamada, espera o **tick del timer** (así también se corta un bucle que no llama al sistema).
+- **Programas de verdad, sin compilador de C.** `kernel/usuario/` se compila para
+  `x86_64-unknown-linux-musl` con `rust-lld` y los objetos de musl que trae Rust: estáticos
+  *static-pie* con la biblioteca estándar entera. `std::fs`, `println!`, `Vec`, `f64` y
+  `TcpStream` funcionan sin tocar una línea. Para saber qué llamadas hacían falta alcanzó con
+  correrlos: lo que no existe devuelve `ENOSYS` y se anota en el log.
+- **Sockets con firewall.** `connect` es una conexión larga del `Outbox` (ADR 0007) a nombre de la
+  app `programas`: pasa por las reglas de `ufw` como todo lo demás, y un bloqueo llega al
+  programa como `EACCES` ("Permission denied").
 
 ### K10: TLS y decodificadores en el kernel
 
@@ -757,7 +804,7 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K10 terminados; sigue K11 (espacio de usuario). Son 11 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
+**Dónde estamos:** K0–K10 terminados; K11 (espacio de usuario) en curso. Son 11 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
 K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los anteriores juntos.
 
 | Hito | Qué se logra | Qué se aprende |
@@ -773,7 +820,7 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
 | **K9** ✅ | Multitarea: planificador con prioridades y desalojo, tareas del kernel con pila propia (escritorio, red, ociosa), disco y red por interrupciones | Cambio de contexto, sincronización |
 | **K10** ✅ | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo ✅; decodificadores PNG (propio) y JPEG (`zune-jpeg`) ✅ | Criptografía, certificados, compresión |
-| K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
+| K11 | Espacio de usuario (ADR 0010): ring 3, syscalls, cargador ELF ✅. Los primeros programas de Linux estáticos ✅; sockets (y el firewall en la pila de red) ✅; un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
 | K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |
 | K14 | **Wi-Fi**: un driver de placa real (firmware del fabricante), 802.11 y WPA2. La sincronización no cambia: ya funciona entre redes distintas | Redes inalámbricas, criptografía de enlace |

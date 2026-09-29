@@ -18,7 +18,9 @@
 //! - **Imágenes**: si el pedido trae `X-Jarvis-Imagen: bmp`, la imagen (PNG, JPEG, GIF, WebP…)
 //!   se convierte a BMP, el único formato que el kernel sabe leer, y se achica si es enorme.
 //! - **Repositorio de paquetes**: `http://paquetes.jarvis/…` se sirve desde la carpeta
-//!   `kernel/paquetes/` del proyecto (solo lectura, sin salir de esa carpeta).
+//!   `kernel/paquetes/` del proyecto (solo lectura, sin salir de esa carpeta), y
+//!   `http://paquetes.jarvis/usuario/…` desde `target/usuario/`: los programas de Linux
+//!   compilados desde `kernel/usuario/` (K11, ADR 0010).
 
 use std::io::{Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -301,7 +303,11 @@ fn serve_repo(path: &str, want_bmp: bool) -> (u16, &'static str, Vec<u8>) {
     if !safe {
         return (400, "text/plain", b"nombre de archivo invalido".to_vec());
     }
-    let file = repo_dir().join(path);
+    // Los programas de Linux compilados desde kernel/usuario/ (K11, ADR 0010).
+    let file = match path.strip_prefix("usuario/") {
+        Some(program) => super::target_dir().join("usuario").join(program),
+        None => repo_dir().join(path),
+    };
     match std::fs::read(&file) {
         Ok(data) if want_bmp => match to_bmp(&data, MAX_SIDE_REPO) {
             Ok(bmp) => (200, "image/bmp", bmp),

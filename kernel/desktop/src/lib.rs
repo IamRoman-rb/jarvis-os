@@ -25,6 +25,7 @@ pub mod input;
 pub mod keymap;
 pub mod look;
 pub mod panels;
+pub mod procs;
 pub mod remote;
 pub mod shell;
 pub mod sync;

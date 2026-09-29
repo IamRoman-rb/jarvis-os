@@ -289,6 +289,10 @@ pub struct Requests {
     /// Cambió el reparto de los monitores: el kernel tiene que armar la imagen de ese tamaño y
     /// decirle a la placa qué muestra cada salida.
     pub display: Option<crate::display::Layout>,
+    /// Programas de Linux a crear (K11).
+    pub spawn: Vec<crate::procs::SpawnRequest>,
+    /// Programas a terminar.
+    pub kill: Vec<u32>,
 }
 
 type ClockKey = Option<(u16, u8, u8, u8, u8)>;
@@ -385,6 +389,8 @@ pub struct Desktop<D: BlockDevice> {
     fw_blocked: Vec<(u32, String)>,
     /// Conexiones largas que bloqueó el firewall.
     fw_blocked_streams: Vec<(u32, String)>,
+    /// Los programas de Linux que corren (K11): sus pedidos de archivos, consola y red.
+    procs: crate::procs::Procs,
 }
 
 /// Arma un `Ctx` con campos separados de `self` (así se puede usar junto con `self.slots`).
@@ -501,6 +507,7 @@ impl<D: BlockDevice> Desktop<D> {
             sphere_settle: 0,
             fw_blocked: Vec::new(),
             fw_blocked_streams: Vec::new(),
+            procs: Default::default(),
             last_clock: None,
             sync: Default::default(),
             brain: Default::default(),
@@ -753,7 +760,77 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     /// Una conexión larga cambió (el kernel la atiende): se le avisa a quien la abrió.
+    /// Algo de un programa de Linux (K11): su salida, que terminó, o un pedido de archivos,
+    /// consola o red. Las respuestas se juntan en [`Desktop::take_proc_replies`].
+    pub fn proc_event(&mut self, ev: crate::procs::ProcEvent) {
+        use crate::procs::ProcEvent;
+        let now_ms = self.last_now;
+        let clock = self.last_clock;
+        match ev {
+            ProcEvent::File { pid, op } => {
+                let now = crate::apps::timestamp(clock);
+                self.procs.file(pid, op, self.fs.as_mut(), now);
+                return;
+            }
+            ProcEvent::ReadLine { pid, max } => {
+                self.procs.read_line(pid, max);
+                return;
+            }
+            ProcEvent::Net { pid, op } => {
+                self.procs.net(pid, op, &mut self.out);
+                self.process_outbox(now_ms, clock);
+                return;
+            }
+            ProcEvent::Exited { pid, code, .. } => {
+                self.logs.push(format!("PROGRAMA_FIN {pid} {code}"));
+                self.procs.exited(pid, &mut self.out);
+            }
+            ProcEvent::Output { pid, ref data } => {
+                // Para el log (los tests la buscan ahí): de a renglones, sin colores.
+                for line in String::from_utf8_lossy(data).lines().take(50) {
+                    self.logs
+                        .push(format!("PROGRAMA_SALIDA {pid} {}", line.trim_end()));
+                }
+            }
+        }
+        let tasks = self.tasks();
+        {
+            let mut ctx = ctx!(self, now_ms, clock, &tasks);
+            for s in &mut self.slots {
+                ctx.out.app = app_tag(s.app.kind());
+                s.app.proc_event(&ev, &mut ctx);
+                if s.app.take_dirty() {
+                    s.content_dirty = true;
+                }
+            }
+        }
+        let before = self.geometry();
+        self.process_outbox(now_ms, clock);
+        self.damage_geometry(&before, now_ms);
+    }
+
+    /// Las respuestas para los programas (las lleva el kernel).
+    pub fn take_proc_replies(&mut self) -> Vec<(u32, crate::procs::ProcReply)> {
+        self.procs.take_replies()
+    }
+
+    /// Un programa que no se pudo crear (el kernel dice por qué): la Terminal lo muestra.
+    pub fn spawn_failed(&mut self, pid: u32, why: String) {
+        self.proc_event(crate::procs::ProcEvent::Output {
+            pid,
+            data: format!("{why}\n").into_bytes(),
+        });
+        self.proc_event(crate::procs::ProcEvent::Exited {
+            pid,
+            code: 126,
+            why: Some(why),
+        });
+    }
+
     pub fn stream_event(&mut self, id: u32, event: StreamEvent) {
+        if self.procs.stream_event(id, &event) {
+            return;
+        }
         if let Some(events) = self
             .brain
             .stream_event(id, &event, self.last_now, &mut self.out)
@@ -2236,11 +2313,25 @@ impl<D: BlockDevice> Desktop<D> {
                 && !out.lock
                 && !out.identify
                 && !out.close_self
+                && out.spawn.is_empty()
+                && out.proc_input.is_empty()
+                && out.proc_kill.is_empty()
             {
                 self.out = out;
                 return;
             }
             self.out.next_net = out.next_net;
+            self.out.next_pid = out.next_pid;
+            for req in out.spawn {
+                self.logs
+                    .push(format!("PROGRAMA_INICIO {} {}", req.pid, req.path));
+                self.procs.started(req.pid);
+                self.requests.spawn.push(req);
+            }
+            for (pid, data) in out.proc_input {
+                self.procs.input(pid, data);
+            }
+            self.requests.kill.extend(out.proc_kill);
             for l in out.launch {
                 self.launch(l, now_ms, clock);
             }

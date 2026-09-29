@@ -258,3 +258,53 @@ fn segmentos_del_elf() {
     cut.truncate(100);
     assert_eq!(load_segments(&cut, 0), None, "encabezados cortados");
 }
+
+#[test]
+fn rangos_permisos_y_liberar_el_espacio_de_un_proceso() {
+    let mut mem = Ram::default();
+    let mut f = frames();
+    let t = PageTable::new(&mut mem, &mut f).unwrap();
+    let before = f.free_frames();
+    let user = flags::USER | flags::WRITABLE;
+    // Tres páginas de un "proceso" en la entrada 0 y una del kernel en otra entrada.
+    for (i, v) in [0x40_0000u64, 0x40_1000, 0x7F_FFFF_E000].iter().enumerate() {
+        t.map(
+            &mut mem,
+            &mut f,
+            *v,
+            0x10_0000 + i as u64 * 0x1000,
+            Size::Small,
+            user,
+        )
+        .unwrap();
+    }
+    t.map(
+        &mut mem,
+        &mut f,
+        0xFFFF_8000_0000_0000,
+        0x20_0000,
+        Size::Small,
+        flags::WRITABLE,
+    )
+    .unwrap();
+    // Permisos: la página queda con la misma física y sin WRITABLE.
+    let old = t.set_flags(&mut mem, 0x40_1000, flags::USER).unwrap();
+    assert_eq!(old.phys, 0x10_1000);
+    let l = t.leaf(&mem, 0x40_1000).unwrap();
+    assert_eq!((l.phys, l.flags & flags::WRITABLE), (0x10_1000, 0));
+    // Un rango: solo lo que cae adentro.
+    let mut gone = Vec::new();
+    t.unmap_range(&mut mem, 0x40_0000, 0x40_1000, &mut |l| gone.push(l.virt));
+    assert_eq!(gone, [0x40_0000]);
+    assert!(t.leaf(&mem, 0x40_0000).is_none());
+    assert!(t.leaf(&mem, 0x40_1000).is_some());
+    // Desarmar la entrada 0: las hojas que quedan se informan, las tablas vuelven al
+    // allocator y el kernel sigue mapeado.
+    let mut leaves = Vec::new();
+    t.free_slot(&mut mem, &mut f, 0, &mut |l| leaves.push(l.virt));
+    assert_eq!(leaves, [0x40_1000, 0x7F_FFFF_E000]);
+    assert!(t.leaf(&mem, 0x40_1000).is_none());
+    assert!(t.leaf(&mem, 0xFFFF_8000_0000_0000).is_some());
+    // Quedan usadas solo las tablas del kernel (PDPT, PD y PT de su página).
+    assert_eq!(f.free_frames(), before - 3);
+}

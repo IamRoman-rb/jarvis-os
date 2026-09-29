@@ -305,10 +305,16 @@ pub fn describe(b: &[u8]) -> String {
     }
 }
 
-/// Lo que se muestra al intentar ejecutar un programa que no es de JARVIS-OS.
+/// ¿Es un programa de Linux que JARVIS-OS puede correr (K11)? ELF de 64 bits para x86-64 y
+/// sin intérprete (estático o static-pie). El cargador del kernel verifica el resto.
+pub fn runnable(b: &[u8]) -> bool {
+    matches!(detect(b), Kind::Elf(e) if e.bits == 64 && e.machine == "x86-64" && e.interpreter.is_none())
+}
+
+/// Lo que se muestra al intentar ejecutar un programa que JARVIS-OS no puede correr.
 pub fn why_not(b: &[u8]) -> Option<String> {
     let k = detect(b);
-    let (what, needs): (String, &str) = match &k {
+    let (what, needs): (String, String) = match &k {
         Kind::Pe(p) => {
             let mut w = describe(b);
             if !p.imports.is_empty() {
@@ -321,27 +327,38 @@ pub fn why_not(b: &[u8]) -> Option<String> {
             }
             (
                 w,
-                "la API de Windows (Win32: esas DLL). Es lo que hace Wine en Linux",
+                "necesita la API de Windows (Win32: esas DLL), que es lo que hace Wine en Linux"
+                    .into(),
             )
         }
-        Kind::Elf(_) => (
+        Kind::Elf(e) if e.bits != 64 || e.machine != "x86-64" => (
             describe(b),
-            "las llamadas al sistema de Linux y su biblioteca de C (glibc)",
+            format!("es para {} y JARVIS-OS corre en x86-64", e.machine),
+        ),
+        Kind::Elf(e) => (
+            describe(b),
+            format!(
+                "usa bibliotecas dinámicas ({}) y todavía no hay un enlazador dinámico",
+                e.interpreter.as_ref()?
+            ),
         ),
         Kind::Deb => (
             describe(b),
-            "dpkg y programas ELF de Linux adentro del paquete",
+            "es un paquete de Debian: habría que desarmarlo (dpkg), y sus programas suelen usar \
+             bibliotecas dinámicas"
+                .into(),
         ),
         Kind::Squashfs => (
             describe(b),
-            "leer squashfs y los programas ELF de Linux que trae adentro",
+            "es un snap: habría que leer squashfs, y sus programas usan bibliotecas dinámicas"
+                .into(),
         ),
         _ => return None,
     };
     Some(format!(
-        "{what}\nJARVIS-OS todavía no puede ejecutarlo: le falta espacio de usuario (ring 3), un\n\
-         cargador de programas y {needs}. Está en el roadmap (K11). Mientras tanto: `file`,\n\
-         `xxd` y `strings` para inspeccionarlo, y `apt install` para programas de JARVIS-OS."
+        "{what}\nJARVIS-OS todavía no puede ejecutarlo: {needs}. Los programas de Linux\n\
+         estáticos para x86-64 sí corren. Mientras tanto: `file`, `xxd` y `strings` para\n\
+         inspeccionarlo, y `apt install` para programas de JARVIS-OS."
     ))
 }
 

@@ -290,6 +290,17 @@ impl App {
         }
     }
 
+    /// Algo de un programa de Linux (la Terminal que lo lanzó lo muestra).
+    pub fn proc_event<D: BlockDevice>(
+        &mut self,
+        ev: &crate::procs::ProcEvent,
+        ctx: &mut Ctx<'_, D>,
+    ) {
+        if let App::Terminal(t) = self {
+            t.proc_event(ev, ctx);
+        }
+    }
+
     /// Algo pasó con una conexión larga (cada app mira solo las que abrió).
     pub fn stream_event<D: BlockDevice>(
         &mut self,

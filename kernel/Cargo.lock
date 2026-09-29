@@ -839,6 +839,7 @@ dependencies = [
  "jarvis-fs",
  "jarvis-gfx",
  "jarvis-image",
+ "jarvis-linux",
  "jarvis-sync",
  "lz4_flex",
  "resvg",
@@ -880,6 +881,7 @@ dependencies = [
  "jarvis-desktop",
  "jarvis-fs",
  "jarvis-gfx",
+ "jarvis-linux",
  "jarvis-mem",
  "jarvis-net",
  "jarvis-task",
@@ -891,6 +893,10 @@ dependencies = [
  "spin 0.12.3",
  "x86_64",
 ]
+
+[[package]]
+name = "jarvis-linux"
+version = "0.1.0"
 
 [[package]]
 name = "jarvis-mem"

@@ -28,7 +28,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 /// Las apps que se pueden nombrar en una regla.
-pub const APPS: [(&str, &str); 10] = [
+pub const APPS: [(&str, &str); 11] = [
     ("navegador", "Navegador web"),
     ("brave", "Brave"),
     ("sync", "Sincronización"),
@@ -38,6 +38,7 @@ pub const APPS: [(&str, &str); 10] = [
     ("winget", "Programas de Windows (winget)"),
     ("configuracion", "Configuración (prueba de red)"),
     ("jarvis", "Consola de JARVIS"),
+    ("programas", "Programas de Linux (sockets)"),
     ("sistema", "El resto del sistema"),
 ];
 

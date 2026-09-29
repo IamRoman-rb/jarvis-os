@@ -18,6 +18,13 @@
 //! pueden cambiar de tarea en medio de cualquier código que tenga las interrupciones
 //! habilitadas. Por eso los datos compartidos usan `IrqMutex` (irqlock.rs) y el heap y el
 //! puerto serie deshabilitan las interrupciones mientras tienen su lock.
+//!
+//! **Procesos (K11).** Una tarea puede ser un programa del anillo 3. Además de su pila, un proceso
+//! tiene cosas que la CPU guarda en registros y que hay que cambiar junto con la tarea: su
+//! espacio de direcciones (CR3), la pila del kernel a la que salta una interrupción o un
+//! `syscall` (rsp0 de la TSS), su registro FS (el TLS del programa) y el estado de SSE (los
+//! registros XMM: el kernel no los usa, pero los programas sí, así que se guardan con `fxsave`
+//! y se recuperan con `fxrstor` solo al salir de un proceso y al entrar a otro).
 //! Referencia: <https://wiki.osdev.org/Kernel_Multitasking> y la ABI System V para x86_64.
 
 use alloc::boxed::Box;
@@ -39,6 +46,10 @@ pub const EV_DISK: u32 = 1 << 0;
 pub const EV_NET: u32 = 1 << 1;
 /// El escritorio le dejó pedidos a la tarea de la red.
 pub const EV_NET_REQUEST: u32 = 1 << 2;
+/// Un proceso le dejó algo al escritorio (salida, un pedido de archivos, que terminó).
+pub const EV_PROC: u32 = 1 << 3;
+/// El escritorio contestó a un proceso.
+pub const EV_PROC_REPLY: u32 = 1 << 4;
 
 /// El planificador. Se toma siempre con las interrupciones deshabilitadas (en las tareas, con
 /// `without_interrupts`; en los manejadores ya lo están), así nunca está tomado cuando llega una
@@ -52,6 +63,89 @@ struct SavedStacks(UnsafeCell<[u64; MAX_TASKS]>);
 // deshabilitadas y en un solo núcleo: nunca hay dos accesos a la vez.
 unsafe impl Sync for SavedStacks {}
 static SAVED: SavedStacks = SavedStacks(UnsafeCell::new([0; MAX_TASKS]));
+
+/// El área de `fxsave` (512 bytes, alineada a 16).
+#[repr(C, align(16))]
+struct Fxsave([u8; 512]);
+
+/// Lo que se cambia además de la pila cuando la tarea es un proceso.
+struct UserContext {
+    user: bool,
+    cr3: u64,
+    /// Tope de la pila del kernel de la tarea (rsp0 y la pila de `syscall`).
+    kstack: u64,
+    fs: u64,
+    fpu: Fxsave,
+}
+
+struct Contexts(UnsafeCell<[UserContext; MAX_TASKS]>);
+// SAFETY: como `SavedStacks`: solo se toca durante un cambio de contexto o al crear la tarea, con
+// las interrupciones deshabilitadas, en un solo núcleo.
+unsafe impl Sync for Contexts {}
+static CONTEXTS: Contexts = Contexts(UnsafeCell::new(
+    [const {
+        UserContext {
+            user: false,
+            cr3: 0,
+            kstack: 0,
+            fs: 0,
+            fpu: Fxsave([0; 512]),
+        }
+    }; MAX_TASKS],
+));
+
+/// La pila del kernel del proceso que corre: la lee la entrada de `syscall` (syscall.rs).
+#[unsafe(no_mangle)]
+pub static JARVIS_SYSCALL_STACK: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+
+/// Estado inicial de SSE/x87 (como después de `fninit`): FCW = 0x37F, MXCSR = 0x1F80 (todas las
+/// excepciones enmascaradas, redondeo al más cercano).
+fn fresh_fpu() -> Fxsave {
+    let mut f = Fxsave([0; 512]);
+    f.0[0..2].copy_from_slice(&0x037Fu16.to_le_bytes());
+    f.0[24..28].copy_from_slice(&0x1F80u32.to_le_bytes());
+    f.0[28..32].copy_from_slice(&0xFFFFu32.to_le_bytes()); // MXCSR_MASK
+    f
+}
+
+/// Lo que va además de la pila al cambiar de `from` a `to` (con las interrupciones apagadas).
+///
+/// # Safety
+/// Interrupciones deshabilitadas, un solo núcleo, `from` y `to` < MAX_TASKS.
+unsafe fn switch_user_context(from: TaskId, to: TaskId) {
+    use x86_64::registers::model_specific::FsBase;
+    // SAFETY: lo garantiza quien llama (ver arriba): nadie más toca CONTEXTS a la vez.
+    let c = unsafe { &mut *CONTEXTS.0.get() };
+    if c[from].user {
+        c[from].fs = FsBase::read().as_u64();
+        // SAFETY: el área es de la tarea `from`, alineada a 16 y de 512 bytes.
+        unsafe {
+            core::arch::asm!("fxsave64 [{}]", in(reg) c[from].fpu.0.as_mut_ptr(), options(nostack))
+        };
+    }
+    let t = &mut c[to];
+    if t.user {
+        let (current, _) = x86_64::registers::control::Cr3::read_raw();
+        if current.start_address().as_u64() != t.cr3 {
+            // SAFETY: `cr3` es la PML4 del proceso, que comparte la mitad del kernel (este
+            // código, la pila, el heap): la ejecución sigue igual con ella.
+            unsafe {
+                x86_64::registers::control::Cr3::write_raw(
+                    x86_64::structures::paging::PhysFrame::containing_address(
+                        x86_64::PhysAddr::new(t.cr3),
+                    ),
+                    0,
+                )
+            };
+        }
+        crate::gdt::set_kernel_stack(t.kstack);
+        JARVIS_SYSCALL_STACK.store(t.kstack, Ordering::Relaxed);
+        FsBase::write(x86_64::VirtAddr::new(t.fs));
+        // SAFETY: el área la llenó `fxsave` (o `fresh_fpu`) y está alineada.
+        unsafe { core::arch::asm!("fxrstor64 [{}]", in(reg) t.fpu.0.as_ptr(), options(nostack)) };
+    }
+}
 
 global_asm!(
     // jarvis_switch(guardar: *mut u64 [rdi], cargar: u64 [rsi])
@@ -127,6 +221,16 @@ pub fn spawn(
     stack: usize,
     f: impl FnOnce() + Send + 'static,
 ) -> Option<TaskId> {
+    spawn_with(name, priority, stack, 0, f)
+}
+
+fn spawn_with(
+    name: &'static str,
+    priority: Priority,
+    stack: usize,
+    user_cr3: u64,
+    f: impl FnOnce() + Send + 'static,
+) -> Option<TaskId> {
     interrupts::without_interrupts(|| {
         let mut guard = SCHED.lock();
         let sched = guard.as_mut()?;
@@ -149,13 +253,46 @@ pub fn spawn(
         ];
         let rsp = top - (frame.len() as u64) * 8;
         // SAFETY: [rsp, top) está dentro de la pila recién mapeada (escribible, de nadie más), y
-        // el lugar de `id` en SAVED no lo usa nadie: la tarea todavía no corrió.
+        // el lugar de `id` en SAVED y CONTEXTS no lo usa nadie: la tarea todavía no corrió.
         unsafe {
             core::ptr::copy_nonoverlapping(frame.as_ptr(), rsp as *mut u64, frame.len());
             (*SAVED.0.get())[id] = rsp;
+            let c = &mut (*CONTEXTS.0.get())[id];
+            c.kstack = top;
+            c.user = user_cr3 != 0;
+            c.cr3 = user_cr3;
+            c.fs = 0;
+            if c.user {
+                c.fpu = fresh_fpu();
+            }
         }
         Some(id)
     })
+}
+
+/// Crea la tarea de un proceso (K11): corre en el espacio `cr3` y, cuando cambia de tarea, se
+/// guardan y recuperan su FS y su estado de SSE. `f` termina saltando al anillo 3.
+pub fn spawn_process(
+    name: &'static str,
+    stack: usize,
+    cr3: u64,
+    f: impl FnOnce() + Send + 'static,
+) -> Option<TaskId> {
+    spawn_with(name, Priority::Normal, stack, cr3, f)
+}
+
+/// La tarea que corre ahora.
+pub fn current() -> TaskId {
+    interrupts::without_interrupts(|| SCHED.lock().as_ref().map_or(0, |s| s.current()))
+}
+
+/// La tarea actual deja de ser un proceso (antes de terminar: su espacio se libera).
+pub fn forget_user_context() {
+    interrupts::without_interrupts(|| {
+        let id = SCHED.lock().as_ref().map_or(0, |s| s.current());
+        // SAFETY: sin interrupciones y en un solo núcleo: nadie más toca CONTEXTS.
+        unsafe { (*CONTEXTS.0.get())[id].user = false };
+    });
 }
 
 /// Cambia a la tarea que diga el planificador. Hay que llamarla sin interrupciones.
@@ -169,7 +306,10 @@ fn reschedule() {
         // SAFETY: interrupciones deshabilitadas (lo exige el llamador) y `from`/`to` < MAX_TASKS.
         // `to` tiene guardado un rsp válido: o lo guardó este mismo código al salir, o lo armó
         // `spawn`. La pila de `from` sigue mapeada mientras exista la tarea.
-        unsafe { jarvis_switch(saved.add(from), *saved.add(to)) }
+        unsafe {
+            switch_user_context(from, to);
+            jarvis_switch(saved.add(from), *saved.add(to))
+        }
     }
 }
 
@@ -206,11 +346,6 @@ pub fn wait(events: u32, until: Option<u64>) -> u32 {
             interrupts::disable();
         }
     })
-}
-
-/// Dormir hasta `until` (ms).
-pub fn sleep_until(until: u64) {
-    wait(0, Some(until));
 }
 
 /// Avisa `events`. Si despierta a una tarea más importante que la actual, le cede la CPU ya

@@ -9,3 +9,4 @@ hola|1.0|El ejemplo más chico de un programa de JARVIS-OS (para aprender a hace
 fondos|1.0|Tres fondos de pantalla (se eligen en Configuración > Personalización)||400 KB
 manual|1.0|El manual de JARVIS-OS en /Documentos||6 KB
 esenciales|1.0|Instala de una vez neofetch, cowsay, fortune y calc|neofetch,cowsay,fortune,calc|1 KB
+programas-linux|1.0|Programas de Linux de verdad (K11): hola-linux, eco, pruebas y red||2 MB
