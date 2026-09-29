@@ -2016,12 +2016,17 @@ fn wallpaper_name(w: &Wallpaper) -> String {
     }
 }
 
-/// Imágenes BMP en /Imágenes/Fondos y /Imágenes.
+/// Imágenes (BMP, PNG y JPEG) en /Imágenes/Fondos y /Imágenes.
 fn find_wallpapers<D: BlockDevice>(fs: &mut FileSystem<D>) -> Vec<String> {
     let mut out = Vec::new();
     for dir in ["/Imágenes/Fondos", "/Imágenes"] {
         for e in fs.list(dir).unwrap_or_default() {
-            if !e.is_dir && e.name.to_ascii_lowercase().ends_with(".bmp") {
+            let lower = e.name.to_ascii_lowercase();
+            if !e.is_dir
+                && [".bmp", ".png", ".jpg", ".jpeg"]
+                    .iter()
+                    .any(|x| lower.ends_with(x))
+            {
                 out.push(join(dir, &e.name));
             }
         }

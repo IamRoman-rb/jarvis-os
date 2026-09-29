@@ -116,6 +116,40 @@ fn u32_at(b: &[u8], o: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(o..o + 4)?.try_into().ok()?))
 }
 
+/// Lado máximo de una imagen de la web (como el puente): más grande no se ve mejor en la
+/// ventana y ocupa mucha memoria.
+pub const WEB_MAX_SIDE: usize = 900;
+/// Lado máximo de una imagen del disco (fondos de pantalla, visor).
+pub const DISK_MAX_SIDE: usize = 1920;
+
+/// Lee un BMP, un PNG o un JPEG (estos dos, con `jarvis-image`), achicado para que el lado
+/// mayor no pase de `max_side`. `None` si es otro formato o está dañado.
+pub fn decode_any(b: &[u8], max_side: usize) -> Option<Image> {
+    let Some(decoded) = jarvis_image::decode(b) else {
+        return decode(b);
+    };
+    let img = decoded.ok()?.shrink_to(max_side);
+    let opaque = !img.has_alpha();
+    let mut pixels = Vec::with_capacity(img.width * img.height);
+    let mut alpha = Vec::new();
+    for p in img.rgba.as_chunks::<4>().0 {
+        pixels.push(Color {
+            r: p[0],
+            g: p[1],
+            b: p[2],
+        });
+        if !opaque {
+            alpha.push(p[3]);
+        }
+    }
+    Some(Image {
+        width: img.width,
+        height: img.height,
+        pixels,
+        alpha,
+    })
+}
+
 /// Lee un BMP de 24 o 32 bits sin compresión. `None` si es otro formato o está roto.
 pub fn decode(b: &[u8]) -> Option<Image> {
     if b.get(0..2)? != b"BM" {
@@ -197,5 +231,8 @@ mod tests {
         assert_eq!(img.pixels[2 * 5 + 4], Color::hex(0x00ff00));
         assert!(decode(b"PNG....").is_none());
         assert!(decode(&bmp[..60]).is_none(), "truncado");
+        // decode_any también entiende el BMP.
+        assert_eq!(decode_any(&bmp, 900).unwrap().pixels, img.pixels);
+        assert!(decode_any(b"GIF89a....", 900).is_none());
     }
 }

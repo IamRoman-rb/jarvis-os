@@ -4,10 +4,11 @@
 mod common;
 
 use common::*;
+use image::ImageEncoder;
 use jarvis_desktop::apps::App;
 use jarvis_desktop::files::{Column, Dialog, Preview};
 use jarvis_desktop::files_view::Action;
-use jarvis_desktop::{AppKind, Key, Mods};
+use jarvis_desktop::{AppKind, Key, Launch, Mods};
 
 #[test]
 fn tab_abre_archivos_en_la_raiz_ordenado() {
@@ -320,5 +321,50 @@ fn una_pagina_html_del_disco_se_abre_en_el_navegador() {
             assert_eq!(b.title(), "Local · Navegador");
         }
         _ => panic!(),
+    }
+}
+
+/// Un PNG (con transparencia) y un JPEG en el disco los abre el visor: los decodifica
+/// `jarvis-image`, sin el puente (K10).
+#[test]
+fn el_visor_abre_png_y_jpeg() {
+    let (w, h) = (40u32, 24u32);
+    let rgba: Vec<u8> = (0..w * h)
+        .flat_map(|i| {
+            [
+                (i % w * 6) as u8,
+                (i / w * 10) as u8,
+                90,
+                if i % 3 == 0 { 0 } else { 255 },
+            ]
+        })
+        .collect();
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(&rgba, w, h, image::ExtendedColorType::Rgba8)
+        .unwrap();
+    let rgb: Vec<u8> = rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect();
+    let mut jpg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new(&mut jpg)
+        .write_image(&rgb, w, h, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    for (name, data) in [("foto.png", &png), ("foto.jpg", &jpg)] {
+        let mut t = Driver::new();
+        let path = format!("/Imágenes/{name}");
+        t.d.fs_mut()
+            .unwrap()
+            .write_file(&path, data, jarvis_fs::Timestamp::EPOCH)
+            .unwrap();
+        t.d.open(Launch::View(path), t.now, CLOCK);
+        let Some(App::Viewer(v)) = t.d.app(AppKind::Viewer) else {
+            panic!("no se abrió el visor");
+        };
+        assert!(v.title().ends_with("40×24"), "{name}: {}", v.title());
+        t.frame();
     }
 }

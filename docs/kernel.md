@@ -378,6 +378,7 @@ firmware UEFI (OVMF en QEMU)
                     │               firewall, idiomas, terminal (jsh, apt, snap, winget, ufw),
                     │               web (DOM, CSS, estilos, maquetación en cajas, HTTP)
                       ├─ jarvis-fs   FAT32 sobre el disco (con caché de sectores)
+                      ├─ jarvis-image PNG (propio, con inflate) y JPEG (zune-jpeg) → RGBA
                       └─ jarvis-gfx  dibujo: HUD, esfera, texto, fuente vectorial, fuente de las
                                      páginas (DejaVu + fontdue), figuras
 ```
@@ -388,6 +389,7 @@ firmware UEFI (OVMF en QEMU)
 | `fs` (`jarvis-fs`) | FAT32 propio: montaje, FAT (dos copias), nombres largos, lectura, escritura, carpetas, renombrar, mover, **copiar**, borrar, **caché de sectores**. Sobre un trait `BlockDevice`. | 22 tests, 14 de ellos **cruzados contra `fatfs`**: cada uno lee lo que escribe el otro, y el espacio libre se cuenta sobre la FAT cruda |
 | `desktop` (`jarvis-desktop`) | Escritorio: gestor de ventanas (con escritorios virtuales), atajos, barra, panel de estado, menús y paneles, configuración, firewall, idiomas, composición; apps (Archivos, Terminal, Configuración, Monitor, Consola, Editor, Música, Visor, Navegador); shell `jsh`, `apt`, `snap`, `winget`, `ufw`, formatos PE/ELF/squashfs; web: URL, HTTP, DOM, selectores y cascada, maquetación en cajas (flujo, flotantes, flex, grid, tablas), JSON, adaptador de YouTube; teclado latinoamericano. | 116 tests: el escritorio manejado con teclas y clics sobre un disco en memoria, verificado con `fatfs`; la terminal, `apt`, `snap` y `winget` contra el repositorio real y respuestas grabadas; el firewall; la maquetación sobre HTML de prueba; incluye "render incremental == redibujar todo". Más `vista_previa` (a mano): arma una página real, con imágenes, y la guarda en BMP |
 | `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente, conexiones TCP largas. | 6 tests de punta a punta en memoria (placa "loopback" + servidores de juguete), incluido `poll_delay` |
+| `image` (`jarvis-image`) | Imágenes (K10): inflate (DEFLATE + zlib) y PNG propios (todos los tipos de color y profundidades, paletas, `tRNS`, Adam7, CRC y Adler-32), JPEG con `zune-jpeg` (progresivos incluidos), topes de tamaño y achicado por promedio. | 13 tests, los de PNG **cruzados contra la crate `png`** (todas las combinaciones de color, bits y filtro; entrelazado; cortado en cada byte) y los de JPEG contra `image`; y `cargo xtask test` (el visor abre un PNG y un JPEG progresivo en el kernel) |
 | `mem` (`jarvis-mem`) | Memoria: allocator de marcos físicos (mapa de bits), tablas de páginas de 4 niveles (mapear, traducir, desmapear, recorrer; páginas de 4 KiB, 2 MiB y 1 GiB) y segmentos del ELF del kernel para W^X. Sobre un trait `PhysMem`. | 8 tests sobre una RAM de mentira (copiar una jerarquía da las mismas traducciones) y `cargo xtask test` (el kernel arranca con sus tablas y verifica W^X) |
 | `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
@@ -395,7 +397,7 @@ firmware UEFI (OVMF en QEMU)
 
 ## Lo que se aprendió (y por qué el código es así)
 
-### K10: TLS en el kernel (en curso)
+### K10: TLS y decodificadores en el kernel
 
 - **Primero, el azar.** TLS entero se apoya en claves efímeras impredecibles: si el generador es
   malo, el cifrado más fuerte no sirve (le pasó a Debian con OpenSSL en 2008). `jarvis_tls::rng`
@@ -448,6 +450,28 @@ firmware UEFI (OVMF en QEMU)
   "continuar de todos modos". Se prueba en memoria (`net/tests/https.rs`: un servidor rustls con
   *ring* sobre la placa loopback, con un certificado para 127.0.0.1) y contra sitios reales en
   `cargo xtask test` con `JARVIS_TEST_INTERNET=1` (example.org llega; expired.badssl.com no).
+- **PNG propio** (`image/src/png.rs` e `inflate.rs`). DEFLATE son dos ideas apiladas: LZ77
+  ("copiá 12 bytes de 300 atrás") y códigos de Huffman (lo frecuente, con menos bits). La
+  sorpresa: los códigos se leen desde el bit menos significativo de cada byte, pero cada código
+  va con su bit más alto primero; por eso la tabla rápida (códigos de hasta 9 bits de una sola
+  consulta) se indexa con el código **invertido**, y los raros de más de 9 bits se decodifican
+  bit a bit como en `puff.c`. Una copia puede pisarse a sí misma (distancia 1, largo 100 = repetir
+  un byte 100 veces), así que se copia byte a byte. Encima de eso PNG filtra cada fila (la
+  diferencia con el píxel de la izquierda, el de arriba, su promedio o el predictor de Paeth),
+  que no comprime nada por sí mismo pero deja números chicos que DEFLATE aprovecha. Se sabe de
+  antemano cuánto tienen que ocupar los píxeles descomprimidos: ese es el tope del inflate, y
+  así un PNG de 1 KB que se descomprime en 4 GB (una "bomba") falla enseguida. Los chunks
+  críticos verifican su CRC; los opcionales no, como hacen los navegadores.
+- **JPEG con `zune-jpeg`**: sin `std` ni SIMD compila tal cual para el kernel. Se pide la salida
+  directo en RGBA y con tope de tamaño (una cabecera de 20 bytes puede decir 65535 × 65535). Su
+  IDCT es entera: el punto flotante por software no lo frena.
+- **Qué va directo y qué al puente**: las imágenes PNG y JPEG se piden sin `X-Jarvis-Imagen` y
+  las decodifica el navegador; las `.svg`, `.gif`, `.webp` e `.ico` van al puente de entrada. Como
+  la dirección no siempre dice el formato (`/foto?id=3`), si lo que llega directo no es PNG,
+  JPEG ni BMP (se mira la firma, no el `Content-Type`), se vuelve a pedir al puente. Las imágenes
+  de la web se achican a 900 px de lado (como hacía el puente) promediando cajas de píxeles,
+  pesando el color por la opacidad para que los bordes transparentes no se oscurezcan. El visor,
+  los fondos de pantalla y `open` también abren PNG y JPEG.
 
 ### K9: multitarea
 - **Una tarea es una pila y un `rsp` guardado**. Cambiar de tarea (`jarvis_switch`, 14
@@ -733,7 +757,7 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K9 terminados; sigue K10 (TLS en el kernel). Son 10 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
+**Dónde estamos:** K0–K10 terminados; sigue K11 (espacio de usuario). Son 11 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
 K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los anteriores juntos.
 
 | Hito | Qué se logra | Qué se aprende |
@@ -748,7 +772,7 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K7** ✅ | **JARVIS con Claude** (ADR 0008): la consola le habla a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code) y la esfera pulsa con la respuesta ✅; acciones en JARVIS-OS con 3 niveles de permiso ✅; "abrí tal proyecto y seguí" ✅; **voz** con el micrófono y los parlantes del anfitrión (adelantada de K12) ✅; micrófono virtio-sound ✅; cuenta de Claude e inicio de sesión con Google desde Configuración ✅ | Protocolos, agentes, permisos, voz |
 | **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
 | **K9** ✅ | Multitarea: planificador con prioridades y desalojo, tareas del kernel con pila propia (escritorio, red, ociosa), disco y red por interrupciones | Cambio de contexto, sincronización |
-| K10 | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo ✅; decodificadores PNG (propio) y JPEG (`zune-jpeg`) | Criptografía, certificados, compresión |
+| **K10** ✅ | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo ✅; decodificadores PNG (propio) y JPEG (`zune-jpeg`) ✅ | Criptografía, certificados, compresión |
 | K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
 | K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |

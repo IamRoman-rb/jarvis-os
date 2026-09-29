@@ -8,8 +8,13 @@
 //! entropía o sin hora) o si el usuario lo eligió en Configuración, esas páginas se piden a un
 //! **puente en el anfitrión** (lo levanta `cargo xtask run`), con la dirección completa en el
 //! pedido, como a un proxy HTTP: `GET https://sitio/camino HTTP/1.1`. El puente hace el TLS y
-//! devuelve la respuesta en texto plano. Las imágenes y los nombres `.jarvis` van siempre al
-//! puente (las convierte a BMP; el repositorio de paquetes vive ahí).
+//! devuelve la respuesta en texto plano. Los nombres `.jarvis` van siempre al puente (el
+//! repositorio de paquetes vive ahí).
+//!
+//! Imágenes: los PNG y JPEG los decodifica el kernel (`jarvis-image`, ADR 0009) y se piden
+//! directo. Los SVG, GIF, WebP e ICO se piden al puente con `X-Jarvis-Imagen: bmp` (los
+//! convierte). Si una imagen pedida directo resulta ser de otro formato (la dirección no lo
+//! dice), se vuelve a pedir al puente.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -56,7 +61,8 @@ pub fn request(url: &Url, via_proxy: bool) -> Vec<u8> {
     request_kind(url, via_proxy, FetchKind::Page)
 }
 
-/// El pedido GET. A las imágenes se les agrega `X-Jarvis-Imagen: bmp`: el puente las convierte.
+/// El pedido GET. A las imágenes que van al puente se les agrega `X-Jarvis-Imagen: bmp`: las
+/// convierte.
 pub fn request_kind(url: &Url, via_proxy: bool, kind: FetchKind) -> Vec<u8> {
     let target = if via_proxy {
         url.to_string()
@@ -70,7 +76,8 @@ pub fn request_kind(url: &Url, via_proxy: bool, kind: FetchKind) -> Vec<u8> {
         ""
     };
     let (accept, extra) = match kind {
-        FetchKind::Image => ("image/*", "X-Jarvis-Imagen: bmp\r\n"),
+        FetchKind::Image if via_proxy => ("image/*", "X-Jarvis-Imagen: bmp\r\n"),
+        FetchKind::Image => ("image/png,image/jpeg,image/*;q=0.5", ""),
         FetchKind::Download => ("*/*", ""),
         FetchKind::Page => ("text/html,text/plain;q=0.9,text/css;q=0.8,*/*;q=0.5", ""),
     };
@@ -186,8 +193,13 @@ pub struct Fetch {
     pub kind: FetchKind,
     /// El kernel hace el TLS (si no, HTTPS va por el puente).
     pub tls: bool,
+    /// La imagen va al puente para que la convierta (no es PNG ni JPEG).
+    image_bridge: bool,
     redirects: u32,
 }
+
+/// Formatos de imagen que el kernel no decodifica: se piden al puente de entrada.
+const BRIDGE_IMAGES: [&str; 5] = [".svg", ".svgz", ".gif", ".webp", ".ico"];
 
 pub enum Step {
     Connect(Connect),
@@ -208,7 +220,9 @@ impl Fetch {
     pub fn start_with(url: &str, kind: FetchKind, tls: bool) -> (Fetch, Step) {
         match Url::parse(url) {
             Some(u) => {
+                let path = u.path_only().to_ascii_lowercase();
                 let f = Fetch {
+                    image_bridge: BRIDGE_IMAGES.iter().any(|e| path.ends_with(e)),
                     url: u,
                     kind,
                     tls,
@@ -227,6 +241,7 @@ impl Fetch {
                     },
                     kind,
                     tls,
+                    image_bridge: false,
                     redirects: 0,
                 },
                 Step::Failed(format!("dirección inválida: {url}")),
@@ -235,9 +250,7 @@ impl Fetch {
     }
 
     fn connect(&self) -> Step {
-        // Las imágenes siempre van por el puente (que las convierte), igual que los nombres
-        // `.jarvis` (el repositorio de paquetes) y todo lo que es HTTPS.
-        let bridge = self.kind == FetchKind::Image || self.url.host.ends_with(BRIDGE_DOMAIN);
+        let bridge = self.bridge();
         match self.url.scheme {
             Scheme::Http if !bridge => Step::Connect(Connect {
                 target: Target::Direct {
@@ -261,12 +274,33 @@ impl Fetch {
         }
     }
 
+    /// ¿El pedido va al puente? Los nombres `.jarvis` (el repositorio de paquetes), las imágenes
+    /// que hay que convertir y, sin TLS propio, todo lo que es HTTPS.
+    fn bridge(&self) -> bool {
+        (self.kind == FetchKind::Image && self.image_bridge)
+            || self.url.host.ends_with(BRIDGE_DOMAIN)
+    }
+
+    fn via_proxy(&self) -> bool {
+        self.bridge() || (self.url.scheme == Scheme::Https && !self.tls)
+    }
+
     /// Llegó la respuesta completa de la conexión anterior.
     pub fn on_response(&mut self, raw: &[u8]) -> Step {
         let parsed = match parse_response(raw) {
             Ok(p) => p,
             Err(e) => return Step::Failed(e),
         };
+        // Una imagen pedida directo que no es PNG ni JPEG (ni BMP): que la convierta el puente.
+        if self.kind == FetchKind::Image
+            && !self.via_proxy()
+            && parsed.status < 300
+            && jarvis_image::sniff(&parsed.body).is_none()
+            && !parsed.body.starts_with(b"BM")
+        {
+            self.image_bridge = true;
+            return self.connect();
+        }
         if (300..400).contains(&parsed.status)
             && let Some(loc) = parsed.header("location")
         {
@@ -276,6 +310,8 @@ impl Fetch {
             }
             match self.url.join(loc) {
                 Some(next) => {
+                    let path = next.path_only().to_ascii_lowercase();
+                    self.image_bridge |= BRIDGE_IMAGES.iter().any(|e| path.ends_with(e));
                     self.url = next;
                     return self.connect();
                 }
@@ -322,13 +358,38 @@ mod tests {
         );
         // Pedido de servidor común, no de proxy.
         assert!(c.request.starts_with(b"GET /a HTTP/1.1\r\n"));
-        // Las imágenes y los nombres .jarvis siguen yendo al puente.
-        let (_, step) = Fetch::start_with("https://example.com/a.png", FetchKind::Image, true);
-        let Step::Connect(c) = step else { panic!() };
-        assert_eq!(c.target, Target::Proxy);
+        // Los nombres .jarvis siguen yendo al puente.
         let (_, step) = Fetch::start_with("https://paquetes.jarvis/x", FetchKind::Page, true);
         let Step::Connect(c) = step else { panic!() };
         assert_eq!(c.target, Target::Proxy);
+    }
+
+    #[test]
+    fn imagenes_png_y_jpeg_directo_y_las_demas_al_puente() {
+        // Un PNG va directo, sin pedirle al puente que lo convierta.
+        let (mut f, step) = Fetch::start_with("https://example.com/a.png", FetchKind::Image, true);
+        let Step::Connect(c) = step else { panic!() };
+        assert!(matches!(c.target, Target::Tls { .. }));
+        assert!(!String::from_utf8_lossy(&c.request).contains("X-Jarvis-Imagen"));
+        let png = b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\n\x89PNG\r\n\x1a\n";
+        assert!(matches!(f.on_response(png), Step::Done(r) if r.body.len() == 8));
+        // Una dirección sin extensión que resulta ser un WebP: se vuelve a pedir al puente.
+        let (mut f, _) = Fetch::start_with("http://example.com/foto", FetchKind::Image, true);
+        let webp = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nRIFF";
+        let Step::Connect(c) = f.on_response(webp) else {
+            panic!()
+        };
+        assert_eq!(c.target, Target::Proxy);
+        assert!(String::from_utf8_lossy(&c.request).contains("X-Jarvis-Imagen: bmp"));
+        // Un SVG va al puente de entrada.
+        let (_, step) = Fetch::start_with("https://example.com/logo.svg", FetchKind::Image, true);
+        let Step::Connect(c) = step else { panic!() };
+        assert_eq!(c.target, Target::Proxy);
+        // Sin TLS propio, un PNG por HTTPS va al puente (que igual lo convierte).
+        let (_, step) = Fetch::start_with("https://example.com/a.png", FetchKind::Image, false);
+        let Step::Connect(c) = step else { panic!() };
+        assert_eq!(c.target, Target::Proxy);
+        assert!(String::from_utf8_lossy(&c.request).contains("X-Jarvis-Imagen: bmp"));
     }
 
     #[test]

@@ -826,6 +826,17 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
         )?;
         s.wait_for("TERMINAL_FIN", STEP)?;
     }
+    // K10: un PNG y un JPEG progresivo del repositorio, sin convertir: los decodifica el
+    // kernel (el visor, con jarvis-image).
+    for file in ["fondos/aurora.png", "pruebas/aurora-progresivo.jpg"] {
+        s.type_text(&format!("wget http://paquetes.jarvis/{file}"))?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+    }
+    s.type_text("open aurora-progresivo.jpg && open aurora.png")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("VISOR_IMAGEN 640x400", STEP)?;
+    s.wait_for("VISOR_IMAGEN 1280x800", STEP)?;
     // Configuración (Win+I).
     s.monitor("sendkey meta_l-i")?;
     s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;

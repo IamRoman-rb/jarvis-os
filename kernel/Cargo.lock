@@ -838,6 +838,7 @@ dependencies = [
  "image",
  "jarvis-fs",
  "jarvis-gfx",
+ "jarvis-image",
  "jarvis-sync",
  "lz4_flex",
  "resvg",
@@ -858,6 +859,17 @@ dependencies = [
  "hashbrown",
  "libm",
  "noto-sans-mono-bitmap",
+]
+
+[[package]]
+name = "jarvis-image"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "miniz_oxide 0.8.9",
+ "png 0.18.1",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]

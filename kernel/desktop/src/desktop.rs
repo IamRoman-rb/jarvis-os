@@ -540,7 +540,7 @@ impl<D: BlockDevice> Desktop<D> {
                     .fs
                     .as_mut()
                     .and_then(|fs| fs.read_file(&path).ok())
-                    .and_then(|b| crate::bmp::decode(&b));
+                    .and_then(|b| crate::bmp::decode_any(&b, crate::bmp::DISK_MAX_SIDE));
                 match image {
                     Some(img) => {
                         let (w, h) = (bg.width() as i32, bg.height() as i32);

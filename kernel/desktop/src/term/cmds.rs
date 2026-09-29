@@ -1895,7 +1895,10 @@ impl Shell {
         let lower = p.to_lowercase();
         let launch = if st.is_dir || p == "/" {
             Launch::Folder(p)
-        } else if lower.ends_with(".bmp") {
+        } else if [".bmp", ".png", ".jpg", ".jpeg"]
+            .iter()
+            .any(|e| lower.ends_with(e))
+        {
             Launch::View(p)
         } else if lower.ends_with(".html") || lower.ends_with(".htm") {
             Launch::Browse(format!("file://{p}"))

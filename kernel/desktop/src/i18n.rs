@@ -813,8 +813,8 @@ static EN: &[(&str, &str)] = &[
         "Digits only (up to 8). Empty = no PIN",
     ),
     (
-        "Solo puedo mostrar imágenes BMP sin compresión (por ahora).",
-        "I can only show uncompressed BMP images (for now).",
+        "Solo puedo mostrar imágenes BMP, PNG y JPEG.",
+        "I can only show BMP, PNG and JPEG images.",
     ),
     (
         "Solo si el puente corre en otra máquina (--red)",
@@ -1698,8 +1698,8 @@ static PT: &[(&str, &str)] = &[
         "Só números (até 8). Vazio = sem PIN",
     ),
     (
-        "Solo puedo mostrar imágenes BMP sin compresión (por ahora).",
-        "Só consigo mostrar imagens BMP sem compressão (por enquanto).",
+        "Solo puedo mostrar imágenes BMP, PNG y JPEG.",
+        "Só consigo mostrar imagens BMP, PNG e JPEG.",
     ),
     (
         "Solo si el puente corre en otra máquina (--red)",

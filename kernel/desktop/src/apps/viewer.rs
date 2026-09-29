@@ -24,15 +24,19 @@ impl Viewer {
         let image = match ctx.fs.as_deref_mut() {
             None => Err(tr("No hay disco.").into()),
             Some(fs) => match fs.read_file(path) {
-                Ok(bytes) => bmp::decode(&bytes).ok_or_else(|| {
-                    String::from(tr(
-                        "Solo puedo mostrar imágenes BMP sin compresión (por ahora).",
-                    ))
+                Ok(bytes) => bmp::decode_any(&bytes, bmp::DISK_MAX_SIDE).ok_or_else(|| {
+                    String::from(tr("Solo puedo mostrar imágenes BMP, PNG y JPEG."))
                 }),
                 Err(e) => Err(crate::files::error_message(e)),
             },
         };
         ctx.log.push(format!("VISOR_ABIERTO {path}"));
+        match &image {
+            Ok(img) => ctx
+                .log
+                .push(format!("VISOR_IMAGEN {}x{}", img.width, img.height)),
+            Err(e) => ctx.log.push(format!("VISOR_ERROR {e}")),
+        }
         Viewer {
             dirty: true,
             path: path.into(),

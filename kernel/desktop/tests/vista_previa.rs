@@ -6,7 +6,7 @@
 //! ```
 //!
 //! Baja la página, sus hojas de estilo y sus imágenes con `curl` (en el anfitrión), convierte las
-//! imágenes a BMP como el puente, y guarda cómo la arma el navegador en `target/vista-previa.bmp`.
+//! imágenes que no son PNG ni JPEG a BMP como el puente, y guarda cómo la arma el navegador en `target/vista-previa.bmp`.
 
 mod common;
 
@@ -118,9 +118,13 @@ fn vista_previa_de_una_pagina() {
             }
             for r in reqs {
                 let resp = if r.kind == jarvis_desktop::FetchKind::Image {
+                    // Los PNG y JPEG los decodifica el navegador (jarvis-image, como en el
+                    // kernel); los demás los convierte el "puente".
                     let res = curl(&r.url).and_then(|mut x| {
-                        x.body = to_bmp(&x.body)?;
-                        x.content_type = "image/bmp".into();
+                        if jarvis_image::sniff(&x.body).is_none() {
+                            x.body = to_bmp(&x.body)?;
+                            x.content_type = "image/bmp".into();
+                        }
                         Ok(x)
                     });
                     if let Err(e) = &res {

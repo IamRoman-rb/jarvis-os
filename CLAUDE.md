@@ -30,6 +30,8 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (client.rs, rustls unbuffered) y el proveedor de criptografía propio sobre
                    RustCrypto (provider/); no_std. Tests contra rustls+ring con certificados de
                    tests/datos/ (generar.sh). kernel/entropy.rs y kernel/tls.rs ponen azar y hora
+    - image/       imágenes (K10): inflate y PNG propios, JPEG con zune-jpeg → RGBA; no_std. Tests
+                   cruzados contra las crates png e image
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - sync/        sincronización de /Sincronizado: emparejado (HKDF), cifrado (ChaCha20-Poly1305),
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red
@@ -109,7 +111,8 @@ Cerebro (desde la raíz):
     (las de la API de snaps, ADR 0006). Cambiar eso (otros métodos, otra interfaz, otras
     carpetas, otras cabeceras) requiere un ADR. Desde K10 el HTTPS lo hace el kernel (ADR 0009);
     el del puente queda de respaldo (Configuración → Red → "HTTPS por el puente", o si el kernel
-    no tiene entropía u hora). La conversión se va con los decodificadores en el kernel. El puente de Brave (xtask/src/brave.rs, puerto
+    no tiene entropía u hora). Los PNG y JPEG los decodifica el kernel (jarvis-image): el puente
+    solo convierte SVG, GIF, WebP e ICO (y lo que llegue directo sin ser PNG ni JPEG). El puente de Brave (xtask/src/brave.rs, puerto
     8119) y el relé de sincronización (puerto 8120) son servicios aparte con protocolo propio
     (ADR 0007): el de Brave escucha fuera de 127.0.0.1 solo con `--red` y un token; el relé
     nunca ve contenido sin cifrar. Las conexiones largas (`Outbox::connect`) pasan por el
