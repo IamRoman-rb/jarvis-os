@@ -814,8 +814,11 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K11 terminados; sigue K12 (audio y video). Son 12 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
-K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los anteriores juntos.
+**Dónde estamos:** K0–K11 terminados (12 de 15 hitos); sigue K12 (audio y video). Lo último:
+TLS y decodificadores de imágenes en el kernel (K10) y espacio de usuario con programas de Linux
+estáticos, sockets con firewall y un intérprete de JavaScript (K11). Los que faltan son los más
+pesados: K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los
+anteriores juntos.
 
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
