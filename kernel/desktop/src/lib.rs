@@ -28,6 +28,7 @@ pub mod panels;
 pub mod procs;
 pub mod remote;
 pub mod shell;
+pub mod sound;
 pub mod sync;
 pub mod system;
 pub mod term;

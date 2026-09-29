@@ -68,3 +68,43 @@ def test_el_efecto_de_ia_no_cambia_el_largo_ni_satura() -> None:
     assert len(out) == len(pcm)
     assert out != pcm
     assert max(abs(x) for x in array.array("h", out)) <= 32767
+
+
+def test_send_paced_manda_al_ritmo_del_audio_y_se_puede_cortar() -> None:
+    from jarvis.voice.audio import send_paced
+
+    now = [0.0]
+    sent: list[tuple[float, int]] = []
+
+    def sleep(s: float) -> None:
+        now[0] += s
+
+    pcm = b"\x00\x00" * 16000  # 1 s a 16 kHz
+    ok = send_paced(
+        pcm,
+        16000,
+        lambda rate, piece: sent.append((now[0], len(piece))),
+        lambda: False,
+        piece_ms=200,
+        lead_ms=300,
+        sleep=sleep,
+        clock=lambda: now[0],
+    )
+    assert ok
+    assert [n for _, n in sent] == [6400] * 5
+    # Los dos primeros salen enseguida (300 ms de ventaja); después, uno cada 200 ms.
+    assert [round(t, 2) for t, _ in sent] == [0.0, 0.0, 0.1, 0.3, 0.5]
+    # Y vuelve cuando terminó de sonar.
+    assert round(now[0], 2) == 1.0
+
+    now[0] = 0.0
+    sent.clear()
+    stopped = send_paced(
+        pcm,
+        16000,
+        lambda rate, piece: sent.append((now[0], len(piece))),
+        lambda: len(sent) >= 2,
+        sleep=sleep,
+        clock=lambda: now[0],
+    )
+    assert not stopped and len(sent) == 2

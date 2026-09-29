@@ -774,8 +774,11 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("ENTROPIA_LISTA", BOOT_TIMEOUT)?;
     // K10: el cliente TLS arma las claves efímeras y el ClientHello dentro del kernel.
     s.wait_for("TLS_LISTO", BOOT_TIMEOUT)?;
-    // K9: el escritorio, la red y la ociosa son tareas aparte.
-    s.wait_for("MULTITAREA 3 tareas", BOOT_TIMEOUT)?;
+    // K9: el escritorio, la red y la ociosa son tareas aparte; K12 suma la del audio.
+    s.wait_for(
+        "MULTITAREA 4 tareas: escritorio, ociosa, red, audio",
+        BOOT_TIMEOUT,
+    )?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.saw_or_wait("RED_IP 10.0.2.15", STEP)?;
     // La tarea de la red se despierta con la interrupción de la placa, no dando vueltas.
@@ -934,10 +937,27 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
         s.monitor("sendkey ret")?;
         s.wait_for("TERMINAL_FIN 0", STEP)?;
     }
-    s.type_text("open aurora-progresivo.jpg && open aurora.png")?;
+    // K12: canciones y un video por los parlantes de la placa virtio-sound.
+    s.saw_or_wait("SONIDO_LISTO", STEP)?;
+    s.type_text("apt install musica videos")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO videos", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text(
+        "open aurora-progresivo.jpg && open aurora.png && cd /M* && open Escala.wav && open /Videos/demo.avi",
+    )?;
     s.monitor("sendkey ret")?;
     s.wait_for("VISOR_IMAGEN 640x400", STEP)?;
     s.wait_for("VISOR_IMAGEN 1280x800", STEP)?;
+    s.wait_for("MUSICA_ARCHIVO /Música/Escala.wav (3200 ms)", STEP)?;
+    s.wait_for(
+        "VIDEO_ABIERTO /Videos/demo.avi 320x240, 120 cuadros, 7999 ms, con audio",
+        STEP,
+    )?;
+    s.wait_for("VIDEO_PRIMER_CUADRO", STEP)?;
+    // Terminan cuando la placa terminó de reproducir su audio.
+    s.wait_for("MUSICA_FIN", STEP)?;
+    s.wait_for("VIDEO_FIN /Videos/demo.avi", STEP)?;
     // Configuración (Win+I).
     s.monitor("sendkey meta_l-i")?;
     s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;

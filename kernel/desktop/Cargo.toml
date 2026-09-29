@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 jarvis-fs = { path = "../fs" }
 jarvis-linux = { path = "../linux" }
+jarvis-audio = { path = "../audio" }
 jarvis-gfx = { path = "../gfx" }
 jarvis-image = { path = "../image" }
 # Mosaicos de Brave comprimidos (ADR 0007). Sin std: el kernel los descomprime.

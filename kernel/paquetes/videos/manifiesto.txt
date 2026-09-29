@@ -1,0 +1,2 @@
+# Video de ejemplo (AVI MJPEG con audio, generado por generar_multimedia.py): K12.
+demo.avi -> /Videos/demo.avi

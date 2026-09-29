@@ -1,9 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["desktop", "fs", "gfx", "image", "kernel", "linux", "mem", "net", "relay", "sync", "task", "tls", "xtask"]
+members = ["audio", "desktop", "fs", "gfx", "image", "kernel", "linux", "mem", "net", "relay", "sync", "task", "tls", "xtask"]
 # El kernel solo compila para x86_64-unknown-none (lo hace `cargo xtask`). Sin esto,
 # `cargo test` o `cargo build` a secas intentarían compilarlo para Windows/Linux y fallarían.
-default-members = ["desktop", "fs", "gfx", "image", "linux", "mem", "net", "relay", "sync", "task", "tls", "xtask"]
+default-members = ["audio", "desktop", "fs", "gfx", "image", "linux", "mem", "net", "relay", "sync", "task", "tls", "xtask"]
 # Los programas de Linux (K11) son otro workspace: se compilan para musl (cargo xtask usuario).
 exclude = ["usuario"]
 

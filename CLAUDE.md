@@ -31,6 +31,9 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (client.rs, rustls unbuffered) y el proveedor de criptografía propio sobre
                    RustCrypto (provider/); no_std. Tests contra rustls+ring con certificados de
                    tests/datos/ (generar.sh). kernel/entropy.rs y kernel/tls.rs ponen azar y hora
+    - audio/       audio y video (K12): WAV, IMA ADPCM, remuestreo, mezclador, sintetizador y AVI;
+                   no_std y sin punto flotante (desktop/src/sound.rs lo usa; kernel/audio.rs y
+                   virtio_sound.rs lo llevan a la placa)
     - image/       imágenes (K10): inflate y PNG propios, JPEG con zune-jpeg → RGBA; no_std. Tests
                    cruzados contra las crates png e image
     - linux/       la ABI de Linux (K11, ADR 0010): cargador de ELF, pila inicial, mapa de memoria

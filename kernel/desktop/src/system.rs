@@ -222,8 +222,10 @@ pub enum Launch {
     Edit(String),
     /// Navegador en una dirección.
     Browse(String),
-    /// Visor de imágenes.
+    /// Visor de imágenes (y de videos, K12).
     View(String),
+    /// Música con un archivo de audio (K12).
+    Play(String),
     /// Terminal, opcionalmente ejecutando un comando.
     Terminal(Option<String>),
     /// Configuración en una sección (0 = Sistema).

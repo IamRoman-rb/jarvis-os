@@ -74,7 +74,8 @@ impl FilesWindow {
                 Launch::Terminal(Some(format!("file '{path}' && wine '{path}'")))
             }
             Kind::Text | Kind::Code => Launch::Edit(path),
-            Kind::Image => Launch::View(path),
+            Kind::Image | Kind::Video => Launch::View(path),
+            Kind::Audio => Launch::Play(path),
             Kind::Binary | Kind::Archive => Launch::Terminal(Some(format!("file '{path}'"))),
             _ => {
                 ctx.out.notify(

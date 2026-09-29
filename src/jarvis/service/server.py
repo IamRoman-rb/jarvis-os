@@ -293,6 +293,8 @@ async def serve_connection(
         log.info("kernel conectado desde %s (%s)", peer, hello.get("equipo", "?"))
         if host is not None and host.voice is not None:
             host.voice.session = session
+            parlantes = hello.get("parlantes")
+            host.voice.kernel_audio = isinstance(parlantes, int) and parlantes > 0
         await session.send({"t": "listo", "voz": host is not None and host.voice is not None})
         if host is not None and host.account_status is not None:
             session._spawn(session.send_account(host.account_status))

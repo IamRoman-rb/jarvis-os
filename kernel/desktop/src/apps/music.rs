@@ -1,12 +1,14 @@
-//! Música por el parlante de la PC ("PC speaker"): el chip PIT genera una onda cuadrada a la
-//! frecuencia de cada nota. Suena como una computadora de los 80, pero no necesita driver de
-//! audio (eso llega en K12). Las canciones son de dominio público.
+//! Música. Con placa de sonido (K12), las partituras suenan por los parlantes con el
+//! sintetizador de `jarvis-audio` y también se reproducen las canciones del disco (`/Música`,
+//! archivos WAV con PCM o IMA ADPCM). Sin placa, las partituras van al parlante de la PC ("PC
+//! speaker"): el chip PIT genera una onda cuadrada a la frecuencia de cada nota, como una
+//! computadora de los 80. Las canciones son de dominio público.
 //!
 //! Las partituras se escriben como texto: `"E4:4 D#4:8. R:8"` = mi de la 4.ª octava negra,
 //! re sostenido corchea con puntillo, silencio de corchea.
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use jarvis_fs::BlockDevice;
@@ -119,14 +121,43 @@ pub fn parse(score: &str, tempo: u32) -> Vec<Note> {
         .collect()
 }
 
+/// Dónde busca canciones (archivos WAV) la app.
+pub const MUSIC_DIR: &str = "/Música";
+
+/// Lo que está sonando.
+enum Playing {
+    /// Una partitura: por los parlantes (con el sintetizador, `track`) o, sin placa de sonido,
+    /// por el parlante de la PC.
+    Score {
+        index: usize,
+        notes: Vec<Note>,
+        start: u64,
+        track: Option<u32>,
+    },
+    /// Un archivo WAV del disco (siempre por los parlantes).
+    File {
+        path: String,
+        track: u32,
+        duration_ms: u64,
+    },
+}
+
 pub struct Music {
     pub dirty: bool,
     selected: usize,
-    /// (canción, notas, cuándo empezó)
-    playing: Option<(usize, Vec<Note>, u64)>,
-    /// La frecuencia que está sonando (para no mandarle al kernel la misma cada frame).
+    playing: Option<Playing>,
+    /// Las canciones del disco (`/Música/*.wav`).
+    files: Vec<String>,
+    /// Hay parlantes (placa de sonido): lo dice el sistema.
+    speakers: bool,
+    /// La frecuencia que está sonando en el parlante de la PC (para no mandarle al kernel la
+    /// misma cada frame).
     current: u32,
     last_frame: u64,
+    /// Cuánto va de la canción (0..=100) y la nota que suena (para el visualizador).
+    progress: u32,
+    pitch: i32,
+    level: i32,
 }
 
 impl Default for Music {
@@ -148,37 +179,156 @@ fn play_button(content: Rect) -> Rect {
     Rect::new(content.x + 16, content.y + content.h - 50, 150, 36)
 }
 
+/// Cuántas filas entran en la lista.
+fn visible_rows(content: Rect) -> usize {
+    ((content.h - 50 - 100) / 44).max(1) as usize
+}
+
 impl Music {
     pub fn new() -> Self {
         Music {
             dirty: true,
             selected: 0,
             playing: None,
+            files: Vec::new(),
+            speakers: false,
             current: 0,
             last_frame: 0,
+            progress: 0,
+            pitch: 0,
+            level: 0,
         }
+    }
+
+    /// Busca las canciones del disco.
+    pub fn scan<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) {
+        self.speakers = ctx.audio.available();
+        self.files = ctx
+            .fs
+            .as_deref_mut()
+            .and_then(|fs| fs.list(MUSIC_DIR).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| !e.is_dir && e.name.to_ascii_lowercase().ends_with(".wav"))
+            .map(|e| format!("{MUSIC_DIR}/{}", e.name))
+            .collect();
+        self.files.sort();
+        self.dirty = true;
+    }
+
+    fn items(&self) -> usize {
+        SONGS.len() + self.files.len()
     }
 
     pub fn title(&self) -> String {
         match &self.playing {
-            Some((i, _, _)) => trf("Música · {}", &[SONGS[*i].title]),
+            Some(Playing::Score { index, .. }) => trf("Música · {}", &[SONGS[*index].title]),
+            Some(Playing::File { path, .. }) => {
+                trf("Música · {}", &[path.rsplit('/').next().unwrap_or(path)])
+            }
             None => tr("Música").into(),
         }
     }
 
+    /// Reproduce el elemento `i` de la lista (primero las partituras, después los archivos).
     pub fn play<D: BlockDevice>(&mut self, i: usize, ctx: &mut Ctx<'_, D>) {
-        let song = &SONGS[i];
-        self.playing = Some((i, parse(song.score, song.tempo), ctx.now_ms));
-        ctx.log.push(format!("MUSICA_REPRODUCE {}", song.title));
+        self.stop(ctx);
+        if let Some(path) = i.checked_sub(SONGS.len()).and_then(|f| self.files.get(f)) {
+            let path = path.clone();
+            self.play_file(&path, ctx);
+            return;
+        }
+        let Some(song) = SONGS.get(i) else {
+            return;
+        };
+        let notes = parse(song.score, song.tempo);
+        let track = if ctx.audio.available() {
+            let rate = ctx.audio.rate();
+            let synth = jarvis_audio::synth::Synth::new(notes.clone(), rate);
+            ctx.audio.play(
+                alloc::boxed::Box::new(synth),
+                jarvis_audio::mixer::Kind::Music,
+            )
+        } else {
+            None
+        };
+        ctx.log.push(format!(
+            "MUSICA_REPRODUCE {} ({})",
+            song.title,
+            if track.is_some() {
+                "parlantes"
+            } else {
+                "parlante de la PC"
+            }
+        ));
+        self.playing = Some(Playing::Score {
+            index: i,
+            notes,
+            start: ctx.now_ms,
+            track,
+        });
+        self.dirty = true;
+    }
+
+    /// Reproduce un archivo WAV (lo abre la app Archivos o `open` en la Terminal).
+    pub fn play_file<D: BlockDevice>(&mut self, path: &str, ctx: &mut Ctx<'_, D>) {
+        self.stop(ctx);
+        if let Some(i) = self.files.iter().position(|f| f == path) {
+            self.selected = SONGS.len() + i;
+        }
+        let bytes = match ctx.fs.as_deref_mut().map(|fs| fs.read_file(path)) {
+            Some(Ok(b)) => b,
+            Some(Err(e)) => {
+                ctx.out.notify(crate::files::error_message(e), true);
+                return;
+            }
+            None => return,
+        };
+        if !ctx.audio.available() {
+            ctx.out
+                .notify(tr("No hay placa de sonido para reproducir archivos."), true);
+            return;
+        }
+        let rate = ctx.audio.rate();
+        match jarvis_audio::wav::Wav::parse(bytes) {
+            Ok(wav) => {
+                let duration_ms = wav.frames() * 1000 / wav.format.rate.max(1) as u64;
+                let src = jarvis_audio::resample::Resampled::new(wav, rate);
+                if let Some(track) = ctx.audio.play(
+                    alloc::boxed::Box::new(src),
+                    jarvis_audio::mixer::Kind::Music,
+                ) {
+                    ctx.log
+                        .push(format!("MUSICA_ARCHIVO {path} ({duration_ms} ms)"));
+                    self.playing = Some(Playing::File {
+                        path: path.into(),
+                        track,
+                        duration_ms,
+                    });
+                }
+            }
+            Err(e) => {
+                ctx.log.push(format!("MUSICA_ERROR {path}: {e}"));
+                ctx.out
+                    .notify(trf("No se puede reproducir: {}", &[&e.to_string()]), true);
+            }
+        }
         self.dirty = true;
     }
 
     pub fn stop<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) {
-        self.playing = None;
+        match self.playing.take() {
+            Some(Playing::Score { track: Some(t), .. }) | Some(Playing::File { track: t, .. }) => {
+                ctx.audio.stop(t)
+            }
+            _ => {}
+        }
         if self.current != 0 {
             self.current = 0;
             ctx.out.tone = Some(0);
         }
+        self.progress = 0;
+        self.level = 0;
         self.dirty = true;
     }
 
@@ -199,21 +349,55 @@ impl Music {
     }
 
     pub fn tick<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) {
-        let Some((_, notes, start)) = &self.playing else {
-            return;
-        };
-        let elapsed = ctx.now_ms.saturating_sub(*start);
-        match Self::note_at(notes, elapsed) {
-            Some((_, hz, _)) => {
-                if hz != self.current {
-                    self.current = hz;
-                    ctx.out.tone = Some(hz);
+        if self.speakers != ctx.audio.available() {
+            self.speakers = ctx.audio.available();
+            self.dirty = true;
+        }
+        let finished = match &self.playing {
+            None => return,
+            Some(Playing::Score {
+                notes,
+                start,
+                track,
+                ..
+            }) => {
+                // Con parlantes, el reloj es el audio que sonó; sin ellos, el del sistema.
+                let elapsed = match track {
+                    Some(t) => ctx.audio.position_ms(*t).unwrap_or(u64::MAX),
+                    None => ctx.now_ms.saturating_sub(*start),
+                };
+                let total: u64 = notes.iter().map(|n| n.1 as u64).sum();
+                match Self::note_at(notes, elapsed) {
+                    Some((_, hz, into)) => {
+                        if track.is_none() && hz != self.current {
+                            self.current = hz;
+                            ctx.out.tone = Some(hz);
+                        }
+                        self.level = if hz > 0 { 255 - into as i32 } else { 0 };
+                        self.pitch = hz as i32;
+                        self.progress = (elapsed * 100 / total.max(1)) as u32;
+                        false
+                    }
+                    None => true,
                 }
             }
-            None => {
-                self.stop(ctx);
-                return;
-            }
+            Some(Playing::File {
+                track, duration_ms, ..
+            }) => match ctx.audio.position_ms(*track) {
+                Some(ms) => {
+                    self.progress = (ms * 100 / (*duration_ms).max(1)).min(100) as u32;
+                    // Sin notas: el visualizador late con el tiempo.
+                    self.level = 160 + (sin((ms as u32).wrapping_mul(30)) / 256) as i32;
+                    self.pitch = 300 + (ms % 2000) as i32 / 5;
+                    false
+                }
+                None => true,
+            },
+        };
+        if finished {
+            ctx.log.push("MUSICA_FIN".into());
+            self.stop(ctx);
+            return;
         }
         // El visualizador se anima a ~30 cuadros por segundo.
         if ctx.now_ms - self.last_frame >= 33 {
@@ -222,12 +406,24 @@ impl Music {
         }
     }
 
+    fn playing_index(&self) -> Option<usize> {
+        match &self.playing {
+            Some(Playing::Score { index, .. }) => Some(*index),
+            Some(Playing::File { path, .. }) => self
+                .files
+                .iter()
+                .position(|f| f == path)
+                .map(|i| SONGS.len() + i),
+            None => None,
+        }
+    }
+
     pub fn key<D: BlockDevice>(&mut self, key: Key, ctx: &mut Ctx<'_, D>) -> bool {
         match key {
             Key::Up => self.selected = self.selected.saturating_sub(1),
-            Key::Down => self.selected = (self.selected + 1).min(SONGS.len() - 1),
+            Key::Down => self.selected = (self.selected + 1).min(self.items().saturating_sub(1)),
             Key::Enter | Key::Char(' ') => {
-                if self.playing.as_ref().is_some_and(|p| p.0 == self.selected) {
+                if self.playing_index() == Some(self.selected) {
                     self.stop(ctx);
                 } else {
                     self.play(self.selected, ctx);
@@ -249,7 +445,7 @@ impl Music {
             }
             return;
         }
-        for i in 0..SONGS.len() {
+        for i in 0..self.items().min(visible_rows(content)) {
             if row_rect(content, i).contains(click.x, click.y) {
                 self.selected = i;
                 self.dirty = true;
@@ -262,16 +458,16 @@ impl Music {
 
     pub fn draw(&mut self, c: &mut Canvas<'_>, r: Rect, now_ms: u64) {
         c.fill_rect(r.x, r.y, r.w, r.h, window_bg());
-        text::draw(
-            c,
-            r.x + 16,
-            r.y + 16,
-            tr("CANCIONES · PARLANTE DE LA PC"),
-            &label(theme::cyan()),
-        );
-        for (i, song) in SONGS.iter().enumerate() {
+        let header = if self.speakers {
+            tr("CANCIONES · PARLANTES")
+        } else {
+            tr("CANCIONES · PARLANTE DE LA PC")
+        };
+        text::draw(c, r.x + 16, r.y + 16, header, &label(theme::cyan()));
+        let playing_index = self.playing_index();
+        for i in 0..self.items().min(visible_rows(r)) {
             let row = row_rect(r, i);
-            let playing = self.playing.as_ref().is_some_and(|p| p.0 == i);
+            let playing = playing_index == Some(i);
             if i == self.selected {
                 c.fill_rect(row.x, row.y, row.w, row.h, selected_bg());
                 c.fill_rect(row.x, row.y, 3, row.h, theme::cyan());
@@ -281,12 +477,19 @@ impl Music {
             } else {
                 theme::text()
             };
-            text::draw(c, row.x + 16, row.y + 4, song.title, &s16(col));
+            let (title, subtitle) = match SONGS.get(i) {
+                Some(song) => (song.title, song.author),
+                None => {
+                    let path = &self.files[i - SONGS.len()];
+                    (path.rsplit('/').next().unwrap_or(path), tr("archivo WAV"))
+                }
+            };
+            text::draw(c, row.x + 16, row.y + 4, title, &s16(col));
             text::draw(
                 c,
                 row.x + 16,
                 row.y + 21,
-                song.author,
+                subtitle,
                 &light(theme::text_dim()),
             );
             if playing {
@@ -302,21 +505,7 @@ impl Music {
 
         // Visualizador: barras que siguen a la nota (más aguda = más a la derecha).
         let viz = Rect::new(r.x + 190, r.y + r.h - 90, r.w - 206, 76);
-        let (level, pitch, progress) = match &self.playing {
-            Some((_, notes, start)) => {
-                let elapsed = now_ms.saturating_sub(*start);
-                let total: u64 = notes.iter().map(|n| n.1 as u64).sum();
-                match Self::note_at(notes, elapsed) {
-                    Some((_, hz, into)) => (
-                        if hz > 0 { 255 - into as i32 } else { 0 },
-                        hz as i32,
-                        (elapsed * 100 / total.max(1)) as u32,
-                    ),
-                    None => (0, 0, 100),
-                }
-            }
-            None => (0, 0, 0),
-        };
+        let (level, pitch) = (self.level, self.pitch);
         let bars = 24;
         let bw = viz.w / bars;
         let center = (pitch - 200).clamp(0, 800) * bars / 800;
@@ -336,7 +525,7 @@ impl Music {
         bar(
             c,
             Rect::new(viz.x, viz.y + viz.h + 4, viz.w - 3, 4),
-            progress,
+            self.progress,
             theme::cyan(),
         );
         let label_text = if self.playing.is_some() {

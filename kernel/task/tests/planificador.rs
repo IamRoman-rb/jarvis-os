@@ -191,3 +191,32 @@ fn sin_nadie_listo_no_elige() {
     assert_eq!(s.task(0).unwrap().state, State::Running);
     assert_eq!(s.woke(), DISK);
 }
+
+#[test]
+fn una_tarea_importante_que_despierta_seguido_no_deja_sin_turno_a_nadie() {
+    // El escritorio (0) y un programa que calcula sin parar (3), con el audio (2) despertando
+    // cada 5 ms: entre los dos de prioridad normal se tienen que seguir turnando.
+    let mut s = Scheduler::new("escritorio", Priority::Normal, 0, 0);
+    s.spawn("ociosa", Priority::Idle);
+    s.spawn("audio", Priority::High);
+    s.spawn("programa", Priority::Normal);
+    let mut ran = [0u32; 4];
+    let mut now = 0;
+    s.schedule(now, now);
+    for _ in 0..200 {
+        let cur = s.current();
+        ran[cur] += 1;
+        if cur == 2 {
+            // El audio atiende la placa y vuelve a dormir 5 ms.
+            s.wait(0, Some(now + 5), now);
+            s.schedule(now, now);
+        } else {
+            now += 5;
+            // El timer: despierta al audio (plazo cumplido) y cobra el turno.
+            if s.tick(now) {
+                s.schedule(now, now);
+            }
+        }
+    }
+    assert!(ran[0] > 20 && ran[3] > 20, "turnos: {ran:?}");
+}

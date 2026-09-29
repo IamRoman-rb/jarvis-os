@@ -23,6 +23,7 @@
 extern crate alloc;
 
 mod allocator;
+mod audio;
 mod cpu;
 mod display;
 mod entropy;
@@ -300,10 +301,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Placa de video con varias salidas (virtio-gpu). Sin ella, la pantalla del firmware.
     // Micrófono (virtio-sound). Sin placa, Configuración → Micrófono lo dice.
-    let mic = virtio_sound::Mic::init(phys_offset);
+    // Micrófono y parlantes (virtio-sound). Los parlantes los alimenta su propia tarea (K12).
+    let (mic, speaker) = virtio_sound::init(phys_offset);
     if mic.is_none() {
         serial_println!("microfono: no hay placa virtio-sound");
     }
+    let sound_rate = match speaker {
+        Some(sp) => Some(audio::start(sp)),
+        None => {
+            serial_println!("parlantes: no hay salida de audio virtio-sound");
+            None
+        }
+    };
 
     let mut gpu = virtio_gpu::VirtioGpu::init(phys_offset);
     let mut outputs: Vec<(u32, u32)> = Vec::new();
@@ -378,6 +387,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut surfaces = display::Surfaces::new(&firmware, gpu, capacity);
 
     let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
+    if let Some(rate) = sound_rate {
+        desktop.enable_sound(rate);
+    }
     // El cerebro de JARVIS en el anfitrión (si `cargo xtask run` lo levantó).
     if let Some((port, token)) = fw_cfg::brain() {
         serial_println!("cerebro: en el anfitrión, puerto {port}");
@@ -484,6 +496,12 @@ fn run(
 
         // El micrófono (buffers de 20 ms, cuatro en la cola: alcanza con mirarlo por cuadro); el
         // nivel va al escritorio 10 veces por segundo (el medidor de Configuración → Micrófono).
+        // K12: el audio que falta para los parlantes (la tarea "audio" lo lleva a la placa).
+        desktop.set_audio_played(audio::played());
+        let room = audio::room();
+        if room > 0 {
+            audio::fill(desktop.audio_render(room));
+        }
         if let Some(m) = mic.as_mut() {
             m.poll();
             if now - last_mic >= 100 {
@@ -631,12 +649,13 @@ fn run(
             desktop.set_stats(stats.clone());
             if now - last_report >= REPORT_MS {
                 serial_println!(
-                    "rendimiento: {} fps, {} ms por frame, CPU {} %, heap {} MiB, {} cambios de contexto",
+                    "rendimiento: {} fps, {} ms por frame, CPU {} %, heap {} MiB, {} cambios de contexto, {} cortes de audio",
                     stats.fps,
                     stats.frame_ms,
                     stats.cpu_pct,
                     heap_used / (1024 * 1024),
-                    switches
+                    switches,
+                    audio::underruns()
                 );
                 last_report = now;
             }

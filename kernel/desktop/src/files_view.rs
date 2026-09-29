@@ -254,6 +254,7 @@ fn kind_color(kind: Kind) -> Color {
         Kind::Code => theme::amber(),
         Kind::Image => theme::particle_bright(),
         Kind::Archive => theme::amber(),
+        Kind::Audio | Kind::Video => theme::cyan(),
         Kind::Binary => theme::text_dim(),
     }
 }
@@ -309,6 +310,19 @@ fn kind_icon(c: &mut Canvas<'_>, kind: Kind, x: i32, y: i32, s: i32) {
             line(c, x + p(12), y + p(12), x + p(14), y + p(10), col);
             line(c, x + p(14), y + p(10), x + p(18), y + p(15), col);
             circle(c, x + p(14), y + p(6), p(2), col, false);
+        }
+        Kind::Audio => {
+            // Una corchea.
+            circle(c, x + p(7), y + p(15), p(3), col, false);
+            line(c, x + p(10), y + p(15), x + p(10), y + p(2), col);
+            line(c, x + p(10), y + p(2), x + p(16), y + p(6), col);
+        }
+        Kind::Video => {
+            // Una película: el cuadro y el triángulo de "reproducir".
+            rounded_outline(c, x, y + p(3), p(20), p(14), 2, col);
+            line(c, x + p(8), y + p(6), x + p(8), y + p(14), col);
+            line(c, x + p(8), y + p(6), x + p(14), y + p(10), col);
+            line(c, x + p(8), y + p(14), x + p(14), y + p(10), col);
         }
         Kind::Archive => {
             rect_outline(c, x + p(2), y + p(4), p(16), p(14), col);

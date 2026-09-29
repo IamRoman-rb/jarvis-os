@@ -53,6 +53,15 @@ pub enum BrainEvent {
     Listening(bool),
     /// Nivel del audio de la respuesta que está sonando (0..=100): mueve la esfera.
     VoiceLevel(u8),
+    /// La voz para los parlantes de JARVIS-OS (K12): PCM mono de 16 bits a `rate` Hz. `end`: no
+    /// llega más.
+    Audio {
+        rate: u32,
+        pcm: Vec<i16>,
+        end: bool,
+    },
+    /// Que se calle ya.
+    Hush,
     /// El avance del agente de un proyecto (para la ventana Proyecto).
     Project {
         name: String,
@@ -107,6 +116,9 @@ pub struct BrainService {
     current: Option<u32>,
     /// El cerebro tiene voz (lo dice en `listo`).
     pub voice: bool,
+    /// La frecuencia de los parlantes de JARVIS-OS (0: no hay): se la dice al cerebro, que
+    /// entonces manda la voz como audio (K12).
+    pub speakers: u32,
     pub account: Account,
     /// La respuesta en curso (para la esfera y el mensaje del escritorio).
     pub answer: String,
@@ -128,6 +140,7 @@ impl Default for BrainService {
             next_id: 0,
             current: None,
             voice: false,
+            speakers: 0,
             account: Account::default(),
             answer: String::new(),
             status: Status::Off,
@@ -266,9 +279,10 @@ impl BrainService {
                 self.send(
                     out,
                     format!(
-                        "{{\"t\":\"hola\",\"token\":{},\"equipo\":{}}}",
+                        "{{\"t\":\"hola\",\"token\":{},\"equipo\":{},\"parlantes\":{}}}",
                         quote(&self.token),
-                        quote(&self.equipo)
+                        quote(&self.equipo),
+                        self.speakers
                     ),
                 );
             }
@@ -403,6 +417,23 @@ impl BrainService {
                 let n = num(msg.get("nivel")).unwrap_or(0).min(100) as u8;
                 events.push(BrainEvent::VoiceLevel(n));
             }
+            "audio" => {
+                let end = matches!(msg.get("fin"), Some(Json::Bool(true)));
+                let rate = num(msg.get("tasa")).unwrap_or(22_050).clamp(8000, 48_000);
+                let bytes = msg
+                    .get("pcm")
+                    .and_then(Json::str)
+                    .and_then(base64)
+                    .unwrap_or_default();
+                let pcm = bytes
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|s| i16::from_le_bytes(*s))
+                    .collect();
+                events.push(BrainEvent::Audio { rate, pcm, end });
+            }
+            "callar" => events.push(BrainEvent::Hush),
             "proyecto" => {
                 let s = |k: &str| msg.get(k).and_then(Json::str).unwrap_or("").to_string();
                 let (name, ev, text) = (s("nombre"), s("ev"), s("texto"));
@@ -458,6 +489,34 @@ impl BrainService {
     }
 }
 
+/// Decodifica base64 (el estándar, con `=` al final). `None` si no es base64 válido.
+fn base64(text: &str) -> Option<Vec<u8>> {
+    let value = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let t = text.trim_end_matches('=').as_bytes();
+    let mut out = Vec::with_capacity(t.len() * 3 / 4);
+    for group in t.chunks(4) {
+        if group.len() == 1 {
+            return None;
+        }
+        let mut acc = 0u32;
+        for (i, &c) in group.iter().enumerate() {
+            acc |= value(c)? << (18 - 6 * i);
+        }
+        let bytes = acc.to_be_bytes();
+        out.extend_from_slice(&bytes[1..group.len()]);
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,5 +527,38 @@ mod tests {
         assert_eq!(quote("\u{1}"), "\"\\u0001\"");
         let parsed = json::parse(&quote("línea \"1\"\nlínea 2")).unwrap();
         assert_eq!(parsed.str(), Some("línea \"1\"\nlínea 2"));
+    }
+
+    #[test]
+    fn la_voz_llega_como_audio_en_base64() {
+        assert_eq!(base64("AQACAA==").unwrap(), [1, 0, 2, 0]);
+        assert_eq!(base64("aG9sYQ").unwrap(), b"hola");
+        assert_eq!(base64(""), Some(Vec::new()));
+        assert!(base64("a").is_none());
+        assert!(base64("??").is_none());
+        let mut b = BrainService::default();
+        let mut events = Vec::new();
+        let msg = json::parse(r#"{"t":"audio","tasa":22050,"pcm":"AQACAA=="}"#).unwrap();
+        b.on_message(&msg, &mut events);
+        let msg = json::parse(r#"{"t":"audio","fin":true}"#).unwrap();
+        b.on_message(&msg, &mut events);
+        let msg = json::parse(r#"{"t":"callar"}"#).unwrap();
+        b.on_message(&msg, &mut events);
+        assert_eq!(
+            events,
+            [
+                BrainEvent::Audio {
+                    rate: 22050,
+                    pcm: alloc::vec![1, 2],
+                    end: false
+                },
+                BrainEvent::Audio {
+                    rate: 22050,
+                    pcm: Vec::new(),
+                    end: true
+                },
+                BrainEvent::Hush
+            ]
+        );
     }
 }

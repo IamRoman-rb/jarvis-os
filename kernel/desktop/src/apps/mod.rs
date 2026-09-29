@@ -64,6 +64,8 @@ pub struct Ctx<'a, D: BlockDevice> {
     pub config: &'a crate::config::Config,
     /// Portapapeles de texto del sistema.
     pub clipboard: &'a mut String,
+    /// Los parlantes (K12): lo que las apps quieren que suene.
+    pub audio: &'a mut crate::sound::Sound,
 }
 
 impl<D: BlockDevice> Ctx<'_, D> {
@@ -175,7 +177,7 @@ impl App {
             App::Console(_) => (760, 460),
             App::Project(_) => (820, 520),
             App::Editor(_) => (820, 560),
-            App::Music(_) => (640, 440),
+            App::Music(_) => (640, 560),
             App::Viewer(_) => (760, 560),
             App::Browser(_) => (1060, 620),
             App::Terminal(_) => (860, 520),
@@ -272,6 +274,7 @@ impl App {
             App::Terminal(a) => a.tick(ctx),
             App::Settings(a) => a.tick(ctx),
             App::Brave(a) => a.tick(ctx),
+            App::Viewer(a) => a.tick(ctx),
             _ => {}
         }
     }
@@ -334,6 +337,10 @@ impl App {
             App::Editor(a) => a.on_close(ctx),
             App::Music(a) => {
                 a.stop(ctx);
+                true
+            }
+            App::Viewer(a) => {
+                a.close(ctx);
                 true
             }
             App::Brave(a) => {

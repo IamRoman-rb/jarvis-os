@@ -142,6 +142,10 @@ class FakeVoice:
         on_level(40)
         on_level(0)
 
+    def speak_pcm(self, text, on_chunk) -> None:  # type: ignore[no-untyped-def]
+        self.spoken.append(text)
+        on_chunk(22050, b"\x01\x00\x02\x00")
+
     def run(self, on_heard, on_listening) -> None:  # type: ignore[no-untyped-def]
         self.on_heard = on_heard
 
@@ -228,4 +232,29 @@ async def test_la_cuenta_y_el_inicio_de_sesion(tmp_path) -> None:  # type: ignor
         "estado": "Listo: entraste.",
     }
     assert logins == [True]
+    writer.close()
+
+
+async def test_con_parlantes_en_el_kernel_la_voz_viaja_como_audio(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """K12: si el kernel tiene parlantes, el audio de la voz va para allá (y el nivel lo calcula
+    él); `callar` le dice que corte."""
+    from jarvis.service.server import Host
+    from jarvis.service.voicehub import VoiceHub
+
+    voice = FakeVoice()
+    hub = VoiceHub(voice, asyncio.get_running_loop())
+    host = Host(projects=tmp_path, voice=hub)
+    server = await start(0, TOKEN, lambda s: ScriptedBrain(s, delay=0.0), host)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(encode({"t": "hola", "token": TOKEN, "parlantes": 48000}))
+    assert (await read(reader))["t"] == "listo"
+    assert hub.kernel_audio
+    writer.write(encode({"t": "pedido", "id": 3, "texto": "hola jarvis", "origen": "voz"}))
+    while (await read(reader))["t"] != "fin":
+        pass
+    assert await read(reader) == {"t": "audio", "tasa": 22050, "pcm": "AQACAA=="}
+    assert await read(reader) == {"t": "audio", "fin": True}
+    hub.hush()
+    assert await read(reader) == {"t": "callar"}
     writer.close()

@@ -1,0 +1,12 @@
+[package]
+name = "jarvis-audio"
+description = "Audio y video de JARVIS-OS (K12): WAV e IMA ADPCM propios, remuestreo, mezclador, sintetizador y el contenedor AVI. no_std, sin punto flotante, testeable en el host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

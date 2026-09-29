@@ -391,6 +391,8 @@ pub struct Desktop<D: BlockDevice> {
     fw_blocked_streams: Vec<(u32, String)>,
     /// Los programas de Linux que corren (K11): sus pedidos de archivos, consola y red.
     procs: crate::procs::Procs,
+    /// Los parlantes (K12): el mezclador.
+    sound: crate::sound::Sound,
 }
 
 /// Arma un `Ctx` con campos separados de `self` (así se puede usar junto con `self.slots`).
@@ -406,6 +408,7 @@ macro_rules! ctx {
             tasks: $tasks,
             config: &$s.config,
             clipboard: &mut $s.clipboard,
+            audio: &mut $s.sound,
         }
     };
 }
@@ -508,6 +511,7 @@ impl<D: BlockDevice> Desktop<D> {
             fw_blocked: Vec::new(),
             fw_blocked_streams: Vec::new(),
             procs: Default::default(),
+            sound: Default::default(),
             last_clock: None,
             sync: Default::default(),
             brain: Default::default(),
@@ -760,6 +764,23 @@ impl<D: BlockDevice> Desktop<D> {
     }
 
     /// Una conexión larga cambió (el kernel la atiende): se le avisa a quien la abrió.
+    /// Hay parlantes (K12): la placa de sonido del kernel, a `rate` Hz estéreo.
+    pub fn enable_sound(&mut self, rate: u32) {
+        self.sound.enable(rate);
+        self.brain.speakers = rate;
+        self.logs.push(format!("SONIDO_LISTO {rate} Hz"));
+    }
+
+    /// El audio mezclado para la placa: `frames` cuadros estéreo.
+    pub fn audio_render(&mut self, frames: usize) -> Vec<i16> {
+        self.sound.render(frames)
+    }
+
+    /// Cuánto audio ya sonó (en cuadros): el reloj de la esfera y de los videos.
+    pub fn set_audio_played(&mut self, played: u64) {
+        self.sound.set_played(played);
+    }
+
     /// Algo de un programa de Linux (K11): su salida, que terminó, o un pedido de archivos,
     /// consola o red. Las respuestas se juntan en [`Desktop::take_proc_replies`].
     pub fn proc_event(&mut self, ev: crate::procs::ProcEvent) {
@@ -2072,6 +2093,15 @@ impl<D: BlockDevice> Desktop<D> {
                     }
                 }
                 BrainEvent::VoiceLevel(n) => self.assistant.set_audio_level(*n, now_ms),
+                BrainEvent::Audio { rate, pcm, end } => {
+                    if self.sound.available() {
+                        if !self.sound.speaking() {
+                            self.logs.push("VOZ_PARLANTES".into());
+                        }
+                        self.sound.voice(*rate, pcm, *end);
+                    }
+                }
+                BrainEvent::Hush => self.sound.hush(),
                 BrainEvent::Listening(true) => self.say(tr("Te escucho."), now_ms),
                 BrainEvent::Listening(false) => {}
                 BrainEvent::Heard(text) => {
@@ -2160,6 +2190,7 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::Edit(_) => AppKind::Editor,
             Launch::Browse(_) => AppKind::Browser,
             Launch::View(_) => AppKind::Viewer,
+            Launch::Play(_) => AppKind::Music,
             Launch::Terminal(_) => AppKind::Terminal,
             Launch::Settings(_) => AppKind::Settings,
         };
@@ -2179,6 +2210,10 @@ impl<D: BlockDevice> Desktop<D> {
             match (&what, &mut slot.app) {
                 (Launch::Folder(p), App::Files(f)) => f.navigate(p, &mut ctx),
                 (Launch::Browse(u), App::Browser(b)) => b.go(u, &mut ctx),
+                (Launch::Play(p), App::Music(m)) => {
+                    m.scan(&mut ctx);
+                    m.play_file(p, &mut ctx);
+                }
                 (Launch::Terminal(Some(cmd)), App::Terminal(t)) => {
                     if !t.shell.waiting() {
                         t.run_command(cmd, &mut ctx);
@@ -2205,7 +2240,17 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::App(AppKind::Monitor) => App::Monitor(Monitor::new()),
             Launch::App(AppKind::Console) => App::Console(Console::new()),
             Launch::App(AppKind::Project) => App::Project(crate::apps::project::Project::new()),
-            Launch::App(AppKind::Music) => App::Music(Music::new()),
+            Launch::App(AppKind::Music) => {
+                let mut m = Music::new();
+                m.scan(&mut ctx);
+                App::Music(m)
+            }
+            Launch::Play(p) => {
+                let mut m = Music::new();
+                m.scan(&mut ctx);
+                m.play_file(&p, &mut ctx);
+                App::Music(m)
+            }
             Launch::App(AppKind::Editor) => App::Editor(Editor::new()),
             Launch::Edit(p) => App::Editor(Editor::open(&p, &mut ctx)),
             Launch::App(AppKind::Viewer) => App::Files(FilesWindow::new("/Imágenes", &mut ctx)),
@@ -2362,6 +2407,10 @@ impl<D: BlockDevice> Desktop<D> {
                 }
             }
             for op in out.brain {
+                // Cancelar también lo calla en los parlantes de JARVIS-OS (K12).
+                if op == crate::brain::BrainOp::Cancel {
+                    self.sound.hush();
+                }
                 if !self.brain.handle(op, &mut self.out) {
                     self.brain_events(
                         alloc::vec![crate::brain::BrainEvent::Error(
@@ -3117,6 +3166,17 @@ impl<D: BlockDevice> Desktop<D> {
         }
         if self.assistant.take_finished(now_ms) {
             self.logs.push("JARVIS_REPOSO".into());
+        }
+        // K12: la esfera se mueve con la voz que está sonando en los parlantes de JARVIS-OS.
+        let was_speaking = self.sound.speaking();
+        for id in self.sound.take_ended() {
+            self.logs.push(format!("AUDIO_FIN {id}"));
+        }
+        if self.sound.speaking() {
+            self.assistant
+                .set_audio_level(self.sound.voice_level(), now_ms);
+        } else if was_speaking {
+            self.assistant.set_audio_level(0, now_ms);
         }
         let before = self.geometry();
         let tasks = self.tasks();
