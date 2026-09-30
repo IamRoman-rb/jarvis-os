@@ -287,8 +287,9 @@ fn ovmf() -> Result<(PathBuf, Option<PathBuf>)> {
 fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     // Sonido (el parlante de la PC): solo con ventana. En Windows, DirectSound; en otros
     // sistemas, el que diga QEMU_AUDIO (por ejemplo "pa" o "alsa"), o ninguno.
+    // Sin ventana: un audio vacío (silencio), así el micrófono virtual existe igual en las pruebas.
     let audio = if headless {
-        None
+        Some("none".to_string())
     } else if let Ok(driver) = env::var("QEMU_AUDIO") {
         Some(driver)
     } else if cfg!(windows) {
@@ -306,6 +307,9 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     let machine = match &audio {
         Some(driver) => {
             cmd.arg("-audiodev").arg(format!("{driver},id=sonido"));
+            // Micrófono (y parlantes) de JARVIS-OS: virtio-sound, conectado al audio del
+            // anfitrión (ver kernel/src/virtio_sound.rs).
+            cmd.args(["-device", "virtio-sound-pci,audiodev=sonido"]);
             "q35,pcspk-audiodev=sonido"
         }
         None => "q35",

@@ -820,12 +820,17 @@ impl<D: BlockDevice> Desktop<D> {
             self.process_outbox(now, clock);
         }
         self.history.push(&stats);
+        // El micrófono lo actualiza `set_mic` (más seguido que las estadísticas).
+        let mic = self.stats.mic.take();
         self.stats = stats;
+        self.stats.mic = mic;
         self.stats.displays = self.outputs.clone();
         self.stats.sync = Some(self.sync.status);
         self.stats.sync_peer = self.sync.peer.clone();
         self.stats.sync_counts = (self.sync.sent, self.sync.received);
         self.stats.brain_online = self.brain.online();
+        self.stats.brain_voice = self.brain.voice;
+        self.stats.brain_account = self.brain.account.clone();
         self.stats_version += 1;
         for s in &mut self.slots {
             if s.app.kind() == AppKind::Monitor {
@@ -1938,6 +1943,23 @@ impl<D: BlockDevice> Desktop<D> {
         self.say(text, now_ms);
     }
 
+    /// El micrófono (el kernel lo actualiza 10 veces por segundo): si Configuración muestra la
+    /// sección Micrófono, se redibuja con el nivel nuevo.
+    pub fn set_mic(&mut self, info: Option<crate::audio::MicInfo>) {
+        if self.stats.mic == info {
+            return;
+        }
+        self.stats.mic = info;
+        for s in &mut self.slots {
+            if let crate::apps::App::Settings(st) = &mut s.app
+                && st.section == crate::apps::settings::Section::Microphone
+            {
+                st.dirty = true;
+                s.content_dirty = true;
+            }
+        }
+    }
+
     /// El token del cerebro y el nombre del equipo (el kernel los recibe del anfitrión).
     pub fn set_brain(&mut self, port: u16, token: &str) {
         let equipo = self.config.hostname.clone();
@@ -1948,6 +1970,8 @@ impl<D: BlockDevice> Desktop<D> {
     fn brain_events(&mut self, events: Vec<crate::brain::BrainEvent>, now_ms: u64) {
         use crate::brain::BrainEvent;
         self.stats.brain_online = self.brain.online();
+        self.stats.brain_voice = self.brain.voice;
+        self.stats.brain_account = self.brain.account.clone();
         self.logs.append(&mut self.brain.logs);
         for ev in events {
             match &ev {
@@ -1960,6 +1984,16 @@ impl<D: BlockDevice> Desktop<D> {
                     self.say(&first, now_ms);
                 }
                 BrainEvent::Error(_) | BrainEvent::Confirm { .. } => {}
+                BrainEvent::Account => {
+                    for s in &mut self.slots {
+                        if let crate::apps::App::Settings(st) = &mut s.app
+                            && st.section == crate::apps::settings::Section::Assistant
+                        {
+                            st.dirty = true;
+                            s.content_dirty = true;
+                        }
+                    }
+                }
                 BrainEvent::VoiceLevel(n) => self.assistant.set_audio_level(*n, now_ms),
                 BrainEvent::Listening(true) => self.say(tr("Te escucho."), now_ms),
                 BrainEvent::Listening(false) => {}

@@ -27,19 +27,35 @@ SPECS: list[tuple[str, str, dict[str, type]]] = [
     ("ventanas_abiertas", "Las ventanas abiertas en JARVIS-OS.", {}),
     (
         "listar_archivos",
-        "Lista una carpeta del disco de JARVIS-OS (ej. /Documentos).",
+        "Lista una carpeta del disco de JARVIS-OS (ej. /Documentos, /Descargas).",
         {"ruta": str},
     ),
     ("leer_archivo", "Lee un archivo de texto del disco de JARVIS-OS.", {"ruta": str}),
     ("buscar_archivos", "Busca archivos por nombre en todo el disco.", {"nombre": str}),
     (
+        "abrir_archivo",
+        "Abre un archivo o carpeta de JARVIS-OS con su app, como el doble clic: los textos en "
+        "el editor, las imágenes en el visor, las carpetas en Archivos, las .html en el "
+        "navegador. Usala cuando Roman pide ver, mostrar o abrir un archivo.",
+        {"ruta": str},
+    ),
+    (
         "abrir_app",
-        "Abre una app: archivos, monitor, música, navegador, editor, terminal, "
-        "configuración, consola.",
+        "Abre una app vacía: archivos, monitor, música, navegador (Brave), editor, terminal, "
+        "configuración, consola, visor. Para un archivo puntual usá abrir_archivo.",
         {"app": str},
     ),
-    ("abrir_web", "Abre una dirección en el navegador principal.", {"url": str}),
-    ("buscar_web", "Busca en la web con el navegador principal.", {"consulta": str}),
+    (
+        "abrir_web",
+        "Abre una dirección en el navegador de JARVIS-OS (para que Roman la vea).",
+        {"url": str},
+    ),
+    (
+        "buscar_web",
+        "Abre una búsqueda en el navegador de JARVIS-OS (para que Roman la vea). No te devuelve "
+        "los resultados: para saber algo vos, usá WebSearch o WebFetch.",
+        {"consulta": str},
+    ),
     (
         "escribir_archivo",
         "Crea o reemplaza un archivo de texto (crea las carpetas que falten).",
@@ -60,9 +76,12 @@ SPECS: list[tuple[str, str, dict[str, type]]] = [
     ),
     (
         "ejecutar_comando",
-        "Ejecuta un comando en la terminal de JARVIS-OS (jsh: ls, apt install, snap…).",
+        "Ejecuta un comando en la terminal de JARVIS-OS (jsh: ls, cat, echo, apt install, snap, "
+        "winget, open…) y devuelve lo último que muestra. Si sigue corriendo (descargas), "
+        "mirá cómo terminó con leer_terminal.",
         {"comando": str},
     ),
+    ("leer_terminal", "Lo último que muestra la terminal de JARVIS-OS.", {}),
 ]
 
 if {s[0] for s in SPECS} != set(LEVELS):

@@ -57,9 +57,11 @@ pub enum Section {
     Security,
     Firewall,
     Sync,
+    Microphone,
+    Assistant,
 }
 
-pub const SECTIONS: [Section; 17] = [
+pub const SECTIONS: [Section; 19] = [
     Section::System,
     Section::Displays,
     Section::Personalization,
@@ -77,6 +79,8 @@ pub const SECTIONS: [Section; 17] = [
     Section::Security,
     Section::Firewall,
     Section::Sync,
+    Section::Microphone,
+    Section::Assistant,
 ];
 
 impl Section {
@@ -99,6 +103,8 @@ impl Section {
             Section::Security => tr("Privacidad y seguridad"),
             Section::Firewall => tr("Firewall"),
             Section::Sync => tr("Sincronización"),
+            Section::Microphone => tr("Micrófono"),
+            Section::Assistant => tr("Asistente (IA)"),
         }
     }
 
@@ -121,6 +127,8 @@ impl Section {
             Section::Security => Icon::Lock,
             Section::Firewall => Icon::Globe,
             Section::Sync => Icon::Folder,
+            Section::Microphone => Icon::Mic,
+            Section::Assistant => Icon::Chat,
         }
     }
 }
@@ -164,6 +172,10 @@ pub enum Opt {
     BraveDefault,
     BraveServer,
     SyncNewCode,
+    MicListen,
+    /// Iniciar sesión en Claude con Google (en el navegador del anfitrión).
+    AiLogin,
+    AiRefresh,
     SyncCode,
     SyncRelay,
     BraveToken,
@@ -686,6 +698,138 @@ impl Settings {
                         tr("Probar la conexión"),
                         test,
                         Button(tr("PROBAR"))
+                    ),
+                ]
+            }
+            Section::Microphone => {
+                let (detail, value) = match &stats.mic {
+                    Some(m) => (
+                        format!(
+                            "{} · {} Hz · {}",
+                            m.device,
+                            m.rate,
+                            if m.channels == 1 {
+                                tr("mono")
+                            } else {
+                                tr("estéreo")
+                            }
+                        ),
+                        if m.receiving {
+                            tr("detectado, recibe audio")
+                        } else {
+                            tr("detectado, sin audio todavía")
+                        },
+                    ),
+                    None => (
+                        tr("No hay placa de sonido con entrada (en QEMU la agrega cargo xtask run)")
+                            .into(),
+                        tr("no detectado"),
+                    ),
+                };
+                let mut rows = alloc::vec![Row::new(
+                    Opt::Info,
+                    tr("Micrófono de JARVIS-OS"),
+                    detail,
+                    Value(value.into())
+                )];
+                if let Some(m) = &stats.mic {
+                    rows.push(Row::new(
+                        Opt::Info,
+                        tr("Nivel de entrada"),
+                        tr("Hablá: la barra se tiene que mover"),
+                        Usage(
+                            m.level as u32,
+                            format!("{} {} · {} {}", tr("nivel"), m.level, tr("pico"), m.peak),
+                        ),
+                    ));
+                }
+                let voice = if !stats.brain_online {
+                    tr("El cerebro no está conectado")
+                } else if stats.brain_voice {
+                    tr("Escucha el micrófono de la PC: decí \"JARVIS, ...\" o Win+J")
+                } else {
+                    tr("Sin voz: uv sync --extra voice y uv run jarvis voz instalar")
+                };
+                rows.push(Row::new(
+                    Opt::Info,
+                    tr("Voz de JARVIS"),
+                    String::from(voice),
+                    Value(
+                        if stats.brain_online && stats.brain_voice {
+                            tr("activa")
+                        } else {
+                            tr("apagada")
+                        }
+                        .into(),
+                    ),
+                ));
+                rows.push(Row::new(
+                    Opt::MicListen,
+                    tr("Probar"),
+                    tr("JARVIS escucha la próxima frase (como Win+J)"),
+                    Button(tr("ESCUCHAR")),
+                ));
+                rows
+            }
+            Section::Assistant => {
+                let a = &stats.brain_account;
+                let (detail, value) = match a.logged_in {
+                    _ if !stats.brain_online => (
+                        tr("Se conecta cuando arrancás JARVIS con cargo xtask run").into(),
+                        tr("sin cerebro"),
+                    ),
+                    Some(true) => {
+                        let plan = if a.plan.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · {} {}", tr("plan"), a.plan)
+                        };
+                        (format!("{}{plan}", a.email), tr("con sesión"))
+                    }
+                    Some(false) => (
+                        tr("Sin sesión: JARVIS no puede usar Claude hasta que entres").into(),
+                        tr("sin sesión"),
+                    ),
+                    None => (tr("Preguntando al anfitrión...").into(), "?"),
+                };
+                let login = if a.login.is_empty() {
+                    String::from(tr(
+                        "Abre el navegador de la PC en claude.ai: elegí \"Continuar con Google\"",
+                    ))
+                } else {
+                    a.login.clone()
+                };
+                alloc::vec![
+                    Row::new(
+                        Opt::Info,
+                        tr("Cerebro"),
+                        tr("Claude, por el Agent SDK en el anfitrión"),
+                        Value(
+                            if stats.brain_online {
+                                tr("conectado")
+                            } else {
+                                tr("sin conectar")
+                            }
+                            .into()
+                        )
+                    ),
+                    Row::new(
+                        Opt::Info,
+                        tr("Cuenta de Claude"),
+                        detail,
+                        Value(value.into())
+                    ),
+                    Row::new(
+                        Opt::AiLogin,
+                        tr("Iniciar sesión con Google"),
+                        login,
+                        Button(tr("GOOGLE"))
+                    ),
+                    Row::new(
+                        Opt::AiRefresh,
+                        tr("Estado de la cuenta"),
+                        tr("Volver a preguntarle al anfitrión"),
+                        Button(tr("ACTUALIZAR"))
                     ),
                 ]
             }
@@ -1514,6 +1658,18 @@ impl Settings {
             Opt::DisplayPrimary => c.display_primary = 1 - c.display_primary.min(1),
             Opt::Identify => {
                 ctx.out.identify = true;
+                return;
+            }
+            Opt::MicListen => {
+                ctx.out.brain.push(crate::brain::BrainOp::Listen);
+                return;
+            }
+            Opt::AiLogin => {
+                ctx.out.brain.push(crate::brain::BrainOp::Login);
+                return;
+            }
+            Opt::AiRefresh => {
+                ctx.out.brain.push(crate::brain::BrainOp::AccountStatus);
                 return;
             }
             Opt::SyncNewCode => {

@@ -59,6 +59,20 @@ pub enum BrainEvent {
         ev: String,
         text: String,
     },
+    /// Cambió la cuenta de Claude del anfitrión (o el estado del inicio de sesión).
+    Account,
+}
+
+/// La cuenta con la que el cerebro usa Claude (la de Claude Code en el anfitrión).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Account {
+    /// `None` = todavía no se sabe (el cerebro no lo dijo).
+    pub logged_in: Option<bool>,
+    pub email: String,
+    /// "pro", "max", "api"...
+    pub plan: String,
+    /// El inicio de sesión en curso o cómo terminó (vacío = no hay uno).
+    pub login: String,
 }
 
 /// Lo que la consola le pide al cerebro (por el [`Outbox`]).
@@ -73,6 +87,11 @@ pub enum BrainOp {
     Cancel,
     /// Detener el agente del proyecto (Esc en la ventana Proyecto).
     StopProject,
+    /// Iniciar sesión en Claude con Google: el anfitrión abre su navegador (Configuración →
+    /// Asistente).
+    Login,
+    /// Volver a preguntar la cuenta.
+    AccountStatus,
 }
 
 pub struct BrainService {
@@ -86,6 +105,9 @@ pub struct BrainService {
     backoff: u64,
     next_id: u32,
     current: Option<u32>,
+    /// El cerebro tiene voz (lo dice en `listo`).
+    pub voice: bool,
+    pub account: Account,
     /// La respuesta en curso (para la esfera y el mensaje del escritorio).
     pub answer: String,
     pub status: Status,
@@ -105,6 +127,8 @@ impl Default for BrainService {
             backoff: 1000,
             next_id: 0,
             current: None,
+            voice: false,
+            account: Account::default(),
             answer: String::new(),
             status: Status::Off,
             logs: Vec::new(),
@@ -211,6 +235,15 @@ impl BrainService {
                 }
             }
             BrainOp::StopProject => self.send(out, "{\"t\":\"proyecto_detener\"}".into()),
+            BrainOp::Login => {
+                self.account.login = crate::i18n::tr("Abriendo el navegador de la PC...").into();
+                self.logs.push("CEREBRO_LOGIN".into());
+                self.send(
+                    out,
+                    "{\"t\":\"iniciar_sesion\",\"metodo\":\"google\"}".into(),
+                );
+            }
+            BrainOp::AccountStatus => self.send(out, "{\"t\":\"cuenta\"}".into()),
         }
         true
     }
@@ -308,6 +341,7 @@ impl BrainService {
         match t {
             "listo" => {
                 self.ready = true;
+                self.voice = matches!(msg.get("voz"), Some(Json::Bool(true)));
                 self.status = Status::Online;
                 self.backoff = 1000;
                 self.logs.push("CEREBRO_CONECTADO".into());
@@ -377,6 +411,28 @@ impl BrainService {
                         .push(format!("PROYECTO_{} {name}", ev.to_uppercase()));
                 }
                 events.push(BrainEvent::Project { name, ev, text });
+            }
+            "cuenta" => {
+                let s = |k: &str| msg.get(k).and_then(Json::str).unwrap_or("").to_string();
+                self.account = Account {
+                    logged_in: match msg.get("sesion") {
+                        Some(Json::Bool(b)) => Some(*b),
+                        _ => None,
+                    },
+                    email: s("email"),
+                    plan: s("plan"),
+                    login: s("estado"),
+                };
+                self.logs.push(format!(
+                    "CEREBRO_CUENTA {} {}",
+                    match self.account.logged_in {
+                        Some(true) => "si",
+                        Some(false) => "no",
+                        None => "?",
+                    },
+                    self.account.login
+                ));
+                events.push(BrainEvent::Account);
             }
             "confirmar" => {
                 let Some(call) = num(msg.get("llamada")) else {

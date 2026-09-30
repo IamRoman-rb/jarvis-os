@@ -9,6 +9,7 @@
 extern crate alloc;
 
 pub mod apps;
+pub mod audio;
 pub mod bmp;
 pub mod brain;
 pub mod chrome;

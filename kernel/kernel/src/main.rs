@@ -37,7 +37,9 @@ mod speaker;
 mod time;
 mod virtio_blk;
 mod virtio_gpu;
+mod virtio_modern;
 mod virtio_net;
+mod virtio_sound;
 
 use alloc::vec::Vec;
 use core::fmt::Write;
@@ -217,6 +219,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
 
     // Placa de video con varias salidas (virtio-gpu). Sin ella, la pantalla del firmware.
+    // Micrófono (virtio-sound). Sin placa, Configuración → Micrófono lo dice.
+    let mic = virtio_sound::Mic::init(phys_offset);
+    if mic.is_none() {
+        serial_println!("microfono: no hay placa virtio-sound");
+    }
+
     let mut gpu = virtio_gpu::VirtioGpu::init(phys_offset);
     let mut outputs: Vec<(u32, u32)> = Vec::new();
     if let Some(g) = gpu.as_mut() {
@@ -335,6 +343,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         base,
         decoder,
         thermal,
+        mic,
     )
 }
 
@@ -350,8 +359,10 @@ fn run(
     mut stats: SystemStats,
     mut mouse_decoder: MouseDecoder,
     thermal: Option<cpu::Thermal>,
+    mut mic: Option<virtio_sound::Mic>,
 ) -> ! {
     let mut keyboard = keyboard::Keyboard::new();
+    let mut last_mic = 0u64;
     let mut clock = local_time(desktop.utc_offset());
     let mut last_rtc = 0;
     let mut next_frame = 0;
@@ -367,6 +378,16 @@ fn run(
         x86_64::instructions::hlt(); // duerme hasta la próxima interrupción (≤ 4 ms)
         idle_ticks += time::rdtsc() - sleep;
         let now = time::millis();
+
+        // El micrófono también (sus buffers son de 20 ms); el nivel va al escritorio 10 veces
+        // por segundo (el medidor de Configuración → Micrófono).
+        if let Some(m) = mic.as_mut() {
+            m.poll();
+            if now - last_mic >= 100 {
+                last_mic = now;
+                desktop.set_mic(Some(m.info.clone()));
+            }
+        }
 
         // La red se atiende en cada vuelta (cada ≤ 4 ms), no solo en cada frame.
         if let Some(n) = net.as_mut() {

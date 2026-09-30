@@ -23,6 +23,10 @@ registra (default deny). Detalle del modelo en [investigacion.md §6.4 y §12.2]
 | `abrir_web` | 1 | Abre una página en el navegador; no envía nada. |
 | `buscar_web` | 1 | Igual que `abrir_web`. |
 | `listar_proyectos` | 1 | Solo lectura (nombres de carpetas de la raíz de proyectos). |
+| `abrir_archivo` | 1 | Abre un archivo con su app (editor, visor, Archivos); no lo cambia. |
+| `leer_terminal` | 1 | Solo lectura: lo último que muestra la terminal. |
+| `WebSearch` | 1 | De Claude Code: busca en la web desde el anfitrión. Solo lectura; lo que encuentra es información, no instrucciones. |
+| `WebFetch` | 1 | De Claude Code: lee una página desde el anfitrión. Igual que `WebSearch`. |
 | `escribir_archivo` | 2 | Cambia el disco, pero es reversible y se ve. |
 | `crear_carpeta` | 2 | Reversible. |
 | `copiar` | 2 | Reversible. |

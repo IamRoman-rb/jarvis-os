@@ -23,6 +23,8 @@ class VoiceLike(Protocol):
 
     def speak(self, text: str, on_level: Callable[[int], None]) -> None: ...
 
+    def hush(self) -> None: ...
+
     def run(
         self, on_heard: Callable[[str], None], on_listening: Callable[[bool], None]
     ) -> None: ...
@@ -67,6 +69,10 @@ class VoiceHub:
 
     def listen_now(self) -> None:
         self.voice.listen_now()
+
+    def hush(self) -> None:
+        """Deja de hablar (llegó otro pedido, o Roman canceló)."""
+        self.voice.hush()
 
     async def speak(self, text: str) -> None:
         if not text.strip():

@@ -41,6 +41,10 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   **Por voz**: "JARVIS, …" (o Win+J; "JARVIS" solo contesta "¿Sí?" y espera la orden) con el micrófono del anfitrión; lo que entiende se trata
   como si se hubiera escrito, y la respuesta se dice en voz alta mientras la esfera se mueve con
   el audio real (`uv sync --extra voice` y `uv run jarvis voz instalar`, ~590 MB de modelos). El micrófono queda siempre abierto: cada frase se transcribe local y solo las que empiezan con "JARVIS" son órdenes; nada sale de la PC.
+- **Micrófono** (driver `virtio_sound.rs`, sobre `virtio_modern.rs`): QEMU agrega una placa
+  virtio-sound conectada al micrófono del anfitrión; el kernel configura su entrada (PCM de 16 bits
+  a 16 kHz) y recibe audio en buffers de 20 ms. Configuración → **Micrófono** muestra si se
+  detectó, el nivel en vivo y el estado de la voz de JARVIS.
 - **Sincronización entre máquinas**: la carpeta `/Sincronizado` se copia sola entre dos (o más)
   JARVIS, aunque estén en redes distintas. En Configuración → Sincronización se genera un código
   en una y se escribe en la otra; las dos se conectan a un **relé** (`cargo xtask relay`) que solo
