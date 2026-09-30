@@ -507,8 +507,13 @@ fn boot_iso(iso: &Path) -> Result<()> {
     s.wait_for("segmentos con W^X", BOOT_TIMEOUT)?;
     s.wait_for("MODO_EN_VIVO", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
-    s.quit();
-    println!("ok: la ISO arranca (modo en vivo, FAT32 en RAM)");
+    // Apagar desde el menú (K13): el kernel usa `\_S5` del AML y QEMU tiene que cerrarse solo.
+    s.monitor("sendkey alt-f4")?;
+    s.wait_for("ESCRITORIO_MENU apagado", STEP)?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("ACPI: apagando (S5", STEP)?;
+    s.wait_exit(STEP)?;
+    println!("ok: la ISO arranca (modo en vivo, FAT32 en RAM) y se apaga por ACPI");
     Ok(())
 }
 
@@ -712,6 +717,18 @@ impl Session {
             thread::sleep(Duration::from_millis(20));
         }
         Ok(())
+    }
+
+    /// Espera a que QEMU termine solo (el sistema se apagó).
+    fn wait_exit(&mut self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        Err("QEMU no se cerró: el apagado no funcionó".into())
     }
 
     /// Cierra QEMU de forma ordenada (el disco queda escrito).

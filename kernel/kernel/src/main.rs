@@ -22,7 +22,9 @@
 
 extern crate alloc;
 
+mod acpi;
 mod allocator;
+mod apic;
 mod audio;
 mod cpu;
 mod display;
@@ -203,6 +205,28 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             " (sin W^X: no se pudo leer el ELF)"
         }
     );
+    // K13: las tablas ACPI del firmware. Si describen el APIC, las interrupciones pasan del PIC
+    // al APIC (hace falta la paginación propia: sus registros se mapean con `map_mmio`), y el
+    // AML (la DSDT) se carga para saber cómo apagar y a dónde va cada línea PCI.
+    let rsdp = boot_info.rsdp_addr.into_option();
+    match rsdp.and_then(acpi::init) {
+        Some(a) => {
+            if time::needs_recalibration()
+                && let Some(mhz) = a.fadt.as_ref().and_then(time::calibrate_with_pm_timer)
+            {
+                serial_println!("TSC recalibrado con el timer PM de ACPI: {mhz} MHz");
+            }
+            if let Some(madt) = a.madt.clone()
+                && !apic::init(madt)
+            {
+                serial_println!("APIC: la MADT no sirve; sigo con el PIC");
+            }
+            if let Some(rsdp) = rsdp {
+                acpi::load_aml(rsdp);
+            }
+        }
+        None => serial_println!("ACPI: no hay tablas; sigo con el PIC"),
+    }
     // K11: `syscall`/`sysret` y SSE para los programas del anillo 3.
     syscall::init();
     if pg.user_space {
@@ -252,8 +276,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let disk = VirtioBlk::init(phys_offset).and_then(|mut blk| {
         // Que avise por interrupción (se usa recién con las tareas andando; el montaje de acá
         // abajo todavía espera dando vueltas).
-        if let Some((line, isr)) = blk.irq()
-            && interrupts::enable_pci_irq(line, isr, task::EV_DISK)
+        if let Some((dev, line, isr)) = blk.irq()
+            && interrupts::enable_pci_irq(dev, line, isr, task::EV_DISK)
         {
             blk.use_irq();
             serial_println!("virtio-blk: avisa por la IRQ {line}");
@@ -286,8 +310,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let has_net = match VirtioNet::init(phys_offset) {
         Some(dev) => {
             let mac = dev.mac();
-            if let Some((line, isr)) = dev.irq()
-                && interrupts::enable_pci_irq(line, isr, task::EV_NET)
+            if let Some((pci_dev, line, isr)) = dev.irq()
+                && interrupts::enable_pci_irq(pci_dev, line, isr, task::EV_NET)
             {
                 serial_println!("virtio-net: avisa por la IRQ {line}");
             }

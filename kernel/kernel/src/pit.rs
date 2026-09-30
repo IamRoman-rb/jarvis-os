@@ -30,7 +30,10 @@ pub fn init() {
 /// Espera exactamente `ms` milisegundos usando el canal 2 del PIT por *polling* (sin
 /// interrupciones), llamando a `before` justo al arrancar la cuenta. Devuelve lo que devuelve
 /// `before` (así el llamador puede leer el TSC en el instante exacto del inicio).
-pub fn wait_ms_polling<T>(ms: u32, before: impl FnOnce() -> T) -> T {
+///
+/// `None` si la salida del canal nunca sube (K13): hay PC nuevas sin PIT, o con el reloj del
+/// 8254 apagado para ahorrar energía. Se abandona después de `give_up` pasos de la espera.
+pub fn wait_ms_polling<T>(ms: u32, give_up: u64, before: impl FnOnce() -> T) -> Option<T> {
     let count = (PIT_FREQUENCY_HZ as u64 * ms as u64 / 1000).min(0xFFFF) as u16;
     let mut control = Port::<u8>::new(0x61);
     let mut command = Port::<u8>::new(0x43);
@@ -46,9 +49,14 @@ pub fn wait_ms_polling<T>(ms: u32, before: impl FnOnce() -> T) -> T {
         channel2.write((count >> 8) as u8); // escribir el byte alto arranca la cuenta
         let value = before();
         // El bit 5 de 0x61 refleja la salida del canal 2: sube cuando la cuenta llega a cero.
+        let mut steps = 0u64;
         while control.read() & 0x20 == 0 {
+            steps += 1;
+            if steps > give_up {
+                return None;
+            }
             core::hint::spin_loop();
         }
-        value
+        Some(value)
     }
 }

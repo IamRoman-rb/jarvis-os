@@ -12,8 +12,10 @@ test = false
 bench = false
 
 [dependencies]
+acpi = "6.1.1"
 bootloader_api = "0.11.17"
 jarvis-desktop = { path = "../desktop" }
+jarvis-drivers = { path = "../drivers" }
 jarvis-fs = { path = "../fs" }
 jarvis-linux = { path = "../linux" }
 jarvis-gfx = { path = "../gfx" }
