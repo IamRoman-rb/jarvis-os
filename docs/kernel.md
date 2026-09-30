@@ -377,8 +377,19 @@ firmware UEFI (OVMF en QEMU)
             ├─ virtio_blk.rs  driver de disco virtio-blk (DMA, virtqueue, interrupción)
             ├─ virtio_net.rs  driver de placa de red virtio-net (dos virtqueues, interrupción)
             ├─ speaker.rs     parlante de la PC (canal 2 del PIT)
-            ├─ power.rs       apagar (ACPI de QEMU) y reiniciar (8042)
-            ├─ cpu.rs         nombre de la CPU (cpuid)
+            ├─ power.rs       apagar (\_S5 de ACPI) y reiniciar (registro de reset de la FADT, 8042)
+            ├─ cpu.rs         nombre de la CPU (cpuid) y temperatura (DTS de Intel, Tctl de AMD,
+            │                 zonas térmicas de ACPI)
+            ├─ acpi.rs        K13: tablas del firmware y el AML (crate acpi): _PRT, \_S5, _TMP
+            ├─ apic.rs        K13: APIC local, IOAPIC y MSI (el PIC queda de respaldo)
+            ├─ storage.rs     K13: discos reales (ahci.rs, nvme.rs, pendrives por xhci.rs) y la
+            │                 partición de JARVIS de su GPT
+            ├─ nic.rs         K13: virtio-net o una placa real (e1000.rs, rtl8139.rs, rtl8169.rs)
+            ├─ xhci.rs        K13: USB 3 (teclado, mouse, pendrives, hubs), con su tarea "usb"
+            ├─ hda.rs         K13: la placa de sonido de las PC (Intel HDA y su codec)
+            ├─ installer.rs   K13: copia el arranque a un disco vacío y crea la partición de datos
+            ├─ bootlog.rs     K13: el registro del arranque (en pantalla y en /Sistema/arranque.log)
+            ├─ hw.rs          K13: la lista de dispositivos para Configuración → Hardware
             ├─ rtc.rs         reloj CMOS → fecha y hora
             ├─ tarea "red"    (prioridad alta) interrupción o pedido → smoltcp → respuestas
             │    └─ jarvis-net      TCP/IP (smoltcp), DHCP, DNS, descargas HTTP
@@ -406,10 +417,55 @@ firmware UEFI (OVMF en QEMU)
 | `mem` (`jarvis-mem`) | Memoria: allocator de marcos físicos (mapa de bits), tablas de páginas de 4 niveles (mapear, traducir, desmapear, recorrer; páginas de 4 KiB, 2 MiB y 1 GiB) y segmentos del ELF del kernel para W^X. Sobre un trait `PhysMem`. | 8 tests sobre una RAM de mentira (copiar una jerarquía da las mismas traducciones) y `cargo xtask test` (el kernel arranca con sus tablas y verifica W^X) |
 | `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
 | `linux` (`jarvis-linux`) | La ABI de Linux x86_64 (K11): cargador de ELF (estáticos y static-pie), pila inicial con el vector auxiliar, zonas de memoria (brk, mmap, mprotect, páginas al primer uso) y ~90 llamadas al sistema (archivos, directorios, consola, tiempo, azar, sockets TCP, señales mínimas). Sobre un trait `System`. | 20 tests: un proceso de mentira de punta a punta (cargar, archivos, directorios, memoria, punteros del kernel → EFAULT, sockets) y `cargo xtask test` (programas de verdad, compilados con musl) |
+| `drivers` (`jarvis-drivers`) | Hardware real (K13, ADR 0011), la mitad que interpreta: tablas fijas de ACPI, entradas del IOAPIC y mensajes MSI, GPT (leer, crear, disco vacío), comandos AHCI/ATA y NVMe, descriptores de e1000, RTL8139 y RTL8168, USB (descriptores, TRB y contextos de xHCI, HID, Bulk-Only + SCSI), verbos y grafo de HDA, sensores de temperatura. Sin `unsafe`. | Tests con tablas y descriptores armados byte por byte; la GPT **cruzada contra la crate `gpt`** en los dos sentidos. En QEMU, `cargo xtask test-hardware` (AHCI + e1000e + HDA, NVMe + RTL8139, todo por USB) y `cargo xtask test-instalar` |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K13: hardware real
+
+- **Un driver son dos mitades.** Una habla con el hardware (registros, DMA, interrupciones) y va
+  en el binario del kernel; la otra interpreta (arma un comando, recorre una tabla, decide qué
+  hacer con un anillo) y va en `jarvis-drivers`, sin `unsafe`, probada en el host. Así se
+  escribieron drivers para placas que QEMU no emula (el RTL8168 de la PC de Roman, el codec
+  Realtek de su HDA): la parte fácil de equivocarse se prueba con datos armados a mano.
+- **ACPI: tablas y un lenguaje.** Las tablas fijas (MADT, FADT, MCFG, HPET) son estructuras: se
+  leen con un parser propio. El AML de la DSDT es un programa con métodos y variables, y para él
+  se usa la crate `acpi`. De ahí sale a qué entrada del IOAPIC va cada línea PCI (`_PRT`), cómo
+  apagar (`\_S5` + PM1_CNT) y las zonas térmicas (`_TMP`, en décimas de kelvin).
+- **Del PIC al APIC, y MSI.** En una PC con UEFI la línea INTx de un dispositivo no tiene un
+  número confiable para el PIC. Con la MADT, el kernel pasa al APIC local y los IOAPIC, y los
+  drivers nuevos piden **MSI**: el dispositivo avisa escribiendo en una dirección de memoria, con
+  su propio vector, sin líneas compartidas.
+- **El disco del sistema es una partición.** En una PC el disco tiene GPT; JARVIS-OS monta solo
+  la partición con su GUID de tipo y nunca toca las demás (el SSD con Windows ni aparece como
+  destino del instalador). Un disco sin GPT se monta entero, como el `disco.img` de siempre.
+- **El instalador copia sectores, no archivos.** La partición de arranque que arma el
+  bootloader es FAT16 (jarvis-fs solo entiende FAT32): se copia entera, sector por sector, y
+  después se escriben el MBR protector, la GPT y la partición de datos. La tabla se escribe
+  **después** de la copia, así un error a la mitad deja el disco "vacío" para reintentar, y se
+  vuelve a verificar que esté vacío justo antes de escribir.
+- **Un bug de lectura desordenada.** El anillo de eventos de xHCI se leía de a 16 bytes de una
+  vez; con transferencias largas llegaba un evento "bien" con el puntero de la vuelta anterior
+  (0) y la lectura quedaba sin respuesta. La controladora escribe la palabra del ciclo **al
+  final**: hay que leerla primero, poner una barrera y recién después leer el resto.
+- **Temperatura en cada fabricante.** Intel la da en un MSR (el DTS); los Ryzen, en el registro
+  Tctl, al que se llega por el SMN a través de dos registros de configuración del complejo raíz
+  PCI (como `k10temp` de Linux); si no, quedan las zonas térmicas de ACPI (que muchas placas de
+  escritorio no declaran). En QEMU no hay ninguno: la temperatura queda vacía.
+- **Sin puerto serie.** En la PC no hay dónde ver el serie: todo lo que el kernel escribe hasta
+  el escritorio se dibuja abajo en la pantalla, se guarda en `/Sistema/arranque.log` y, si hay un
+  panic, sus últimas líneas quedan debajo del error.
+- **Lo que no se puede probar acá.** El RTL8168 y el codec real de HDA siguen el datasheet y el
+  driver de Linux: quedan verificados recién cuando corran en la PC.
+- **Qué quedó afuera: la suspensión S3.** Dormir en RAM es fácil (`\_S3` + PM1_CNT); despertar
+  no: la CPU vuelve en modo real por el vector de la FACS, y **todos** los dispositivos vuelven
+  reseteados. Además de un trampolín de 16 a 64 bits y de reprogramar el APIC, el IOAPIC, los
+  MSI y cada driver, hace falta la **placa de video**: el firmware no la reinicia al despertar, y
+  en la APU de la PC de Roman eso es un driver nativo de GPU (como `amdgpu`), que JARVIS-OS no
+  tiene. Sin él, S3 despierta con la pantalla negra. Suspender sigue siendo la pantalla negra
+  con la CPU en `hlt` (K6), y S3 queda para cuando haya un driver de video.
 
 ### K12: audio y video
 
@@ -859,11 +915,11 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K12 terminados (13 de 15 hitos); sigue K13 (hardware real). Lo último:
-espacio de usuario con programas de Linux estáticos y un intérprete de JavaScript (K11), y audio
-y video (K12): salida por la placa de sonido, mezclador, música, videos y la voz de JARVIS
-sonando en JARVIS-OS. Los que faltan son los más pesados: K13 (hardware real) y K14 (Wi-Fi) son,
-cada uno, más trabajo que varios de los anteriores juntos.
+**Dónde estamos:** K0–K13 terminados (14 de 15 hitos); sigue K14 (Wi-Fi). Lo último: hardware
+real (K13): ACPI, APIC y MSI, discos SATA y NVMe con GPT, placas de red Intel y Realtek, USB
+(teclado, mouse, pendrives y hubs), sonido HDA, sensores de temperatura y el instalador, que
+copia JARVIS-OS de un pendrive a un disco vacío. Falta verificar en la PC los drivers que QEMU no
+emula (RTL8168 y el codec real de HDA).
 
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
@@ -880,7 +936,7 @@ cada uno, más trabajo que varios de los anteriores juntos.
 | **K10** ✅ | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo ✅; decodificadores PNG (propio) y JPEG (`zune-jpeg`) ✅ | Criptografía, certificados, compresión |
 | **K11** ✅ | Espacio de usuario (ADR 0010): ring 3, syscalls, cargador ELF ✅. Los primeros programas de Linux estáticos ✅; sockets (y el firewall en la pila de red) ✅; un intérprete de JavaScript (Boa, `apt install js`) ✅. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | **K12** ✅ | Audio y video: salida por virtio-sound con su propia tarea ✅; mezclador, WAV e IMA ADPCM propios ✅; la voz de JARVIS suena en JARVIS-OS y la envolvente de la esfera sale del audio que suena ✅; Música con archivos y el sintetizador ✅; videos AVI (MJPEG + audio) en el Visor ✅. HDA queda para K13 (hardware real) | Drivers de audio, códecs |
-| K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |
+| **K13** ✅ | Hardware real (ADR 0011): ACPI (tablas propias y AML), APIC y MSI ✅; discos SATA (AHCI) y NVMe con GPT ✅; placas de red e1000/e1000e, RTL8139 y RTL8168 ✅; USB (xHCI): teclado, mouse, pendrives y hubs ✅; sonido HDA ✅; sensores de temperatura (Intel, AMD, ACPI) y registro del arranque ✅; instalador desde el pendrive a un disco vacío ✅. La suspensión S3 queda para cuando haya un driver de video (ver "Lo que se aprendió") | Drivers reales |
 | K14 | **Wi-Fi**: un driver de placa real (firmware del fabricante), 802.11 y WPA2. La sincronización no cambia: ya funciona entre redes distintas | Redes inalámbricas, criptografía de enlace |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),

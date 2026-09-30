@@ -1,6 +1,6 @@
 # ADR 0011: hardware real
 
-- **Estado:** propuesta
+- **Estado:** aceptada (K13 terminado el 2026-09-30)
 - **Fecha:** 2026-09-29
 
 ## Contexto
@@ -58,3 +58,7 @@ K13 es que JARVIS-OS arranque ahí desde un pendrive y se pueda instalar en un d
 - `cargo xtask test` sigue con virtio y suma corridas con el hardware que QEMU sí emula (AHCI,
   NVMe, e1000e, RTL8139, xHCI, HDA).
 - El PIC y las líneas compartidas quedan como respaldo, no como el camino normal.
+- **S3 (dormir en RAM) queda fuera de K13.** Al despertar, la CPU vuelve en modo real y todos los
+  dispositivos, reseteados; la placa de video no la reinicia el firmware, y en la APU de la PC
+  destino eso necesita un driver nativo de GPU. Suspender sigue siendo la pantalla negra con la
+  CPU en `hlt`.
