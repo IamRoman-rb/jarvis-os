@@ -58,10 +58,11 @@ pub enum Section {
     Firewall,
     Sync,
     Microphone,
+    Hardware,
     Assistant,
 }
 
-pub const SECTIONS: [Section; 19] = [
+pub const SECTIONS: [Section; 20] = [
     Section::System,
     Section::Displays,
     Section::Personalization,
@@ -80,8 +81,12 @@ pub const SECTIONS: [Section; 19] = [
     Section::Firewall,
     Section::Sync,
     Section::Microphone,
+    Section::Hardware,
     Section::Assistant,
 ];
+
+/// El número de la sección Hardware (para `Launch::Settings` y el comando `instalar`).
+pub const HARDWARE: usize = 18;
 
 impl Section {
     pub fn name(self) -> &'static str {
@@ -105,6 +110,7 @@ impl Section {
             Section::Sync => tr("Sincronización"),
             Section::Microphone => tr("Micrófono"),
             Section::Assistant => tr("Asistente (IA)"),
+            Section::Hardware => tr("Hardware"),
         }
     }
 
@@ -129,6 +135,7 @@ impl Section {
             Section::Sync => Icon::Folder,
             Section::Microphone => Icon::Mic,
             Section::Assistant => Icon::Chat,
+            Section::Hardware => Icon::Gear,
         }
     }
 }
@@ -207,6 +214,8 @@ pub enum Opt {
     FwAddSite,
     FwRule(usize),
     FwShowLog,
+    /// Instalar en el disco N de `SystemStats::disks` (K13).
+    Install(usize),
     Info,
 }
 
@@ -269,6 +278,8 @@ pub struct Settings {
     storage: Vec<(String, u64)>,
     /// "Vaciar la Papelera" pide un segundo clic.
     confirm_trash: bool,
+    /// El disco en el que se pidió instalar y falta confirmar (segundo clic).
+    confirm_install: Option<usize>,
     /// Hasta cuándo suena el tono de prueba.
     tone_until: Option<u64>,
     net_test: Option<(u32, String)>,
@@ -289,6 +300,7 @@ impl Settings {
             packages: Vec::new(),
             storage: Vec::new(),
             confirm_trash: false,
+            confirm_install: None,
             side_scroll: 0,
             side_follow: true,
             hover: (0, 0),
@@ -322,6 +334,7 @@ impl Settings {
         self.side_follow = true;
         self.editing = None;
         self.confirm_trash = false;
+        self.confirm_install = None;
         self.dirty = true;
         let Some(fs) = ctx.fs.as_deref_mut() else {
             return;
@@ -332,6 +345,75 @@ impl Settings {
             Section::Storage => self.storage = folder_sizes(fs),
             _ => {}
         }
+    }
+
+    /// Configuración → Hardware (K13): los dispositivos con driver, los discos y el instalador.
+    fn hardware_rows(&self, stats: &crate::system::SystemStats) -> Vec<Row> {
+        use crate::system::InstallState;
+        use Control::*;
+        let mut rows = Vec::new();
+        for (kind, detail) in &stats.devices {
+            rows.push(Row::new(
+                Opt::Info,
+                tr_kind(kind),
+                detail.clone(),
+                Value(String::new()),
+            ));
+        }
+        let boot = stats.disks.iter().find(|d| d.boot_medium);
+        rows.push(Row::new(
+            Opt::Info,
+            tr("Instalar JARVIS-OS"),
+            match boot {
+                Some(b) => trf(
+                    "Desde {}: se copia el arranque y se crea la partición de datos",
+                    &[&b.name],
+                ),
+                None => tr("Arrancá desde el pendrive de JARVIS-OS para instalar").into(),
+            },
+            Value(match &stats.install {
+                InstallState::Idle => String::new(),
+                InstallState::Working(_) => tr("instalando...").into(),
+                InstallState::Done(Ok(_)) => tr("listo").into(),
+                InstallState::Done(Err(_)) => tr("error").into(),
+            }),
+        ));
+        if let InstallState::Done(result) = &stats.install {
+            let msg = match result {
+                Ok(m) | Err(m) => m.clone(),
+            };
+            rows.push(Row::new(
+                Opt::Info,
+                tr("Resultado"),
+                msg,
+                Value(String::new()),
+            ));
+        }
+        for (i, d) in stats.disks.iter().enumerate() {
+            let size = trf("{} MiB", &[&d.mib.to_string()]);
+            let (detail, control) = if d.boot_medium {
+                (
+                    trf("{} · medio de arranque", &[&size]),
+                    Value(String::new()),
+                )
+            } else if !d.blank {
+                (
+                    trf("{} · tiene particiones: no se toca", &[&size]),
+                    Value(tr("no elegible").into()),
+                )
+            } else if boot.is_none() || stats.install != InstallState::Idle {
+                (trf("{} · vacío", &[&size]), Value(String::new()))
+            } else if self.confirm_install == Some(i) {
+                (
+                    tr("Se va a escribir en este disco: hacé clic en CONFIRMAR").into(),
+                    Button(tr("CONFIRMAR")),
+                )
+            } else {
+                (trf("{} · vacío", &[&size]), Button(tr("INSTALAR")))
+            };
+            rows.push(Row::new(Opt::Install(i), d.name.clone(), detail, control));
+        }
+        rows
     }
 
     fn rows(&self, stats: &crate::system::SystemStats) -> Vec<Row> {
@@ -772,6 +854,7 @@ impl Settings {
                 ));
                 rows
             }
+            Section::Hardware => self.hardware_rows(stats),
             Section::Assistant => {
                 let a = &stats.brain_account;
                 let (detail, value) = match a.logged_in {
@@ -1738,6 +1821,16 @@ impl Settings {
                 }
                 return;
             }
+            Opt::Install(disk) => {
+                // Dos clics: el primero pide confirmar, el segundo instala.
+                if self.confirm_install != Some(disk) {
+                    self.confirm_install = Some(disk);
+                    return;
+                }
+                self.confirm_install = None;
+                ctx.out.install = Some(disk);
+                return;
+            }
             Opt::EmptyTrash => {
                 if !self.confirm_trash {
                     self.confirm_trash = true;
@@ -2087,4 +2180,19 @@ fn scrollbar(
     let span = total.saturating_sub(visible).max(1) as i32;
     let ty = y + (h - thumb) * first.min(total - visible.min(total)) as i32 / span;
     rounded_rect(c, x, ty, 4, thumb, 2, theme::cyan().scale(170), 255);
+}
+
+/// El tipo de dispositivo que manda el kernel ("Disco", "Red"…) en el idioma de la interfaz.
+fn tr_kind(kind: &str) -> &'static str {
+    match kind {
+        "Disco" => tr("Disco"),
+        "Red" => tr("Red"),
+        "USB" => tr("USB"),
+        "Sonido" => tr("Sonido"),
+        "Interrupciones" => tr("Interrupciones"),
+        "Firmware" => tr("Firmware"),
+        "Procesador" => tr("Procesador"),
+        "Sensores" => tr("Sensores"),
+        _ => tr("Otro"),
+    }
 }

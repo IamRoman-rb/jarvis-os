@@ -107,6 +107,8 @@ pub struct VirtioBlk {
     physical_memory_offset: u64,
     /// Línea PCI por la que avisa (la eligió el firmware).
     irq_line: Option<u8>,
+    /// El dispositivo PCI (con APIC, su ruta de interrupción sale de `_PRT`).
+    pci: pci::Device,
     /// Ya está anotado en su línea: se puede dormir esperándolo.
     use_irq: bool,
 }
@@ -151,6 +153,7 @@ impl VirtioBlk {
             capacity: 0,
             physical_memory_offset,
             irq_line: dev.interrupt_line(),
+            pci: dev,
             use_irq: false,
         };
         // Secuencia de arranque de un dispositivo virtio: reset → "te vi" → "tengo driver".
@@ -196,9 +199,9 @@ impl VirtioBlk {
         Some(blk)
     }
 
-    /// (línea, puerto del registro ISR), para anotarlo en interrupts.rs.
-    pub fn irq(&self) -> Option<(u8, u16)> {
-        Some((self.irq_line?, self.io_base + REG_ISR))
+    /// (dispositivo, línea, puerto del registro ISR), para anotarlo en interrupts.rs.
+    pub fn irq(&self) -> Option<(pci::Device, u8, u16)> {
+        Some((self.pci, self.irq_line?, self.io_base + REG_ISR))
     }
 
     /// Ya está anotado en su línea: desde ahora, esperar al disco es dormir.

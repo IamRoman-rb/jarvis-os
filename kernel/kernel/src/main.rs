@@ -22,18 +22,30 @@
 
 extern crate alloc;
 
+mod acpi;
+mod ahci;
 mod allocator;
+mod apic;
 mod audio;
+mod bootlog;
 mod cpu;
 mod display;
+mod dma;
+mod e1000;
 mod entropy;
 mod fw_cfg;
 mod gdt;
+mod hda;
+mod hw;
+mod installer;
 mod interrupts;
 mod irqlock;
 mod keyboard;
+mod mmio;
 mod mouse;
 mod nettask;
+mod nic;
+mod nvme;
 mod paging;
 mod pci;
 mod pit;
@@ -41,8 +53,11 @@ mod power;
 mod process;
 mod queue;
 mod rtc;
+mod rtl8139;
+mod rtl8169;
 mod serial;
 mod speaker;
+mod storage;
 mod syscall;
 mod task;
 mod time;
@@ -52,6 +67,7 @@ mod virtio_gpu;
 mod virtio_modern;
 mod virtio_net;
 mod virtio_sound;
+mod xhci;
 
 use alloc::vec::Vec;
 use core::fmt::Write;
@@ -62,6 +78,7 @@ use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::info::{MemoryRegionKind, PixelFormat as BootPixelFormat};
 use bootloader_api::{BootInfo, entry_point};
 use jarvis_desktop::{Desktop, Event, MouseDecoder, NetInfo, Power, SystemStats};
+use jarvis_drivers::gpt::PartitionDevice;
 use jarvis_fs::{BlockCache, BlockDevice, FileSystem, IoError, MemDisk};
 use jarvis_gfx::clock::{DateTime, StrBuf};
 use jarvis_gfx::{Canvas, Color, PixelFormat, text};
@@ -84,9 +101,11 @@ const DISK_CACHE_SECTORS: usize = 1024;
 /// Disco en RAM del modo en vivo (arranque desde la ISO, sin disco virtio): 48 MiB.
 const LIVE_DISK_BYTES: usize = 48 * 1024 * 1024;
 
-/// El disco del sistema: el virtio (con caché) o, en modo en vivo, uno en RAM.
+/// El disco del sistema: el virtio (con caché), la partición de JARVIS de un disco real (SATA,
+/// NVMe; K13) o, en modo en vivo, uno en RAM.
 enum Disk {
     Virtio(BlockCache<VirtioBlk>),
+    Hw(BlockCache<PartitionDevice<storage::AnyDisk>>),
     Ram(MemDisk),
 }
 
@@ -94,47 +113,36 @@ impl BlockDevice for Disk {
     fn sector_count(&self) -> u64 {
         match self {
             Disk::Virtio(d) => d.sector_count(),
+            Disk::Hw(d) => d.sector_count(),
             Disk::Ram(d) => d.sector_count(),
         }
     }
     fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), IoError> {
         match self {
             Disk::Virtio(d) => d.read(lba, buf),
+            Disk::Hw(d) => d.read(lba, buf),
             Disk::Ram(d) => d.read(lba, buf),
         }
     }
     fn write(&mut self, lba: u64, buf: &[u8]) -> Result<(), IoError> {
         match self {
             Disk::Virtio(d) => d.write(lba, buf),
+            Disk::Hw(d) => d.write(lba, buf),
             Disk::Ram(d) => d.write(lba, buf),
         }
     }
 }
 
 /// Modo en vivo: un FAT32 nuevo en RAM con las carpetas de siempre. Lo que se guarde se pierde
-/// al apagar (hasta que haya drivers de disco reales para instalar, K13).
+/// al apagar (para guardar, se instala en un disco: Configuración → Hardware, K13).
 fn live_disk() -> Option<FileSystem<Disk>> {
     let mut ram = MemDisk::new(alloc::vec![0u8; LIVE_DISK_BYTES]);
     jarvis_fs::format_fat32(&mut ram, "JARVIS VIVO").ok()?;
     let mut fs = FileSystem::mount(Disk::Ram(ram)).ok()?;
-    let now = jarvis_fs::Timestamp::EPOCH;
-    for dir in [
-        "/Documentos",
-        "/Descargas",
-        "/Imágenes",
-        "/Música",
-        "/Papelera",
-        "/Sincronizado",
-        "/Sistema",
-    ] {
-        let _ = fs.mkdir(dir, now);
-    }
-    let _ = fs.write_file(
-        "/Documentos/Bienvenida.txt",
+    storage::populate(
+        &mut fs,
         "JARVIS-OS en modo en vivo: lo que guardes se pierde al apagar.
-"
-        .as_bytes(),
-        now,
+",
     );
     Some(fs)
 }
@@ -191,6 +199,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // K8: el kernel deja las tablas de páginas del bootloader y arma las suyas.
     let pg = paging::init(boot_info, phys_offset, heap_phys)
         .expect("no se pudieron armar las tablas de páginas propias");
+    dma::init(phys_offset);
     serial_println!(
         "PAGINACION_PROPIA {} tablas, RAM mapeada {} MiB, {} MiB de marcos libres, kernel {} segmentos{}",
         pg.tables,
@@ -203,6 +212,59 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             " (sin W^X: no se pudo leer el ELF)"
         }
     );
+    // La pantalla del firmware, lo antes posible (K13): desde acá el registro del arranque se ve
+    // en pantalla (en una PC real no hay puerto serie) y un panic muestra sus últimas líneas.
+    let rsdp = boot_info.rsdp_addr.into_option();
+    let Some(fb) = boot_info.framebuffer.as_mut() else {
+        serial_println!("sin framebuffer: el firmware no dio pantalla gráfica");
+        halt();
+    };
+    let info = fb.info();
+    let format = match info.pixel_format {
+        BootPixelFormat::Rgb => PixelFormat::Rgb,
+        BootPixelFormat::U8 => PixelFormat::Gray,
+        _ => PixelFormat::Bgr, // lo más común en UEFI
+    };
+    serial_println!(
+        "pantalla: {}x{} ({:?}, {} bytes/píxel)",
+        info.width,
+        info.height,
+        info.pixel_format,
+        info.bytes_per_pixel
+    );
+    let screen = Canvas::new(
+        fb.buffer_mut(),
+        info.width,
+        info.height,
+        info.stride,
+        info.bytes_per_pixel,
+        format,
+    )
+    .expect("geometría de framebuffer inválida");
+    *SCREEN.lock() = Some(screen);
+    bootlog::start_console(draw_boot_console);
+
+    // K13: las tablas ACPI del firmware. Si describen el APIC, las interrupciones pasan del PIC
+    // al APIC (hace falta la paginación propia: sus registros se mapean con `map_mmio`), y el
+    // AML (la DSDT) se carga para saber cómo apagar y a dónde va cada línea PCI.
+    match rsdp.and_then(acpi::init) {
+        Some(a) => {
+            if time::needs_recalibration()
+                && let Some(mhz) = a.fadt.as_ref().and_then(time::calibrate_with_pm_timer)
+            {
+                serial_println!("TSC recalibrado con el timer PM de ACPI: {mhz} MHz");
+            }
+            if let Some(madt) = a.madt.clone()
+                && !apic::init(madt)
+            {
+                serial_println!("APIC: la MADT no sirve; sigo con el PIC");
+            }
+            if let Some(rsdp) = rsdp {
+                acpi::load_aml(rsdp);
+            }
+        }
+        None => serial_println!("ACPI: no hay tablas; sigo con el PIC"),
+    }
     // K11: `syscall`/`sysret` y SSE para los programas del anillo 3.
     syscall::init();
     if pg.user_space {
@@ -242,8 +304,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     task::init("escritorio");
     let cpu_name = cpu::brand();
     serial_println!("CPU: {}", cpu_name);
-    let thermal = cpu::Thermal::detect();
-    match thermal.as_ref().and_then(cpu::Thermal::read) {
+    hw::note("Procesador", cpu_name.clone());
+    // K13: el sensor de Intel, el Tctl de los Ryzen o las zonas térmicas de ACPI.
+    let mut thermal = cpu::Thermal::detect();
+    if let Some(t) = &thermal {
+        hw::note("Sensores", t.describe());
+    }
+    match thermal.as_mut().and_then(cpu::Thermal::read) {
         Some(t) => serial_println!("TEMP {} C", t),
         None => serial_println!("TEMP sin sensor"),
     }
@@ -252,8 +319,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let disk = VirtioBlk::init(phys_offset).and_then(|mut blk| {
         // Que avise por interrupción (se usa recién con las tareas andando; el montaje de acá
         // abajo todavía espera dando vueltas).
-        if let Some((line, isr)) = blk.irq()
-            && interrupts::enable_pci_irq(line, isr, task::EV_DISK)
+        if let Some((dev, line, isr)) = blk.irq()
+            && interrupts::enable_pci_irq(dev, line, isr, task::EV_DISK)
         {
             blk.use_irq();
             serial_println!("virtio-blk: avisa por la IRQ {line}");
@@ -266,6 +333,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
     });
+    // K13: los discos reales (SATA, NVMe). El del sistema es el que tiene la partición de JARVIS;
+    // los demás quedan guardados para el instalador, sin montar.
+    let mut found = storage::probe();
+    let disk = disk.or_else(|| {
+        let (name, part) = storage::take_system(&mut found)?;
+        match FileSystem::mount(Disk::Hw(BlockCache::new(part, DISK_CACHE_SECTORS))) {
+            Ok(fs) => {
+                serial_println!("DISCO_SISTEMA {name}");
+                Some(fs)
+            }
+            Err(e) => {
+                serial_println!("disco {name}: la partición de JARVIS no se pudo montar: {e}");
+                None
+            }
+        }
+    });
+    storage::park(found);
     let disk = disk.or_else(|| {
         serial_println!("disco: no hay; modo en vivo (FAT32 en RAM)");
         let fs = live_disk();
@@ -282,21 +366,30 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         );
     }
 
-    // Red: virtio-net + smoltcp, en su propia tarea (K9). La dirección se pide por DHCP.
-    let has_net = match VirtioNet::init(phys_offset) {
+    // Red: virtio-net o una placa real (Intel, Realtek; K13) + smoltcp, en su propia tarea
+    // (K9). La dirección se pide por DHCP.
+    let nic = match VirtioNet::init(phys_offset) {
         Some(dev) => {
-            let mac = dev.mac();
-            if let Some((line, isr)) = dev.irq()
-                && interrupts::enable_pci_irq(line, isr, task::EV_NET)
+            if let Some((pci_dev, line, isr)) = dev.irq()
+                && interrupts::enable_pci_irq(pci_dev, line, isr, task::EV_NET)
             {
                 serial_println!("virtio-net: avisa por la IRQ {line}");
             }
-            nettask::start(Net::new(dev, mac, time::rdtsc(), time::millis()))
+            hw::note("Red", "virtio-net (QEMU)".into());
+            Some(nic::Nic::Virtio(dev))
         }
-        None => false,
+        None => nic::probe().map(|(dev, name)| {
+            serial_println!("RED_PLACA {name}");
+            hw::note("Red", name.into());
+            nic::Nic::Ring(dev)
+        }),
     };
+    let has_net = nic.is_some_and(|dev| {
+        let mac = dev.mac();
+        nettask::start(Net::new(dev, mac, time::rdtsc(), time::millis()))
+    });
     if !has_net {
-        serial_println!("red: no hay placa de red virtio");
+        serial_println!("red: no hay placa de red");
     }
 
     // Placa de video con varias salidas (virtio-gpu). Sin ella, la pantalla del firmware.
@@ -306,10 +399,27 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     if mic.is_none() {
         serial_println!("microfono: no hay placa virtio-sound");
     }
-    let sound_rate = match speaker {
-        Some(sp) => Some(audio::start(sp)),
+    // Sin virtio-sound, la placa de sonido de una PC (HDA, K13).
+    let output: Option<alloc::boxed::Box<dyn audio::Output>> = match speaker {
+        Some(sp) => Some(alloc::boxed::Box::new(sp)),
         None => {
-            serial_println!("parlantes: no hay salida de audio virtio-sound");
+            hda::probe().map(|h| alloc::boxed::Box::new(h) as alloc::boxed::Box<dyn audio::Output>)
+        }
+    };
+    if output.is_some() {
+        hw::note(
+            "Sonido",
+            if mic.is_some() {
+                "virtio-sound (QEMU)".into()
+            } else {
+                "Intel HDA".into()
+            },
+        );
+    }
+    let sound_rate = match output {
+        Some(out) => Some(audio::start(out)),
+        None => {
+            serial_println!("parlantes: no hay salida de audio");
             None
         }
     };
@@ -347,33 +457,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
     );
 
-    let Some(fb) = boot_info.framebuffer.as_mut() else {
-        serial_println!("sin framebuffer: el firmware no dio pantalla gráfica");
-        halt();
-    };
-    let info = fb.info();
-    let format = match info.pixel_format {
-        BootPixelFormat::Rgb => PixelFormat::Rgb,
-        BootPixelFormat::U8 => PixelFormat::Gray,
-        _ => PixelFormat::Bgr, // lo más común en UEFI
-    };
-    serial_println!(
-        "pantalla: {}x{} ({:?}, {} bytes/píxel)",
-        info.width,
-        info.height,
-        info.pixel_format,
-        info.bytes_per_pixel
-    );
-    let screen = Canvas::new(
-        fb.buffer_mut(),
-        info.width,
-        info.height,
-        info.stride,
-        info.bytes_per_pixel,
-        format,
-    )
-    .expect("geometría de framebuffer inválida");
-    *SCREEN.lock() = Some(screen);
     // Doble buffer en el heap: `bg` con la capa estática y `frame` donde se compone cada frame.
     // Con placa de video, reservados para el escritorio más grande posible (dos monitores).
     let firmware = display::Firmware {
@@ -386,6 +469,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let capacity = jarvis_desktop::display::max_pixels(&outputs);
     let mut surfaces = display::Surfaces::new(&firmware, gpu, capacity);
 
+    let mut disk = disk;
+    if let Some(fs) = disk.as_mut() {
+        save_boot_log(fs);
+    }
     let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
     if let Some(rate) = sound_rate {
         desktop.enable_sound(rate);
@@ -420,6 +507,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         cpu_name,
         ram_total: ram,
         net: NetInfo::default(),
+        // K13: los discos que no son el del sistema, para Configuración → Hardware.
+        disks: installer::disks(),
         ..Default::default()
     };
     let decoder = if mouse == Some(true) {
@@ -456,10 +545,12 @@ fn run(
     surfaces: &mut display::Surfaces,
     mut stats: SystemStats,
     mut mouse_decoder: MouseDecoder,
-    thermal: Option<cpu::Thermal>,
+    mut thermal: Option<cpu::Thermal>,
     mut mic: Option<virtio_sound::Mic>,
 ) -> ! {
     let mut keyboard = keyboard::Keyboard::new();
+    // Los mouse USB (K13) llegan como paquetes PS/2 de 4 bytes, por su propia cola.
+    let mut usb_mouse = MouseDecoder::with_wheel();
     let mut last_mic = 0u64;
     let mut clock = local_time(desktop.utc_offset());
     let mut last_rtc = 0;
@@ -520,6 +611,11 @@ fn run(
         }
         while let Some(byte) = mouse::pop_byte() {
             if let Some(packet) = mouse_decoder.push(byte) {
+                desktop.handle(Event::Mouse(packet), now, clock);
+            }
+        }
+        while let Some(byte) = mouse::pop_usb_byte() {
+            if let Some(packet) = usb_mouse.push(byte) {
                 desktop.handle(Event::Mouse(packet), now, clock);
             }
         }
@@ -611,9 +707,28 @@ fn run(
         if let Some(p) = requests.power {
             power_off(p);
         }
+        // K13: instalar en un disco vacío (ya confirmado dos veces en Configuración). Tarda unos
+        // segundos: la pantalla queda quieta mientras tanto.
+        if let Some(target) = requests.install {
+            let name = stats
+                .disks
+                .get(target)
+                .map(|d| d.name.clone())
+                .unwrap_or_default();
+            stats.install = jarvis_desktop::InstallState::Working(name);
+            desktop.set_stats(stats.clone());
+            let result = installer::install(target);
+            if let Err(e) = &result {
+                serial_println!("INSTALAR_ERROR {e}");
+            }
+            stats.install = jarvis_desktop::InstallState::Done(result);
+            stats.disks = installer::disks();
+            desktop.set_stats(stats.clone());
+        }
 
         if first {
             // La CI busca esta línea para saber que el kernel arrancó y dibujó sin errores.
+            bootlog::stop_console();
             serial_println!("JARVIS_BOOT_OK");
             first = false;
         }
@@ -643,9 +758,10 @@ fn run(
             stats.net_rx = virtio_net::RX_BYTES.load(Ordering::Relaxed);
             stats.net_tx = virtio_net::TX_BYTES.load(Ordering::Relaxed);
             stats.net = nettask::info();
-            stats.temp_c = thermal.as_ref().and_then(cpu::Thermal::read);
+            stats.temp_c = thermal.as_mut().and_then(cpu::Thermal::read);
             stats.kernel_tasks = tasks;
             stats.context_switches = switches;
+            stats.devices = hw::list();
             desktop.set_stats(stats.clone());
             if now - last_report >= REPORT_MS {
                 serial_println!(
@@ -688,6 +804,57 @@ fn power_off(p: Power) -> ! {
     }
 }
 
+/// La consola del arranque: las últimas líneas del registro, abajo a la izquierda, sobre el
+/// framebuffer del firmware (se llama con cada línea, hasta el primer cuadro del escritorio).
+fn draw_boot_console(tail: &str) {
+    let Some(mut guard) = SCREEN.try_lock() else {
+        return;
+    };
+    let Some(canvas) = guard.as_mut() else {
+        return;
+    };
+    draw_log_lines(canvas, tail, Color::hex(0x050b14), Color::hex(0x7fdcff));
+}
+
+/// Dibuja líneas de registro de abajo hacia arriba en la mitad inferior de la pantalla.
+fn draw_log_lines(canvas: &mut Canvas<'_>, tail: &str, bg: Color, fg: Color) {
+    const LINE: i32 = 18;
+    let (w, h) = (canvas.width() as i32, canvas.height() as i32);
+    let lines: Vec<&str> = tail.lines().collect();
+    let area = (lines.len() as i32 * LINE + 16).min(h / 2);
+    canvas.fill_rect(0, h - area, w, area, bg);
+    let st = text::Style::new(text::Weight::Regular, text::Size::Size16, fg);
+    let mut y = h - 8 - LINE;
+    for line in lines.iter().rev() {
+        if y < h - area {
+            break;
+        }
+        // Sin los códigos de escape de la consola del firmware.
+        let clean: alloc::string::String = line.chars().filter(|c| !c.is_control()).collect();
+        text::draw(canvas, 16, y, &clean, &st);
+        y -= LINE;
+    }
+}
+
+/// `/Sistema/arranque.log`: el registro del arranque hasta montar el disco (K13).
+fn save_boot_log<D: BlockDevice>(fs: &mut FileSystem<D>) {
+    let now = jarvis_desktop::apps::timestamp(rtc::read_utc());
+    bootlog::with_all(|text, dropped| {
+        let mut out = alloc::string::String::from(text);
+        if dropped > 0 {
+            out.push_str(&alloc::format!(
+                "[{dropped} bytes más no entraron]
+"
+            ));
+        }
+        let _ = fs.mkdir("/Sistema", now);
+        match fs.write_file("/Sistema/arranque.log", out.as_bytes(), now) {
+            Ok(()) => serial_println!("REGISTRO_ARRANQUE {} bytes", out.len()),
+            Err(e) => serial_println!("REGISTRO_ARRANQUE no se pudo guardar: {e}"),
+        }
+    });
+}
+
 /// Detiene la CPU hasta la próxima interrupción, para siempre (sin quemar ciclos).
 fn halt() -> ! {
     loop {
@@ -711,6 +878,10 @@ fn panic(info: &PanicInfo<'_>) -> ! {
         let _ = write!(msg, "{}", info.message());
         let body = text::Style::new(text::Weight::Regular, text::Size::Size16, Color::WHITE);
         text::draw(canvas, 40, 100, msg.as_str(), &body);
+        // Lo último que pasó antes del error (en una PC real es lo único que hay para mirar).
+        bootlog::with_tail(20, |tail| {
+            draw_log_lines(canvas, tail, Color::hex(0x2a0008), Color::hex(0xffb0c0));
+        });
     }
     halt();
 }

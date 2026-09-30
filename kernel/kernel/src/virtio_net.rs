@@ -145,6 +145,8 @@ pub struct VirtioNet {
     physical_memory_offset: u64,
     /// Línea PCI por la que avisa (la eligió el firmware).
     irq_line: Option<u8>,
+    /// El dispositivo PCI (con APIC, su ruta de interrupción sale de `_PRT`).
+    pci: pci::Device,
 }
 
 // SAFETY: los punteros son memoria del heap que solo usa este driver, y lo usa una sola tarea
@@ -170,6 +172,7 @@ impl VirtioNet {
             mac: [0; 6],
             physical_memory_offset,
             irq_line: dev.interrupt_line(),
+            pci: dev,
         };
         net.out8(REG_STATUS, 0);
         net.out8(REG_STATUS, STATUS_ACKNOWLEDGE);
@@ -226,9 +229,9 @@ impl VirtioNet {
         self.mac
     }
 
-    /// (línea, puerto del registro ISR), para anotarlo en interrupts.rs.
-    pub fn irq(&self) -> Option<(u8, u16)> {
-        Some((self.irq_line?, self.io_base + REG_ISR))
+    /// (dispositivo, línea, puerto del registro ISR), para anotarlo en interrupts.rs.
+    pub fn irq(&self) -> Option<(pci::Device, u8, u16)> {
+        Some((self.pci, self.irq_line?, self.io_base + REG_ISR))
     }
 
     fn setup_queue(&mut self, index: u16) -> Option<Queue> {
@@ -352,6 +355,13 @@ fn empty_queue() -> Queue {
 
 pub struct RxToken(Vec<u8>);
 pub struct TxToken<'a>(&'a mut VirtioNet);
+
+impl RxToken {
+    /// La trama recibida (para `nic.rs`).
+    pub fn into_frame(self) -> Vec<u8> {
+        self.0
+    }
+}
 
 impl phy::RxToken for RxToken {
     fn consume<R, F: FnOnce(&[u8]) -> R>(self, f: F) -> R {

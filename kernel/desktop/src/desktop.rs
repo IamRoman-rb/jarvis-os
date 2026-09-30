@@ -293,6 +293,8 @@ pub struct Requests {
     pub spawn: Vec<crate::procs::SpawnRequest>,
     /// Programas a terminar.
     pub kill: Vec<u32>,
+    /// Instalar en el disco N de `SystemStats::disks` (K13).
+    pub install: Option<usize>,
 }
 
 type ClockKey = Option<(u16, u8, u8, u8, u8)>;
@@ -930,8 +932,10 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.brain_voice = self.brain.voice;
         self.stats.brain_account = self.brain.account.clone();
         self.stats_version += 1;
+        // Las apps que muestran estadísticas: el Monitor y Configuración (Sistema, Hardware y
+        // el resultado del instalador salen de acá).
         for s in &mut self.slots {
-            if s.app.kind() == AppKind::Monitor {
+            if matches!(s.app.kind(), AppKind::Monitor | AppKind::Settings) {
                 s.content_dirty = true;
             }
         }
@@ -2354,6 +2358,7 @@ impl<D: BlockDevice> Desktop<D> {
                 && out.brain.is_empty()
                 && out.tone.is_none()
                 && out.power.is_none()
+                && out.install.is_none()
                 && out.config.is_none()
                 && !out.lock
                 && !out.identify
@@ -2437,6 +2442,10 @@ impl<D: BlockDevice> Desktop<D> {
             }
             if let Some(p) = out.power {
                 self.power(p);
+            }
+            if let Some(disk) = out.install {
+                self.logs.push(format!("INSTALAR_PEDIDO {disk}"));
+                self.requests.install = Some(disk);
             }
             if let Some(cfg) = out.config {
                 self.apply_config(cfg, now_ms);

@@ -23,7 +23,7 @@ use jarvis_net::Net;
 use jarvis_task::Priority;
 
 use crate::irqlock::IrqMutex;
-use crate::virtio_net::VirtioNet;
+use crate::nic::Nic;
 use crate::{serial_println, task, time, tls};
 
 /// Lo que la tarea de la red le devuelve al escritorio.
@@ -56,7 +56,7 @@ const MAX_SLEEP_MS: u64 = 50;
 const MAX_BUSY_ROUNDS: u32 = 8;
 
 /// Arranca la tarea con la placa. `false` si no se pudo crear.
-pub fn start(net: Net<VirtioNet>) -> bool {
+pub fn start(net: Net<Nic>) -> bool {
     INFO.with(|i| *i = Some(net.info().clone()));
     task::spawn("red", Priority::High, STACK, move || run(net)).is_some()
 }
@@ -94,7 +94,7 @@ pub fn info() -> NetInfo {
     INFO.with(|i| i.clone()).unwrap_or_default()
 }
 
-fn run(mut net: Net<VirtioNet>) {
+fn run(mut net: Net<Nic>) {
     let mut last_ip = None;
     let mut busy = 0;
     net.set_tls(tls::config());

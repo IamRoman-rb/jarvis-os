@@ -6,7 +6,7 @@ de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va 
 red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
 idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta; espacio de usuario y programas
-de Linux, la 0010, propuesta). Roadmap y arquitectura del kernel:
+de Linux, la 0010, propuesta; hardware real, la 0011). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -46,6 +46,9 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
     - sync/        sincronización de /Sincronizado: emparejado (HKDF), cifrado (ChaCha20-Poly1305),
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red
                    (desktop/src/sync.rs lo une con el FAT32 y las conexiones largas)
+    - drivers/     hardware real (K13, ADR 0011): la mitad de los drivers que interpreta (tablas
+                   ACPI, APIC/MSI, GPT, AHCI, NVMe, placas de red, USB/xHCI, HDA, sensores); no_std
+                   y sin unsafe (los registros los tocan kernel/ahci.rs, xhci.rs, hda.rs…)
     - relay/       el relé (std): reenvía marcos cifrados entre las máquinas de un grupo
     - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
                    (task.rs: tareas y cambio de contexto; nettask.rs: la tarea de la red;
@@ -68,6 +71,9 @@ Kernel (desde kernel/):
 - Tests en el host: cargo test                (gfx, fs contra fatfs, desktop, net con loopback)
 - Arrancar:         cargo xtask run            (QEMU con ventana, red, sonido y puente HTTPS)
 - Punta a punta:    cargo xtask test           (sin ventana: teclado, mouse, ventanas, disco y red)
+- Hardware real:    cargo xtask test-hardware (AHCI/NVMe/USB, e1000e/RTL8139, xHCI y HDA en QEMU)
+                    cargo xtask test-instalar (arranca de un pendrive, instala en un NVMe vacío y
+                    vuelve a arrancar solo desde el NVMe)
 - Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
 - Brave:            cargo xtask brave --instalar | --probar URL (el puente sin QEMU → target/brave-prueba.png)
 - Sincronización:   cargo xtask relay | run2 | sincronizar (dos QEMU + relé; verifica los discos con fatfs)

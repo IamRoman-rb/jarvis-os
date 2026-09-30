@@ -45,6 +45,29 @@ pub struct KernelTask {
     pub runs: u64,
 }
 
+/// Un disco que encontró el kernel (K13), para Configuración → Hardware y el instalador.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiskInfo {
+    /// "SATA 0: WD Green 2.5 480GB", "USB: Kingston DataTraveler".
+    pub name: String,
+    pub mib: u64,
+    /// Sin MBR ni GPT: el único tipo de disco donde se puede instalar (ADR 0011).
+    pub blank: bool,
+    /// Es el medio desde el que arrancó JARVIS-OS (el pendrive).
+    pub boot_medium: bool,
+}
+
+/// Cómo va la instalación.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum InstallState {
+    #[default]
+    Idle,
+    /// En curso, en ese disco.
+    Working(String),
+    /// Terminó: el mensaje para mostrar, o el error.
+    Done(Result<String, String>),
+}
+
 /// Una foto del estado de la máquina.
 #[derive(Clone, Debug, Default)]
 pub struct SystemStats {
@@ -89,6 +112,11 @@ pub struct SystemStats {
     /// Las tareas del kernel (K9) y los cambios de contexto desde el arranque.
     pub kernel_tasks: Vec<KernelTask>,
     pub context_switches: u64,
+    /// K13: los dispositivos con driver, como (tipo, descripción): ("Red", "Realtek RTL8168").
+    pub devices: Vec<(String, String)>,
+    /// Los discos (menos el del sistema) y el estado del instalador.
+    pub disks: Vec<DiskInfo>,
+    pub install: InstallState,
 }
 
 /// Últimos `N` valores (una muestra por segundo), para los gráficos.
@@ -337,6 +365,8 @@ pub struct Outbox {
     pub proc_input: Vec<(u32, Vec<u8>)>,
     /// Programas a terminar (Ctrl+C).
     pub proc_kill: Vec<u32>,
+    /// Instalar JARVIS-OS en el disco número N de `SystemStats::disks` (K13; ya confirmado).
+    pub install: Option<usize>,
     /// Número del último proceso (no se repiten).
     pub(crate) next_pid: u32,
     /// Número del último pedido de red (los números no se repiten).

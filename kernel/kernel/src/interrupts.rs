@@ -16,17 +16,22 @@
 //! Una excepción que viene de un **programa** (anillo 3, K11) no es un error del kernel: un fallo
 //! de página puede ser memoria que se asigna al primer uso (process.rs), y cualquier otra
 //! termina ese programa con la señal que le correspondería en Linux (SIGSEGV, SIGILL, SIGFPE).
+//!
+//! Desde K13, si el firmware describe el APIC (MADT), el PIC se enmascara y todo pasa por el
+//! APIC local y los IOAPIC (apic.rs): mismos vectores para el timer, el teclado y el mouse; las
+//! líneas INTx de PCI se enrutan según `_PRT` (AML), y los drivers nuevos avisan por **MSI**,
+//! con un vector propio cada uno (`alloc_msi`), sin preguntarle a nadie más si fue él.
 //! Referencia: <https://wiki.osdev.org/Interrupts>, <https://wiki.osdev.org/8259_PIC> y
 //! <https://wiki.osdev.org/PCI#Interrupt_Line>.
 
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use pic8259::ChainedPics;
 use spin::{Mutex, Once};
 use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
-use crate::{gdt, keyboard, mouse, paging, process, serial_println, task};
+use crate::{acpi, apic, gdt, keyboard, mouse, paging, pci, process, serial_println, task};
 
 /// ¿La interrupción llegó mientras corría un programa?
 fn from_user(frame: &InterruptStackFrame) -> bool {
@@ -86,6 +91,10 @@ pub fn init() {
         for (line, handler) in PCI_HANDLERS {
             idt[PIC_1_OFFSET + line].set_handler_fn(handler);
         }
+        for (i, handler) in MSI_HANDLERS.iter().enumerate() {
+            idt[MSI_BASE + i as u8].set_handler_fn(*handler);
+        }
+        idt[apic::SPURIOUS_VECTOR].set_handler_fn(spurious);
         idt
     });
     idt.load();
@@ -233,9 +242,71 @@ fn end_of_interrupt(irq: Irq) {
 }
 
 fn eoi_vector(vector: u8) {
+    if apic::active() {
+        apic::eoi();
+        return;
+    }
     // SAFETY: se llama al final del manejador del vector `vector`. El lock de PICS solo se toma
     // con las interrupciones deshabilitadas, así que acá nunca está tomado.
     unsafe { PICS.lock().notify_end_of_interrupt(vector) };
+}
+
+/// Enmascara las 16 líneas del PIC (al pasar al APIC).
+pub fn mask_pic() {
+    // SAFETY: escribir las máscaras solo decide qué líneas llegan a la CPU.
+    unsafe { PICS.lock().write_masks(0xFF, 0xFF) };
+}
+
+/// La interrupción "espuria" del APIC: no se atiende ni lleva fin de interrupción.
+extern "x86-interrupt" fn spurious(_frame: InterruptStackFrame) {}
+
+// --- MSI (K13) --------------------------------------------------------------------------------
+
+/// Primer vector de los MSI: arriba de los del PIC (32–47) y lejos del espurio (0xFF).
+const MSI_BASE: u8 = 0x50;
+const MSI_COUNT: usize = 8;
+/// El evento que despierta cada vector MSI (0 = libre).
+static MSI_EVENTS: [AtomicU32; MSI_COUNT] = [const { AtomicU32::new(0) }; MSI_COUNT];
+static MSI_NEXT: AtomicU8 = AtomicU8::new(0);
+
+macro_rules! msi_handlers {
+    ($($name:ident = $i:literal),*) => {
+        $(extern "x86-interrupt" fn $name(_frame: InterruptStackFrame) { msi_irq($i) })*
+        const MSI_HANDLERS: [extern "x86-interrupt" fn(InterruptStackFrame); MSI_COUNT] = [$($name),*];
+    };
+}
+msi_handlers!(
+    msi0 = 0,
+    msi1 = 1,
+    msi2 = 2,
+    msi3 = 3,
+    msi4 = 4,
+    msi5 = 5,
+    msi6 = 6,
+    msi7 = 7
+);
+
+fn msi_irq(i: usize) {
+    apic::eoi();
+    let event = MSI_EVENTS[i].load(Ordering::Relaxed);
+    if event != 0 {
+        task::signal(event);
+    }
+}
+
+/// Configura el MSI (o MSI-X, si `msix`) de `dev` con un vector propio que despierta `event`.
+/// `false` si no hay APIC, el dispositivo no tiene MSI o se acabaron los vectores: el driver
+/// espera revisando su anillo con plazo (polling).
+pub fn enable_msi(dev: pci::Device, event: u32, msix: bool) -> bool {
+    if !apic::active() {
+        return false;
+    }
+    let i = MSI_NEXT.fetch_add(1, Ordering::Relaxed) as usize;
+    if i >= MSI_COUNT {
+        return false;
+    }
+    MSI_EVENTS[i].store(event, Ordering::Relaxed);
+    dev.enable_msi(apic::id(), MSI_BASE + i as u8, msix)
 }
 
 // --- dispositivos PCI (K9) --------------------------------------------------------------------
@@ -245,6 +316,8 @@ fn eoi_vector(vector: u8) {
 #[derive(Clone, Copy)]
 struct Source {
     line: u8,
+    /// Con APIC: la entrada del IOAPIC por la que llega (según `_PRT`).
+    gsi: Option<u32>,
     isr_port: u16,
     event: u32,
 }
@@ -307,6 +380,14 @@ fn pci_irq(line: u8) {
 
 /// Hay que llamarla sin interrupciones (el lock de PICS lo toman los manejadores).
 fn set_masked(line: u8, masked: bool) {
+    if apic::active() {
+        for s in SOURCES.lock().iter().flatten().filter(|s| s.line == line) {
+            if let Some(gsi) = s.gsi {
+                apic::set_gsi_masked(gsi, masked);
+            }
+        }
+        return;
+    }
     let mut pics = PICS.lock();
     // SAFETY: leer y escribir las máscaras solo cambia qué líneas llegan a la CPU.
     unsafe {
@@ -325,11 +406,24 @@ fn set_masked(line: u8, masked: bool) {
     }
 }
 
-/// Anota un dispositivo virtio legacy que avisa por `line` y habilita esa línea en el PIC.
-/// Devuelve `false` si no se puede (una línea reservada, o ya hay demasiados).
-pub fn enable_pci_irq(line: u8, isr_port: u16, event: u32) -> bool {
+/// Anota un dispositivo virtio legacy que avisa por `line` y habilita esa línea (en el PIC o,
+/// con APIC, en la entrada del IOAPIC que dice `_PRT`). Devuelve `false` si no se puede (una
+/// línea reservada, sin ruta conocida, o ya hay demasiados).
+pub fn enable_pci_irq(dev: pci::Device, line: u8, isr_port: u16, event: u32) -> bool {
     if !PCI_HANDLERS.iter().any(|&(l, _)| l == line) {
         return false;
+    }
+    let mut gsi = None;
+    if apic::active() {
+        let Some((g, active_low, level)) = acpi::get().and_then(|a| a.pci_gsi(dev)) else {
+            return false;
+        };
+        // Al mismo vector que tenía con el PIC: el manejador de la línea no cambia.
+        if !apic::route_gsi(g, PIC_1_OFFSET + line, active_low, level, apic::id()) {
+            return false;
+        }
+        apic::set_gsi_masked(g, true);
+        gsi = Some(g);
     }
     x86_64::instructions::interrupts::without_interrupts(|| {
         let mut sources = SOURCES.lock();
@@ -338,6 +432,7 @@ pub fn enable_pci_irq(line: u8, isr_port: u16, event: u32) -> bool {
         };
         *free = Some(Source {
             line,
+            gsi,
             isr_port,
             event,
         });

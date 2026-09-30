@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 mod brave;
 mod cerebro;
+mod hardware;
 mod iso;
 mod puente;
 mod sincro;
@@ -41,6 +42,8 @@ fn main() -> ExitCode {
         "test" => build_user()
             .and_then(|_| build())
             .and_then(|img| test(&img, &fresh_disk("disco-test.img")?)),
+        "test-hardware" => build().and_then(|img| test_hardware(&img)),
+        "test-instalar" => build().and_then(|img| test_install(&img)),
         "usuario" => build_user().map(|d| println!("programas de Linux: {}", d.display())),
         "screenshot" => build().and_then(|img| screenshot(&img, &fresh_disk("disco-captura.img")?)),
         "vdi" => build().and_then(|img| vdi(&img)),
@@ -55,7 +58,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -342,9 +345,8 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     let machine = match &audio {
         Some(driver) => {
             cmd.arg("-audiodev").arg(format!("{driver},id=sonido"));
-            // Micrófono (y parlantes) de JARVIS-OS: virtio-sound, conectado al audio del
-            // anfitrión (ver kernel/src/virtio_sound.rs).
-            cmd.args(["-device", "virtio-sound-pci,audiodev=sonido"]);
+            // Micrófono y parlantes: virtio-sound, o HDA en las pruebas de hardware (K13).
+            hardware::sound_args(&mut cmd);
             "q35,pcspk-audiodev=sonido"
         }
         None => "q35",
@@ -373,16 +375,9 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         // Desde la ISO, como un CD y sin disco: modo en vivo (el disco se ignora).
         cmd.arg("-cdrom").arg(image);
     } else {
-        cmd.arg("-drive")
-            .arg(format!("format=raw,file={}", image.display()));
-        // Disco de datos: virtio-blk con la interfaz legacy (por puertos de E/S), que es la que
-        // implementa el driver del kernel.
-        cmd.arg("-drive")
-            .arg(format!(
-                "if=none,id=disco,format=raw,file={}",
-                disk.display()
-            ))
-            .args(["-device", "virtio-blk-pci,drive=disco,disable-modern=on"]);
+        // La imagen y el disco de datos: virtio-blk, o lo de `hardware::set` (K13: SATA, NVMe,
+        // USB, arrancar desde un pendrive o desde el disco instalado).
+        hardware::disk_args(&mut cmd, image, disk);
     }
     // Placa de video: virtio-vga (una virtio-gpu que arranca como VGA común, así el firmware
     // tiene dónde dibujar) con una salida por monitor del anfitrión. JARVIS_MONITORES la cambia.
@@ -407,12 +402,7 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     cmd.args(["-vga", "none", "-device", &video]);
     // Placa de red virtio-net con la red "user" de QEMU: DHCP (10.0.2.15), DNS (10.0.2.3) y
     // salida a internet por el anfitrión, que se ve como 10.0.2.2.
-    cmd.args([
-        "-netdev",
-        "user,id=red",
-        "-device",
-        "virtio-net-pci,netdev=red,disable-modern=on",
-    ]);
+    cmd.args(["-netdev", "user,id=red", "-device", hardware::net_device()]);
     if headless {
         cmd.args(["-display", "none"]);
     }
@@ -501,14 +491,204 @@ fn iso_cmd(image: &Path) -> Result<()> {
     Ok(())
 }
 
+/// K13: una corrida por combinación de hardware que emula QEMU. En cada una el kernel tiene que
+/// encontrar el disco, montar la partición de JARVIS de la GPT y escribir en ella (se verifica
+/// con `fatfs` adentro de la partición).
+fn test_hardware(image: &Path) -> Result<()> {
+    use hardware::{DiskBus, Hw, NetCard};
+    let port = puente::test_server(TEST_PAGE)?;
+    // El repositorio de paquetes (la música de la prueba de HDA).
+    puente::start();
+    let runs = [
+        (
+            Hw {
+                boot: hardware::Boot::Disk,
+                disk: DiskBus::Ahci,
+                net: NetCard::E1000e,
+                usb_input: false,
+                hda: true,
+            },
+            "AHCI_DISCO puerto 1",
+            "SATA 1",
+            "RED_PLACA Intel e1000",
+        ),
+        (
+            Hw {
+                boot: hardware::Boot::Disk,
+                disk: DiskBus::Nvme,
+                net: NetCard::Rtl8139,
+                usb_input: false,
+                hda: false,
+            },
+            "NVME_DISCO",
+            "NVMe",
+            "RED_PLACA Realtek RTL8139",
+        ),
+        // Todo por USB: el disco del sistema en un pendrive, y el teclado y el mouse.
+        (
+            Hw {
+                boot: hardware::Boot::Disk,
+                disk: DiskBus::Usb,
+                net: NetCard::Virtio,
+                usb_input: true,
+                hda: false,
+            },
+            "USB_DISCO",
+            "USB",
+            "USB_MOUSE",
+        ),
+    ];
+    for (hw, found, system, card) in runs {
+        println!("--- hardware: {hw:?}");
+        let fat = fresh_disk("disco-hw-fat.img")?;
+        let disk = target_dir().join("disco-hw.img");
+        hardware::gpt_disk(&fat, &disk)?;
+        hardware::set(hw);
+        let mut s = Session::start(image, &disk)?;
+        s.wait_for("APIC_LISTO", BOOT_TIMEOUT)?;
+        s.wait_for(found, BOOT_TIMEOUT)?;
+        s.wait_for(&format!("DISCO_SISTEMA {system}"), BOOT_TIMEOUT)?;
+        s.saw_or_wait(card, BOOT_TIMEOUT)?;
+        s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+        // La placa de red: DHCP y una página del anfitrión por HTTP.
+        s.saw_or_wait("RED_IP 10.0.2.15", STEP)?;
+        s.monitor("sendkey meta_l-r")?;
+        thread::sleep(Duration::from_millis(500));
+        s.type_text(&format!("ir http://10.0.2.2:{port}/"))?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("RED_RESPUESTA 200", STEP)?;
+        s.monitor("sendkey alt-f4")?;
+        thread::sleep(Duration::from_millis(300));
+        s.monitor("sendkey alt-f4")?;
+        thread::sleep(Duration::from_millis(300));
+        if hw.hda {
+            // Sonido por HDA: una canción suena entera (MUSICA_FIN llega cuando la placa terminó
+            // de reproducirla, contando lo que ya pasó por los buffers).
+            s.saw_or_wait("HDA_LISTO", STEP)?;
+            s.monitor("sendkey ctrl-alt-t")?;
+            s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+            s.type_text("apt install musica && cd /M* && open Escala.wav")?;
+            s.monitor("sendkey ret")?;
+            s.wait_for("MUSICA_ARCHIVO", STEP)?;
+            s.wait_for("MUSICA_FIN", STEP)?;
+            s.monitor("sendkey alt-f4")?;
+            thread::sleep(Duration::from_millis(300));
+            s.monitor("sendkey alt-f4")?;
+            thread::sleep(Duration::from_millis(300));
+        }
+        s.monitor("sendkey tab")?;
+        s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
+        if hw.usb_input {
+            // La tecla llegó por el teclado USB, no por el PS/2 que QEMU también emula.
+            s.saw_or_wait("USB_TECLA", STEP)?;
+            s.monitor("mouse_move 30 20")?;
+            s.saw_or_wait("USB_MOVIMIENTO", STEP)?;
+        }
+        s.monitor("sendkey f7")?;
+        s.type_text("hardware")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("ARCHIVOS_CREADO /hardware", STEP)?;
+        s.quit();
+        drop(s);
+        hardware::set(hardware::VIRTIO);
+        let mut part = hardware::Partition::open(&disk)?;
+        let fs = fatfs::FileSystem::new(&mut part, fatfs::FsOptions::new())
+            .map_err(|e| format!("la partición de JARVIS no es un FAT32 sano: {e}"))?;
+        fs.root_dir()
+            .open_dir("hardware")
+            .map_err(|e| format!("/hardware no quedó en la partición: {e}"))?;
+        println!(
+            "ok: {hw:?}: el disco se montó desde la GPT, /hardware quedó escrito y la red anduvo"
+        );
+    }
+    Ok(())
+}
+
+/// K13: el instalador de punta a punta. Arranca desde la imagen como pendrive USB (modo en vivo)
+/// con un NVMe vacío, instala desde Configuración → Hardware (dos confirmaciones), y vuelve a
+/// arrancar **solo** desde el NVMe: tiene que llegar al escritorio con su disco del sistema.
+fn test_install(image: &Path) -> Result<()> {
+    use hardware::{Boot, DiskBus, Hw, NetCard};
+    let io = |e: std::io::Error| format!("disco de prueba: {e}");
+    let stick = target_dir().join("pendrive-instalar.img");
+    fs::copy(image, &stick).map_err(io)?;
+    let target = target_dir().join("disco-instalar.img");
+    let _ = fs::remove_file(&target);
+    fs::File::create(&target)
+        .and_then(|f| f.set_len(256 * 1024 * 1024))
+        .map_err(io)?;
+    let hw = |boot| Hw {
+        boot,
+        disk: DiskBus::Nvme,
+        net: NetCard::Virtio,
+        usb_input: false,
+        hda: false,
+    };
+    hardware::set(hw(Boot::Usb));
+    let mut s = Session::start(&stick, &target)?;
+    s.wait_for("MODO_EN_VIVO", BOOT_TIMEOUT)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    s.type_text("instalar")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
+    // La lista de discos llega con las estadísticas (una vez por segundo).
+    thread::sleep(Duration::from_millis(1500));
+    // El último es el NVMe vacío (el pendrive va primero): dos Enter = instalar y confirmar.
+    s.monitor("sendkey end")?;
+    s.monitor("sendkey ret")?;
+    thread::sleep(Duration::from_millis(300));
+    s.monitor("sendkey ret")?;
+    s.wait_for("INSTALAR_PEDIDO", STEP)?;
+    s.wait_for("INSTALAR_ARRANQUE", Duration::from_secs(120))?;
+    s.wait_for("INSTALAR_LISTO", Duration::from_secs(120))?;
+    thread::sleep(Duration::from_millis(500));
+    s.screenshot_head(&target_dir().join("jarvis-os-instalado.png"), None)?;
+    s.quit();
+    drop(s);
+
+    // Otra vez, sin pendrive: arranca del NVMe.
+    hardware::set(hw(Boot::Data));
+    let mut s = Session::start(Path::new("sin-imagen.img"), &target)?;
+    s.wait_for("DISCO_SISTEMA NVMe", BOOT_TIMEOUT)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.quit();
+    drop(s);
+    hardware::set(hardware::VIRTIO);
+    let mut part = hardware::Partition::open(&target)?;
+    let fs = fatfs::FileSystem::new(&mut part, fatfs::FsOptions::new())
+        .map_err(|e| format!("la partición de datos no es un FAT32 sano: {e}"))?;
+    let mut text = String::new();
+    fs.root_dir()
+        .open_file("Documentos/Bienvenida.txt")
+        .and_then(|mut f| f.read_to_string(&mut text))
+        .map_err(|e| format!("falta /Documentos/Bienvenida.txt: {e}"))?;
+    let mut log = String::new();
+    fs.root_dir()
+        .open_file("Sistema/arranque.log")
+        .and_then(|mut f| f.read_to_string(&mut log))
+        .map_err(|e| format!("falta /Sistema/arranque.log: {e}"))?;
+    if !log.contains("DISCO_SISTEMA NVMe") {
+        return Err("el registro del arranque del NVMe no dice DISCO_SISTEMA".into());
+    }
+    println!("ok: instalado en un NVMe vacío desde el pendrive, y arranca solo desde el NVMe");
+    Ok(())
+}
+
 /// Arranca la ISO como un CD, sin disco, y espera el escritorio en modo en vivo.
 fn boot_iso(iso: &Path) -> Result<()> {
     let mut s = Session::start(iso, Path::new(""))?;
     s.wait_for("segmentos con W^X", BOOT_TIMEOUT)?;
     s.wait_for("MODO_EN_VIVO", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
-    s.quit();
-    println!("ok: la ISO arranca (modo en vivo, FAT32 en RAM)");
+    // Apagar desde el menú (K13): el kernel usa `\_S5` del AML y QEMU tiene que cerrarse solo.
+    s.monitor("sendkey alt-f4")?;
+    s.wait_for("ESCRITORIO_MENU apagado", STEP)?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("ACPI: apagando (S5", STEP)?;
+    s.wait_exit(STEP)?;
+    println!("ok: la ISO arranca (modo en vivo, FAT32 en RAM) y se apaga por ACPI");
     Ok(())
 }
 
@@ -712,6 +892,18 @@ impl Session {
             thread::sleep(Duration::from_millis(20));
         }
         Ok(())
+    }
+
+    /// Espera a que QEMU termine solo (el sistema se apagó).
+    fn wait_exit(&mut self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        Err("QEMU no se cerró: el apagado no funcionó".into())
     }
 
     /// Cierra QEMU de forma ordenada (el disco queda escrito).
@@ -1050,6 +1242,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     verify_file_exists(disk, "Programas/bin/hola")?;
     verify_file_exists(disk, "snap/bin/saludo")?;
     verify_file_exists(disk, "Sistema/firewall.log")?;
+    verify_boot_log(disk, "arrancando")?;
     println!(
         "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, snap, firewall, configuración, Brave ({}), suspender, cerrar sesión y disco verificados",
         if brave_ok {
@@ -1103,6 +1296,26 @@ fn verify_file_exists(disk: &Path, path: &str) -> Result<()> {
         .open_file(path)
         .map_err(|e| format!("no quedó /{path}: {e}"))?;
     println!("[disco] /{path} existe (verificado con fatfs)");
+    Ok(())
+}
+
+/// K13: el registro del arranque quedó en /Sistema/arranque.log y dice `needle`.
+fn verify_boot_log(disk: &Path, needle: &str) -> Result<()> {
+    let mut file = open_fatfs(disk)?;
+    let fs =
+        fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(|e| e.to_string())?;
+    let mut text = String::new();
+    fs.root_dir()
+        .open_file("Sistema/arranque.log")
+        .and_then(|mut f| f.read_to_string(&mut text))
+        .map_err(|e| format!("no quedó /Sistema/arranque.log: {e}"))?;
+    if !text.contains(needle) {
+        return Err(format!("/Sistema/arranque.log no dice \"{needle}\""));
+    }
+    println!(
+        "[disco] /Sistema/arranque.log: {} líneas (verificado con fatfs)",
+        text.lines().count()
+    );
     Ok(())
 }
 

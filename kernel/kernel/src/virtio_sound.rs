@@ -360,7 +360,7 @@ impl Speaker {
 
     /// Los buffers que la placa ya consumió se vuelven a llenar con `fill` y se mandan. Devuelve
     /// cuántos se atendieron.
-    pub fn poll(&mut self, fill: &mut dyn FnMut(&mut [i16]) -> usize) -> usize {
+    pub fn refill(&mut self, fill: &mut dyn FnMut(&mut [i16]) -> usize) -> usize {
         let mut n = 0;
         while let Some((head, _)) = self.tx.take_used() {
             let i = (head / 3) as usize;
@@ -372,5 +372,17 @@ impl Speaker {
             n += 1;
         }
         n
+    }
+}
+
+impl crate::audio::Output for Speaker {
+    fn rate(&self) -> u32 {
+        self.rate
+    }
+    fn poll(&mut self, fill: &mut dyn FnMut(&mut [i16]) -> usize) {
+        self.refill(fill);
+    }
+    fn played(&self) -> u64 {
+        self.played
     }
 }

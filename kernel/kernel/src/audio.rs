@@ -11,7 +11,11 @@
 //!
 //! Así un cuadro lento come del anillo en vez de dejar a la placa sin nada. Si igual se vacía, va
 //! silencio y se anota ("underrun").
+//!
+//! La placa puede ser la virtio-sound de QEMU o una HDA de verdad (K13): las dos implementan
+//! [`Output`].
 
+use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -19,8 +23,17 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use jarvis_task::Priority;
 
 use crate::irqlock::IrqMutex;
-use crate::virtio_sound::Speaker;
 use crate::{serial_println, task, time};
+
+/// Una salida de audio: estéreo de 16 bits a la frecuencia `rate`.
+pub trait Output: Send {
+    fn rate(&self) -> u32;
+    /// Los buffers que la placa ya consumió se vuelven a llenar con `fill`, que devuelve cuántos
+    /// cuadros de audio de verdad puso (el resto es silencio).
+    fn poll(&mut self, fill: &mut dyn FnMut(&mut [i16]) -> usize);
+    /// Cuadros de audio de verdad que la placa ya reprodujo.
+    fn played(&self) -> u64;
+}
 
 /// Cuánto audio se mezcla por adelantado (además de los 100 ms de buffers de la placa).
 pub const AHEAD_MS: u64 = 120;
@@ -39,8 +52,8 @@ static PLAYED: AtomicU64 = AtomicU64::new(0);
 static UNDERRUNS: AtomicU64 = AtomicU64::new(0);
 
 /// Arranca la tarea que alimenta la placa.
-pub fn start(mut speaker: Speaker) -> u32 {
-    let rate = speaker.rate;
+pub fn start(mut speaker: Box<dyn Output>) -> u32 {
+    let rate = speaker.rate();
     RING.with(|r| r.rate = rate);
     task::spawn("audio", Priority::High, 32 * 1024, move || {
         loop {
@@ -57,7 +70,7 @@ pub fn start(mut speaker: Speaker) -> u32 {
                 }
                 n
             });
-            PLAYED.store(speaker.played, Ordering::Relaxed);
+            PLAYED.store(speaker.played(), Ordering::Relaxed);
             task::wait(0, Some(time::millis() + 5));
         }
     });
