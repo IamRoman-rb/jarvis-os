@@ -503,6 +503,7 @@ fn test_hardware(image: &Path) -> Result<()> {
             Hw {
                 disk: DiskBus::Ahci,
                 net: NetCard::E1000e,
+                usb_input: false,
             },
             "AHCI_DISCO puerto 1",
             "SATA 1",
@@ -512,10 +513,22 @@ fn test_hardware(image: &Path) -> Result<()> {
             Hw {
                 disk: DiskBus::Nvme,
                 net: NetCard::Rtl8139,
+                usb_input: false,
             },
             "NVME_DISCO",
             "NVMe",
             "RED_PLACA Realtek RTL8139",
+        ),
+        // Todo por USB: el disco del sistema en un pendrive, y el teclado y el mouse.
+        (
+            Hw {
+                disk: DiskBus::Usb,
+                net: NetCard::Virtio,
+                usb_input: true,
+            },
+            "USB_DISCO",
+            "USB",
+            "USB_MOUSE",
         ),
     ];
     for (hw, found, system, card) in runs {
@@ -543,6 +556,12 @@ fn test_hardware(image: &Path) -> Result<()> {
         thread::sleep(Duration::from_millis(300));
         s.monitor("sendkey tab")?;
         s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
+        if hw.usb_input {
+            // La tecla llegó por el teclado USB, no por el PS/2 que QEMU también emula.
+            s.saw_or_wait("USB_TECLA", STEP)?;
+            s.monitor("mouse_move 30 20")?;
+            s.saw_or_wait("USB_MOVIMIENTO", STEP)?;
+        }
         s.monitor("sendkey f7")?;
         s.type_text("hardware")?;
         s.monitor("sendkey ret")?;

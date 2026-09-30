@@ -21,6 +21,8 @@ pub enum DiskBus {
     /// La controladora AHCI de la q35, con un disco SATA.
     Ahci,
     Nvme,
+    /// Un pendrive en la controladora xHCI (`usb-storage`).
+    Usb,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,11 +38,14 @@ pub enum NetCard {
 pub struct Hw {
     pub disk: DiskBus,
     pub net: NetCard,
+    /// Teclado y mouse USB (`usb-kbd`, `usb-mouse`) en la controladora xHCI.
+    pub usb_input: bool,
 }
 
 pub const VIRTIO: Hw = Hw {
     disk: DiskBus::Virtio,
     net: NetCard::Virtio,
+    usb_input: false,
 };
 
 static HW: Mutex<Hw> = Mutex::new(VIRTIO);
@@ -54,8 +59,23 @@ pub fn get() -> Hw {
     *HW.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Los argumentos de QEMU del disco de datos.
+/// Los argumentos de QEMU del disco de datos y de lo que va por USB.
 pub fn disk_args(cmd: &mut Command, disk: &Path) {
+    let hw = get();
+    if hw.disk == DiskBus::Usb || hw.usb_input {
+        cmd.args(["-device", "qemu-xhci,id=xhci"]);
+    }
+    if hw.usb_input {
+        // El mouse, detrás de un hub (el de QEMU es USB 1.1), para probar la enumeración de hubs.
+        cmd.args([
+            "-device",
+            "usb-kbd,bus=xhci.0",
+            "-device",
+            "usb-hub,bus=xhci.0,port=4",
+            "-device",
+            "usb-mouse,bus=xhci.0,port=4.2",
+        ]);
+    }
     cmd.arg("-drive").arg(format!(
         "if=none,id=disco,format=raw,file={}",
         disk.display()
@@ -67,6 +87,7 @@ pub fn disk_args(cmd: &mut Command, disk: &Path) {
         // arranque (`-drive` sin `if=` va ahí): el disco de datos va en el 1.
         DiskBus::Ahci => cmd.args(["-device", "ide-hd,drive=disco,bus=ide.1"]),
         DiskBus::Nvme => cmd.args(["-device", "nvme,serial=JARVIS0001,drive=disco"]),
+        DiskBus::Usb => cmd.args(["-device", "usb-storage,bus=xhci.0,drive=disco"]),
     };
 }
 

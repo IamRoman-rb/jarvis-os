@@ -27,6 +27,21 @@ pub fn pop_byte() -> Option<u8> {
     QUEUE.pop()
 }
 
+/// Los mouse USB (K13) mandan sus movimientos convertidos a paquetes PS/2 de 4 bytes (con
+/// rueda) por una cola aparte: el mouse PS/2 puede ser de 3 bytes, y los dos no se mezclan.
+static USB_QUEUE: ByteQueue<512> = ByteQueue::new();
+
+/// La llama la tarea "usb" (con las interrupciones deshabilitadas: un solo productor a la vez).
+pub fn push_usb_packet(packet: [u8; 4]) {
+    for b in packet {
+        USB_QUEUE.push(b);
+    }
+}
+
+pub fn pop_usb_byte() -> Option<u8> {
+    USB_QUEUE.pop()
+}
+
 fn status() -> u8 {
     // SAFETY: 0x64 es el registro de estado del controlador 8042; leerlo no tiene efectos.
     unsafe { Port::new(STATUS_COMMAND).read() }

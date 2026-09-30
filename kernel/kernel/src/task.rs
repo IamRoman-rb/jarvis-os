@@ -50,6 +50,8 @@ pub const EV_NET_REQUEST: u32 = 1 << 2;
 pub const EV_PROC: u32 = 1 << 3;
 /// El escritorio contestó a un proceso.
 pub const EV_PROC_REPLY: u32 = 1 << 4;
+/// La controladora USB tiene eventos (K13).
+pub const EV_USB: u32 = 1 << 5;
 
 /// El planificador. Se toma siempre con las interrupciones deshabilitadas (en las tareas, con
 /// `without_interrupts`; en los manejadores ya lo están), así nunca está tomado cuando llega una

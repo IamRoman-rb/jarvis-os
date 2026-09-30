@@ -63,6 +63,7 @@ mod virtio_gpu;
 mod virtio_modern;
 mod virtio_net;
 mod virtio_sound;
+mod xhci;
 
 use alloc::vec::Vec;
 use core::fmt::Write;
@@ -524,6 +525,8 @@ fn run(
     mut mic: Option<virtio_sound::Mic>,
 ) -> ! {
     let mut keyboard = keyboard::Keyboard::new();
+    // Los mouse USB (K13) llegan como paquetes PS/2 de 4 bytes, por su propia cola.
+    let mut usb_mouse = MouseDecoder::with_wheel();
     let mut last_mic = 0u64;
     let mut clock = local_time(desktop.utc_offset());
     let mut last_rtc = 0;
@@ -584,6 +587,11 @@ fn run(
         }
         while let Some(byte) = mouse::pop_byte() {
             if let Some(packet) = mouse_decoder.push(byte) {
+                desktop.handle(Event::Mouse(packet), now, clock);
+            }
+        }
+        while let Some(byte) = mouse::pop_usb_byte() {
+            if let Some(packet) = usb_mouse.push(byte) {
                 desktop.handle(Event::Mouse(packet), now, clock);
             }
         }

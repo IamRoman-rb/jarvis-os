@@ -14,7 +14,7 @@ use jarvis_drivers::gpt::{self, JARVIS_DATA, PartitionDevice};
 use jarvis_fs::BlockDevice;
 use spin::Mutex;
 
-use crate::{ahci, nvme, serial_println};
+use crate::{ahci, nvme, serial_println, xhci};
 
 pub type AnyDisk = Box<dyn BlockDevice + Send>;
 
@@ -28,7 +28,7 @@ pub struct Found {
 /// Los discos que no son el del sistema.
 static SPARE: Mutex<Vec<Found>> = Mutex::new(Vec::new());
 
-/// Busca los discos SATA y NVMe.
+/// Busca los discos SATA, NVMe y USB (esto último arranca también el teclado y el mouse USB).
 pub fn probe() -> Vec<Found> {
     let mut found = Vec::new();
     for d in ahci::probe() {
@@ -43,6 +43,7 @@ pub fn probe() -> Vec<Found> {
             disk: Box::new(d),
         });
     }
+    found.extend(xhci::init());
     found
 }
 
