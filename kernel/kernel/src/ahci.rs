@@ -86,7 +86,7 @@ pub fn probe() -> Vec<AhciDisk> {
         };
         take_ownership(&hba);
         hba.w32(GHC, hba.r32(GHC) | GHC_AE);
-        let msi = interrupts::enable_msi(dev, task::EV_DISK);
+        let msi = interrupts::enable_msi(dev, task::EV_DISK, true);
         if msi {
             USE_IRQ.store(true, Ordering::Relaxed);
             hba.w32(IS, u32::MAX);
@@ -166,8 +166,8 @@ impl AhciDisk {
             serial_println!("AHCI: la controladora no llega a la memoria del heap (> 4 GiB)");
             return None;
         }
-        port.w64(PX_CLB, list_phys);
-        port.w64(PX_FB, fis_phys);
+        port.w64_split(PX_CLB, list_phys);
+        port.w64_split(PX_FB, fis_phys);
         port.w32(PX_SERR, u32::MAX);
         port.w32(PX_IS, u32::MAX);
         // Interrupciones del puerto: terminó con FIS de registro (DHRS) o con error (TFES).

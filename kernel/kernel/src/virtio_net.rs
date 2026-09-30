@@ -356,6 +356,13 @@ fn empty_queue() -> Queue {
 pub struct RxToken(Vec<u8>);
 pub struct TxToken<'a>(&'a mut VirtioNet);
 
+impl RxToken {
+    /// La trama recibida (para `nic.rs`).
+    pub fn into_frame(self) -> Vec<u8> {
+        self.0
+    }
+}
+
 impl phy::RxToken for RxToken {
     fn consume<R, F: FnOnce(&[u8]) -> R>(self, f: F) -> R {
         f(&self.0)

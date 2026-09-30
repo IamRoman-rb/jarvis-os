@@ -294,10 +294,10 @@ fn msi_irq(i: usize) {
     }
 }
 
-/// Configura el MSI (o MSI-X) de `dev` con un vector propio que despierta `event`. `false` si
-/// no hay APIC, el dispositivo no tiene MSI o se acabaron los vectores: el driver espera
-/// revisando su anillo con plazo (polling).
-pub fn enable_msi(dev: pci::Device, event: u32) -> bool {
+/// Configura el MSI (o MSI-X, si `msix`) de `dev` con un vector propio que despierta `event`.
+/// `false` si no hay APIC, el dispositivo no tiene MSI o se acabaron los vectores: el driver
+/// espera revisando su anillo con plazo (polling).
+pub fn enable_msi(dev: pci::Device, event: u32, msix: bool) -> bool {
     if !apic::active() {
         return false;
     }
@@ -306,7 +306,7 @@ pub fn enable_msi(dev: pci::Device, event: u32) -> bool {
         return false;
     }
     MSI_EVENTS[i].store(event, Ordering::Relaxed);
-    dev.enable_msi(apic::id(), MSI_BASE + i as u8)
+    dev.enable_msi(apic::id(), MSI_BASE + i as u8, msix)
 }
 
 // --- dispositivos PCI (K9) --------------------------------------------------------------------

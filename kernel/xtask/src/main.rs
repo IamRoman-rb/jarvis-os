@@ -403,12 +403,7 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     cmd.args(["-vga", "none", "-device", &video]);
     // Placa de red virtio-net con la red "user" de QEMU: DHCP (10.0.2.15), DNS (10.0.2.3) y
     // salida a internet por el anfitrión, que se ve como 10.0.2.2.
-    cmd.args([
-        "-netdev",
-        "user,id=red",
-        "-device",
-        "virtio-net-pci,netdev=red,disable-modern=on",
-    ]);
+    cmd.args(["-netdev", "user,id=red", "-device", hardware::net_device()]);
     if headless {
         cmd.args(["-display", "none"]);
     }
@@ -501,24 +496,29 @@ fn iso_cmd(image: &Path) -> Result<()> {
 /// encontrar el disco, montar la partición de JARVIS de la GPT y escribir en ella (se verifica
 /// con `fatfs` adentro de la partición).
 fn test_hardware(image: &Path) -> Result<()> {
-    use hardware::{DiskBus, Hw};
+    use hardware::{DiskBus, Hw, NetCard};
+    let port = puente::test_server(TEST_PAGE)?;
     let runs = [
         (
             Hw {
                 disk: DiskBus::Ahci,
+                net: NetCard::E1000e,
             },
             "AHCI_DISCO puerto 1",
             "SATA 1",
+            "RED_PLACA Intel e1000",
         ),
         (
             Hw {
                 disk: DiskBus::Nvme,
+                net: NetCard::Rtl8139,
             },
             "NVME_DISCO",
             "NVMe",
+            "RED_PLACA Realtek RTL8139",
         ),
     ];
-    for (hw, found, system) in runs {
+    for (hw, found, system, card) in runs {
         println!("--- hardware: {hw:?}");
         let fat = fresh_disk("disco-hw-fat.img")?;
         let disk = target_dir().join("disco-hw.img");
@@ -528,7 +528,19 @@ fn test_hardware(image: &Path) -> Result<()> {
         s.wait_for("APIC_LISTO", BOOT_TIMEOUT)?;
         s.wait_for(found, BOOT_TIMEOUT)?;
         s.wait_for(&format!("DISCO_SISTEMA {system}"), BOOT_TIMEOUT)?;
+        s.saw_or_wait(card, BOOT_TIMEOUT)?;
         s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+        // La placa de red: DHCP y una página del anfitrión por HTTP.
+        s.saw_or_wait("RED_IP 10.0.2.15", STEP)?;
+        s.monitor("sendkey meta_l-r")?;
+        thread::sleep(Duration::from_millis(500));
+        s.type_text(&format!("ir http://10.0.2.2:{port}/"))?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("RED_RESPUESTA 200", STEP)?;
+        s.monitor("sendkey alt-f4")?;
+        thread::sleep(Duration::from_millis(300));
+        s.monitor("sendkey alt-f4")?;
+        thread::sleep(Duration::from_millis(300));
         s.monitor("sendkey tab")?;
         s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
         s.monitor("sendkey f7")?;
@@ -544,7 +556,9 @@ fn test_hardware(image: &Path) -> Result<()> {
         fs.root_dir()
             .open_dir("hardware")
             .map_err(|e| format!("/hardware no quedó en la partición: {e}"))?;
-        println!("ok: {hw:?}: el disco se montó desde la GPT y /hardware quedó escrito");
+        println!(
+            "ok: {hw:?}: el disco se montó desde la GPT, /hardware quedó escrito y la red anduvo"
+        );
     }
     Ok(())
 }

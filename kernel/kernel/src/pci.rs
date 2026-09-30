@@ -90,12 +90,13 @@ impl Device {
         ((c >> 24) as u8, (c >> 16) as u8, (c >> 8) as u8)
     }
 
-    /// Configura MSI-X (si lo tiene) o MSI para que el dispositivo dispare `vector` en la CPU
-    /// `apic_id`. Con MSI-X, todas las entradas de la tabla van a ese vector (los drivers usan
-    /// una sola cola de eventos). Devuelve `false` si no tiene ninguno de los dos.
-    pub fn enable_msi(&self, apic_id: u8, vector: u8) -> bool {
+    /// Configura MSI-X (si lo tiene y `msix`) o MSI para que el dispositivo dispare `vector` en
+    /// la CPU `apic_id`. Con MSI-X, todas las entradas de la tabla van a ese vector (los drivers
+    /// usan una sola cola de eventos). Devuelve `false` si no tiene ninguno de los dos.
+    pub fn enable_msi(&self, apic_id: u8, vector: u8, msix: bool) -> bool {
         let caps = self.capabilities();
-        if let Some(&(_, at)) = caps.iter().find(|c| c.0 == CAP_MSIX)
+        if msix
+            && let Some(&(_, at)) = caps.iter().find(|c| c.0 == CAP_MSIX)
             && self.enable_msix_at(at, apic_id, vector)
         {
             return true;

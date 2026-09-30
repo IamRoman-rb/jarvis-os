@@ -13,6 +13,7 @@
 //! - [`apic`]: el formato de las entradas del IOAPIC y de los mensajes MSI/MSI-X.
 //! - [`gpt`]: la tabla de particiones de UEFI (leer, crear, ver una partición como disco).
 //! - [`ahci`] y [`nvme`]: los comandos de los discos SATA y NVMe y lo que responden.
+//! - [`nic`]: los anillos de descriptores de las placas de red Intel y Realtek.
 //!
 //! Referencias: especificación ACPI 6.5 (cap. 5), Intel SDM vol. 3A cap. 11 (APIC) y la
 //! especificación PCI Local Bus 3.0 §6.8 (MSI).
@@ -25,6 +26,7 @@ pub mod acpi;
 pub mod ahci;
 pub mod apic;
 pub mod gpt;
+pub mod nic;
 pub mod nvme;
 
 /// Lee un entero en little endian de `b` en `at`. Fuera de rango da 0: las tablas del firmware

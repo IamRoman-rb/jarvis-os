@@ -23,13 +23,24 @@ pub enum DiskBus {
     Nvme,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NetCard {
+    Virtio,
+    /// Intel 82574L (PCI Express, con MSI).
+    E1000e,
+    /// Realtek RTL8139 (PCI, sin MSI: el kernel la revisa cada tanto).
+    Rtl8139,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Hw {
     pub disk: DiskBus,
+    pub net: NetCard,
 }
 
 pub const VIRTIO: Hw = Hw {
     disk: DiskBus::Virtio,
+    net: NetCard::Virtio,
 };
 
 static HW: Mutex<Hw> = Mutex::new(VIRTIO);
@@ -57,6 +68,15 @@ pub fn disk_args(cmd: &mut Command, disk: &Path) {
         DiskBus::Ahci => cmd.args(["-device", "ide-hd,drive=disco,bus=ide.1"]),
         DiskBus::Nvme => cmd.args(["-device", "nvme,serial=JARVIS0001,drive=disco"]),
     };
+}
+
+/// El `-device` de la placa de red (conectada a la red "user" de QEMU, `red`).
+pub fn net_device() -> &'static str {
+    match get().net {
+        NetCard::Virtio => "virtio-net-pci,netdev=red,disable-modern=on",
+        NetCard::E1000e => "e1000e,netdev=red",
+        NetCard::Rtl8139 => "rtl8139,netdev=red",
+    }
 }
 
 /// Sectores de 512 bytes.

@@ -30,6 +30,7 @@ mod audio;
 mod cpu;
 mod display;
 mod dma;
+mod e1000;
 mod entropy;
 mod fw_cfg;
 mod gdt;
@@ -39,6 +40,7 @@ mod keyboard;
 mod mmio;
 mod mouse;
 mod nettask;
+mod nic;
 mod nvme;
 mod paging;
 mod pci;
@@ -47,6 +49,8 @@ mod power;
 mod process;
 mod queue;
 mod rtc;
+mod rtl8139;
+mod rtl8169;
 mod serial;
 mod speaker;
 mod storage;
@@ -335,21 +339,28 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         );
     }
 
-    // Red: virtio-net + smoltcp, en su propia tarea (K9). La dirección se pide por DHCP.
-    let has_net = match VirtioNet::init(phys_offset) {
+    // Red: virtio-net o una placa real (Intel, Realtek; K13) + smoltcp, en su propia tarea
+    // (K9). La dirección se pide por DHCP.
+    let nic = match VirtioNet::init(phys_offset) {
         Some(dev) => {
-            let mac = dev.mac();
             if let Some((pci_dev, line, isr)) = dev.irq()
                 && interrupts::enable_pci_irq(pci_dev, line, isr, task::EV_NET)
             {
                 serial_println!("virtio-net: avisa por la IRQ {line}");
             }
-            nettask::start(Net::new(dev, mac, time::rdtsc(), time::millis()))
+            Some(nic::Nic::Virtio(dev))
         }
-        None => false,
+        None => nic::probe().map(|(dev, name)| {
+            serial_println!("RED_PLACA {name}");
+            nic::Nic::Ring(dev)
+        }),
     };
+    let has_net = nic.is_some_and(|dev| {
+        let mac = dev.mac();
+        nettask::start(Net::new(dev, mac, time::rdtsc(), time::millis()))
+    });
     if !has_net {
-        serial_println!("red: no hay placa de red virtio");
+        serial_println!("red: no hay placa de red");
     }
 
     // Placa de video con varias salidas (virtio-gpu). Sin ella, la pantalla del firmware.

@@ -54,8 +54,17 @@ impl Mmio {
         }
     }
 
+    access!(r8, w8, u8);
+    access!(r16, w16, u16);
     access!(r32, w32, u32);
     access!(r64, w64, u64);
+
+    /// Un registro de 64 bits escrito como dos de 32 (primero la parte baja): muchos
+    /// dispositivos (AHCI, e1000) no aceptan un acceso de 64 bits de una vez.
+    pub fn w64_split(&self, offset: usize, value: u64) {
+        self.w32(offset, value as u32);
+        self.w32(offset + 4, (value >> 32) as u32);
+    }
 }
 
 /// Espera a que `done()` dé `true`, hasta `timeout_ms`. Con interrupción (`irq`) y si la tarea

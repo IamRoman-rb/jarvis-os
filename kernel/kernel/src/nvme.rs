@@ -112,7 +112,7 @@ impl NvmeDisk {
             serial_println!("NVMe: el controlador no quedó listo");
             return None;
         }
-        let irq = interrupts::enable_msi(dev, task::EV_DISK);
+        let irq = interrupts::enable_msi(dev, task::EV_DISK, true);
         let bounce = dma::alloc(BOUNCE_PAGES * PAGE, PAGE)?;
         let prp_list = dma::alloc(PAGE, PAGE)? as *mut u64;
         for i in 1..BOUNCE_PAGES {
