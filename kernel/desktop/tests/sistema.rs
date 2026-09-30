@@ -77,9 +77,11 @@ fn pin_de_bloqueo() {
     let mut t = Driver::new();
     t.combo(Mods::WIN, Key::Char('i'));
     // Asistente (IA) es la última sección (RePág desde Sistema da la vuelta); antes están
-    // Micrófono, Sincronización, Firewall y Privacidad y seguridad.
+    // Hardware (K13), Micrófono, Sincronización, Firewall y Privacidad y seguridad.
     t.key(Key::PageUp);
     assert_eq!(settings_section(&t), "Asistente (IA)");
+    t.key(Key::PageUp);
+    assert_eq!(settings_section(&t), "Hardware");
     t.key(Key::PageUp);
     assert_eq!(settings_section(&t), "Micrófono");
     t.key(Key::PageUp);

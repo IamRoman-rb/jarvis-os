@@ -176,6 +176,14 @@ pub fn init(madt: Madt) -> bool {
             serial_println!("APIC: la IRQ {irq} (GSI {}) no tiene IOAPIC", r.gsi);
         }
     }
+    crate::hw::note(
+        "Interrupciones",
+        alloc::format!(
+            "APIC local e {} IOAPIC ({} CPU)",
+            madt.ioapics.len(),
+            madt.cpus.iter().filter(|c| c.usable).count()
+        ),
+    );
     serial_println!(
         "APIC_LISTO local {:#x} (CPU {}), {} IOAPIC, {} CPU en la MADT",
         madt.lapic_addr,

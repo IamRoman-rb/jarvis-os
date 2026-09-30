@@ -43,6 +43,7 @@ fn main() -> ExitCode {
             .and_then(|_| build())
             .and_then(|img| test(&img, &fresh_disk("disco-test.img")?)),
         "test-hardware" => build().and_then(|img| test_hardware(&img)),
+        "test-instalar" => build().and_then(|img| test_install(&img)),
         "usuario" => build_user().map(|d| println!("programas de Linux: {}", d.display())),
         "screenshot" => build().and_then(|img| screenshot(&img, &fresh_disk("disco-captura.img")?)),
         "vdi" => build().and_then(|img| vdi(&img)),
@@ -57,7 +58,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|test-hardware|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -374,10 +375,9 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         // Desde la ISO, como un CD y sin disco: modo en vivo (el disco se ignora).
         cmd.arg("-cdrom").arg(image);
     } else {
-        cmd.arg("-drive")
-            .arg(format!("format=raw,file={}", image.display()));
-        // Disco de datos: virtio-blk, o el de `hardware::set` (K13: SATA o NVMe).
-        hardware::disk_args(&mut cmd, disk);
+        // La imagen y el disco de datos: virtio-blk, o lo de `hardware::set` (K13: SATA, NVMe,
+        // USB, arrancar desde un pendrive o desde el disco instalado).
+        hardware::disk_args(&mut cmd, image, disk);
     }
     // Placa de video: virtio-vga (una virtio-gpu que arranca como VGA común, así el firmware
     // tiene dónde dibujar) con una salida por monitor del anfitrión. JARVIS_MONITORES la cambia.
@@ -502,6 +502,7 @@ fn test_hardware(image: &Path) -> Result<()> {
     let runs = [
         (
             Hw {
+                boot: hardware::Boot::Disk,
                 disk: DiskBus::Ahci,
                 net: NetCard::E1000e,
                 usb_input: false,
@@ -513,6 +514,7 @@ fn test_hardware(image: &Path) -> Result<()> {
         ),
         (
             Hw {
+                boot: hardware::Boot::Disk,
                 disk: DiskBus::Nvme,
                 net: NetCard::Rtl8139,
                 usb_input: false,
@@ -525,6 +527,7 @@ fn test_hardware(image: &Path) -> Result<()> {
         // Todo por USB: el disco del sistema en un pendrive, y el teclado y el mouse.
         (
             Hw {
+                boot: hardware::Boot::Disk,
                 disk: DiskBus::Usb,
                 net: NetCard::Virtio,
                 usb_input: true,
@@ -598,6 +601,70 @@ fn test_hardware(image: &Path) -> Result<()> {
             "ok: {hw:?}: el disco se montó desde la GPT, /hardware quedó escrito y la red anduvo"
         );
     }
+    Ok(())
+}
+
+/// K13: el instalador de punta a punta. Arranca desde la imagen como pendrive USB (modo en vivo)
+/// con un NVMe vacío, instala desde Configuración → Hardware (dos confirmaciones), y vuelve a
+/// arrancar **solo** desde el NVMe: tiene que llegar al escritorio con su disco del sistema.
+fn test_install(image: &Path) -> Result<()> {
+    use hardware::{Boot, DiskBus, Hw, NetCard};
+    let io = |e: std::io::Error| format!("disco de prueba: {e}");
+    let stick = target_dir().join("pendrive-instalar.img");
+    fs::copy(image, &stick).map_err(io)?;
+    let target = target_dir().join("disco-instalar.img");
+    let _ = fs::remove_file(&target);
+    fs::File::create(&target)
+        .and_then(|f| f.set_len(256 * 1024 * 1024))
+        .map_err(io)?;
+    let hw = |boot| Hw {
+        boot,
+        disk: DiskBus::Nvme,
+        net: NetCard::Virtio,
+        usb_input: false,
+        hda: false,
+    };
+    hardware::set(hw(Boot::Usb));
+    let mut s = Session::start(&stick, &target)?;
+    s.wait_for("MODO_EN_VIVO", BOOT_TIMEOUT)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    s.type_text("instalar")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
+    // La lista de discos llega con las estadísticas (una vez por segundo).
+    thread::sleep(Duration::from_millis(1500));
+    // El último es el NVMe vacío (el pendrive va primero): dos Enter = instalar y confirmar.
+    s.monitor("sendkey end")?;
+    s.monitor("sendkey ret")?;
+    thread::sleep(Duration::from_millis(300));
+    s.monitor("sendkey ret")?;
+    s.wait_for("INSTALAR_PEDIDO", STEP)?;
+    s.wait_for("INSTALAR_ARRANQUE", Duration::from_secs(120))?;
+    s.wait_for("INSTALAR_LISTO", Duration::from_secs(120))?;
+    thread::sleep(Duration::from_millis(500));
+    s.screenshot_head(&target_dir().join("jarvis-os-instalado.png"), None)?;
+    s.quit();
+    drop(s);
+
+    // Otra vez, sin pendrive: arranca del NVMe.
+    hardware::set(hw(Boot::Data));
+    let mut s = Session::start(Path::new("sin-imagen.img"), &target)?;
+    s.wait_for("DISCO_SISTEMA NVMe", BOOT_TIMEOUT)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.quit();
+    drop(s);
+    hardware::set(hardware::VIRTIO);
+    let mut part = hardware::Partition::open(&target)?;
+    let fs = fatfs::FileSystem::new(&mut part, fatfs::FsOptions::new())
+        .map_err(|e| format!("la partición de datos no es un FAT32 sano: {e}"))?;
+    let mut text = String::new();
+    fs.root_dir()
+        .open_file("Documentos/Bienvenida.txt")
+        .and_then(|mut f| f.read_to_string(&mut text))
+        .map_err(|e| format!("falta /Documentos/Bienvenida.txt: {e}"))?;
+    println!("ok: instalado en un NVMe vacío desde el pendrive, y arranca solo desde el NVMe");
     Ok(())
 }
 

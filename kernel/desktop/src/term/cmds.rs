@@ -50,6 +50,10 @@ pub const NAMES: &[(&str, &str)] = &[
     ("history", "comandos anteriores"),
     ("hostname", "nombre del equipo"),
     ("id", "usuario y grupos"),
+    (
+        "instalar",
+        "instala JARVIS-OS en un disco vacío (Configuración → Hardware)",
+    ),
     ("ip", "dirección de red (ip a)"),
     ("jarvis", "JARVIS lo dice en voz alta: jarvis hola"),
     ("kill", "cierra una ventana por su PID (ver ps)"),
@@ -1107,6 +1111,18 @@ impl Shell {
             }
             "reboot" => {
                 ctx.out.power = Some(Power::Reboot);
+                0
+            }
+            "instalar" => {
+                ctx.out
+                    .launch
+                    .push(Launch::Settings(crate::apps::settings::HARDWARE));
+                o.push_str(
+                    "Instalar JARVIS-OS: se abre Configuración → Hardware.
+                     Solo se puede instalar en un disco vacío: los que tienen particiones (por
+                     ejemplo, uno con Windows) no se tocan.
+",
+                );
                 0
             }
             "shutdown" | "poweroff" | "halt" => {

@@ -299,6 +299,7 @@ pub fn init(rsdp: u64) -> Option<&'static Acpi> {
         names.trim_end(),
         tables.revision
     );
+    crate::hw::note("Firmware", alloc::format!("ACPI: {}", names.trim_end()));
     Some(ACPI.call_once(|| Acpi {
         tables,
         madt,

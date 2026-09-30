@@ -304,3 +304,25 @@ fn comandos_y_respuestas_nvme() {
     assert_eq!((n.blocks, n.block_size), (262_144, 4096));
     assert!(parse_namespace(&vec![0u8; 4096]).is_none());
 }
+
+#[test]
+fn reconoce_el_arranque_de_jarvis() {
+    use jarvis_drivers::gpt::is_jarvis_boot;
+    let mut fat16 = [0u8; 512];
+    fat16[510..].copy_from_slice(&[0x55, 0xAA]);
+    fat16[38] = 0x29;
+    fat16[43..54].copy_from_slice(b"jarvis-kern");
+    assert!(is_jarvis_boot(&fat16));
+    let mut fat32 = [0u8; 512];
+    fat32[510..].copy_from_slice(&[0x55, 0xAA]);
+    fat32[66] = 0x29;
+    fat32[71..82].copy_from_slice(b"JARVIS-KERN");
+    assert!(is_jarvis_boot(&fat32));
+    // La ESP de Windows (etiqueta "SYSTEM" o sin etiqueta) no.
+    let mut windows = fat32;
+    windows[71..82].copy_from_slice(b"SYSTEM     ");
+    assert!(!is_jarvis_boot(&windows));
+    // Sin firma de sector de arranque, tampoco.
+    fat16[511] = 0;
+    assert!(!is_jarvis_boot(&fat16));
+}

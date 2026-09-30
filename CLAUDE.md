@@ -68,6 +68,9 @@ Kernel (desde kernel/):
 - Tests en el host: cargo test                (gfx, fs contra fatfs, desktop, net con loopback)
 - Arrancar:         cargo xtask run            (QEMU con ventana, red, sonido y puente HTTPS)
 - Punta a punta:    cargo xtask test           (sin ventana: teclado, mouse, ventanas, disco y red)
+- Hardware real:    cargo xtask test-hardware (AHCI/NVMe/USB, e1000e/RTL8139, xHCI y HDA en QEMU)
+                    cargo xtask test-instalar (arranca de un pendrive, instala en un NVMe vacío y
+                    vuelve a arrancar solo desde el NVMe)
 - Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
 - Brave:            cargo xtask brave --instalar | --probar URL (el puente sin QEMU → target/brave-prueba.png)
 - Sincronización:   cargo xtask relay | run2 | sincronizar (dos QEMU + relé; verifica los discos con fatfs)

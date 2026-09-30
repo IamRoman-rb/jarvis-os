@@ -187,6 +187,10 @@ static EN: &[(&str, &str)] = &[
     ("Archivos", "Files"),
     ("Archivos (Win+E)", "Files (Win+E)"),
     (
+        "Arrancá desde el pendrive de JARVIS-OS para instalar",
+        "Boot from the JARVIS-OS USB drive to install",
+    ),
+    (
         "Arrastrar al costado ocupa media pantalla; arriba, maximiza",
         "Dragging to a side fills half the screen; to the top, maximizes",
     ),
@@ -440,6 +444,7 @@ static EN: &[(&str, &str)] = &[
     ("Facultad", "University"),
     ("Febrero", "February"),
     ("Firewall", "Firewall"),
+    ("Firmware", "Firmware"),
     (
         "Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan",
         "Arrows or mouse: the zone for this window · Enter places it · the others fill in",
@@ -468,6 +473,7 @@ static EN: &[(&str, &str)] = &[
         "Hablá: la barra se tiene que mover",
         "Speak: the bar should move",
     ),
+    ("Hardware", "Hardware"),
     (
         "Hay cambios sin guardar: Ctrl+S guarda; cerrá de nuevo para descartarlos.",
         "There are unsaved changes: Ctrl+S saves; close again to discard them.",
@@ -479,6 +485,7 @@ static EN: &[(&str, &str)] = &[
     ("Hora e idioma", "Time & language"),
     ("IDENTIFICAR", "IDENTIFY"),
     ("INSPECTOR", "INSPECTOR"),
+    ("INSTALAR", "INSTALL"),
     ("Identificar", "Identify"),
     ("Idioma", "Language"),
     ("Imágenes", "Pictures"),
@@ -486,7 +493,9 @@ static EN: &[(&str, &str)] = &[
     ("Iniciar sesión con Google", "Sign in with Google"),
     ("Inicio", "Home"),
     ("Inicio (Win)", "Start (Win)"),
+    ("Instalar JARVIS-OS", "Install JARVIS-OS"),
     ("Instalar más programas", "Install more programs"),
+    ("Interrupciones", "Interrupts"),
     ("Invertir la rueda", "Invert the wheel"),
     ("JARVIS QUIERE HACER ESTO", "JARVIS WANTS TO DO THIS"),
     (
@@ -675,6 +684,7 @@ static EN: &[(&str, &str)] = &[
     ("Nueva pestaña", "New tab"),
     ("Nunca", "Never"),
     ("Octubre", "October"),
+    ("Otro", "Other"),
     ("PAPELERA", "TRASH"),
     (
         "PEDILE A JARVIS QUE ABRA UN PROYECTO",
@@ -750,6 +760,7 @@ static EN: &[(&str, &str)] = &[
         "Resolution chosen by the firmware (UEFI GOP)",
     ),
     ("Restaurar", "Restore"),
+    ("Resultado", "Result"),
     (
         "Revisa cada conexión que sale antes de que llegue a la red",
         "Checks every outgoing connection before it reaches the network",
@@ -782,6 +793,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Se cortó la conexión con el cerebro.",
         "The connection to the brain was lost.",
+    ),
+    (
+        "Se va a escribir en este disco: hacé clic en CONFIRMAR",
+        "This disk will be written: click CONFIRM",
     ),
     ("Segundos en el reloj", "Seconds on the clock"),
     ("Septiembre", "September"),
@@ -876,6 +891,7 @@ static EN: &[(&str, &str)] = &[
         "Your user name in the terminal",
     ),
     ("Títulos en negrita", "Bold titles"),
+    ("USB", "USB"),
     (
         "Un La (440 Hz) por el parlante de la PC",
         "An A (440 Hz) through the PC speaker",
@@ -936,10 +952,13 @@ static EN: &[(&str, &str)] = &[
         "on an Intel PC it is read from the CPU.",
     ),
     ("enviados", "sent"),
+    ("error", "error"),
     ("espacio: pausa", "space: pause"),
     ("estéreo", "stereo"),
     ("imagen", "image"),
+    ("instalando...", "installing..."),
     ("ju", "th"),
+    ("listo", "done"),
     ("lu", "mo"),
     ("ma", "tu"),
     ("mi", "we"),
@@ -947,6 +966,7 @@ static EN: &[(&str, &str)] = &[
     ("mono", "mono"),
     ("nivel", "level"),
     ("no detectado", "not detected"),
+    ("no elegible", "not eligible"),
     ("papelera", "trash"),
     ("pico", "peak"),
     ("plan", "plan"),
@@ -1050,6 +1070,10 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Archivos", "Arquivos"),
     ("Archivos (Win+E)", "Arquivos (Win+E)"),
+    (
+        "Arrancá desde el pendrive de JARVIS-OS para instalar",
+        "Inicie pelo pendrive do JARVIS-OS para instalar",
+    ),
     (
         "Arrastrar al costado ocupa media pantalla; arriba, maximiza",
         "Arrastar para o lado ocupa meia tela; para cima, maximiza",
@@ -1322,6 +1346,7 @@ static PT: &[(&str, &str)] = &[
     ("Facultad", "Faculdade"),
     ("Febrero", "Fevereiro"),
     ("Firewall", "Firewall"),
+    ("Firmware", "Firmware"),
     (
         "Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan",
         "Setas ou mouse: a zona para esta janela · Enter a posiciona · as outras completam",
@@ -1350,6 +1375,7 @@ static PT: &[(&str, &str)] = &[
         "Hablá: la barra se tiene que mover",
         "Fale: a barra tem que se mexer",
     ),
+    ("Hardware", "Hardware"),
     (
         "Hay cambios sin guardar: Ctrl+S guarda; cerrá de nuevo para descartarlos.",
         "Há alterações não salvas: Ctrl+S salva; feche de novo para descartá-las.",
@@ -1361,6 +1387,7 @@ static PT: &[(&str, &str)] = &[
     ("Hora e idioma", "Hora e idioma"),
     ("IDENTIFICAR", "IDENTIFICAR"),
     ("INSPECTOR", "INSPETOR"),
+    ("INSTALAR", "INSTALAR"),
     ("Identificar", "Identificar"),
     ("Idioma", "Idioma"),
     ("Imágenes", "Imagens"),
@@ -1368,7 +1395,9 @@ static PT: &[(&str, &str)] = &[
     ("Iniciar sesión con Google", "Entrar com o Google"),
     ("Inicio", "Início"),
     ("Inicio (Win)", "Iniciar (Win)"),
+    ("Instalar JARVIS-OS", "Instalar o JARVIS-OS"),
     ("Instalar más programas", "Instalar mais programas"),
+    ("Interrupciones", "Interrupções"),
     ("Invertir la rueda", "Inverter a roda"),
     ("JARVIS QUIERE HACER ESTO", "JARVIS QUER FAZER ISTO"),
     (
@@ -1569,6 +1598,7 @@ static PT: &[(&str, &str)] = &[
     ("Nueva pestaña", "Nova aba"),
     ("Nunca", "Nunca"),
     ("Octubre", "Outubro"),
+    ("Otro", "Outro"),
     ("PAPELERA", "LIXEIRA"),
     (
         "PEDILE A JARVIS QUE ABRA UN PROYECTO",
@@ -1647,6 +1677,7 @@ static PT: &[(&str, &str)] = &[
         "Resolução escolhida pelo firmware (UEFI GOP)",
     ),
     ("Restaurar", "Restaurar"),
+    ("Resultado", "Resultado"),
     (
         "Revisa cada conexión que sale antes de que llegue a la red",
         "Verifica cada conexão de saída antes de chegar à rede",
@@ -1679,6 +1710,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Se cortó la conexión con el cerebro.",
         "A conexão com o cérebro caiu.",
+    ),
+    (
+        "Se va a escribir en este disco: hacé clic en CONFIRMAR",
+        "Este disco será gravado: clique em CONFIRMAR",
     ),
     ("Segundos en el reloj", "Segundos no relógio"),
     ("Septiembre", "Setembro"),
@@ -1773,6 +1808,7 @@ static PT: &[(&str, &str)] = &[
         "Seu nome de usuário no terminal",
     ),
     ("Títulos en negrita", "Títulos em negrito"),
+    ("USB", "USB"),
     (
         "Un La (440 Hz) por el parlante de la PC",
         "Um Lá (440 Hz) pelo alto-falante do PC",
@@ -1836,10 +1872,13 @@ static PT: &[(&str, &str)] = &[
         "num PC Intel é lido da CPU.",
     ),
     ("enviados", "enviados"),
+    ("error", "erro"),
     ("espacio: pausa", "espaço: pausa"),
     ("estéreo", "estéreo"),
     ("imagen", "imagem"),
+    ("instalando...", "instalando..."),
     ("ju", "qi"),
+    ("listo", "pronto"),
     ("lu", "se"),
     ("ma", "te"),
     ("mi", "qa"),
@@ -1847,6 +1886,7 @@ static PT: &[(&str, &str)] = &[
     ("mono", "mono"),
     ("nivel", "nível"),
     ("no detectado", "não detectado"),
+    ("no elegible", "não elegível"),
     ("papelera", "lixeira"),
     ("pico", "pico"),
     ("plan", "plano"),
@@ -1891,6 +1931,10 @@ static EN_F: &[(&str, &str)] = &[
     ("Conectando con Brave{}", "Connecting to Brave{}"),
     ("Conectando con {}...", "Connecting to {}..."),
     ("Configuración · {}", "Settings · {}"),
+    (
+        "Desde {}: se copia el arranque y se crea la partición de datos",
+        "From {}: the boot files are copied and the data partition is created",
+    ),
     (
         "Dirección del puente inválida: {}",
         "Invalid bridge address: {}",
@@ -1944,6 +1988,7 @@ static EN_F: &[(&str, &str)] = &[
     ("libre: {}", "free: {}"),
     ("recibido {} · enviado {}", "received {} · sent {}"),
     ("versión {}", "version {}"),
+    ("{} MiB", "{} MiB"),
     ("{} MiB libres", "{} MiB free"),
     ("{} de {}", "{} {}"),
     ("{} de {} (heap)", "{} of {} (heap)"),
@@ -1979,6 +2024,12 @@ static EN_F: &[(&str, &str)] = &[
     ),
     ("{} seleccionados de {} · {}", "{} selected of {} · {}"),
     ("{} · Navegador", "{} · Browser"),
+    ("{} · medio de arranque", "{} · boot media"),
+    (
+        "{} · tiene particiones: no se toca",
+        "{} · has partitions: left untouched",
+    ),
+    ("{} · vacío", "{} · empty"),
     ("{}{} · Editor", "{}{} · Editor"),
     ("¿Mover \"{}\" a la Papelera?", "Move \"{}\" to the Trash?"),
     (
@@ -2005,6 +2056,10 @@ static PT_F: &[(&str, &str)] = &[
     ("Conectando con Brave{}", "Conectando ao Brave{}"),
     ("Conectando con {}...", "Conectando com {}..."),
     ("Configuración · {}", "Configurações · {}"),
+    (
+        "Desde {}: se copia el arranque y se crea la partición de datos",
+        "De {}: a inicialização é copiada e a partição de dados é criada",
+    ),
     (
         "Dirección del puente inválida: {}",
         "Endereço da ponte inválido: {}",
@@ -2061,6 +2116,7 @@ static PT_F: &[(&str, &str)] = &[
     ("libre: {}", "livre: {}"),
     ("recibido {} · enviado {}", "recebido {} · enviado {}"),
     ("versión {}", "versão {}"),
+    ("{} MiB", "{} MiB"),
     ("{} MiB libres", "{} MiB livres"),
     ("{} de {}", "{} de {}"),
     ("{} de {} (heap)", "{} de {} (heap)"),
@@ -2096,6 +2152,12 @@ static PT_F: &[(&str, &str)] = &[
     ),
     ("{} seleccionados de {} · {}", "{} selecionados de {} · {}"),
     ("{} · Navegador", "{} · Navegador"),
+    ("{} · medio de arranque", "{} · mídia de inicialização"),
+    (
+        "{} · tiene particiones: no se toca",
+        "{} · tem partições: não é tocado",
+    ),
+    ("{} · vacío", "{} · vazio"),
     ("{}{} · Editor", "{}{} · Editor"),
     (
         "¿Mover \"{}\" a la Papelera?",

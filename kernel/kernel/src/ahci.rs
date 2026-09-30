@@ -121,6 +121,7 @@ pub fn probe() -> Vec<AhciDisk> {
                         d.model,
                         d.sectors * SECTOR_SIZE as u64 / (1024 * 1024)
                     );
+                    crate::hw::note("Disco", alloc::format!("SATA {n}: {} (AHCI)", d.model));
                     disks.push(d);
                 }
                 None => serial_println!("AHCI: el disco del puerto {n} no respondió"),

@@ -564,3 +564,15 @@ fn programas_de_linux_en_la_terminal() {
     assert!(t.d.take_requests().spawn.is_empty());
     assert!(fatfs_exists(t.d, "/Papelera/k11.txt"));
 }
+
+#[test]
+fn instalar_abre_la_configuracion_de_hardware() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let out = run(&mut t, "instalar");
+    assert!(out.contains("disco vacío"), "{out}");
+    let Some(App::Settings(s)) = t.d.app(AppKind::Settings) else {
+        panic!("no se abrió Configuración");
+    };
+    assert_eq!(s.section.name(), "Hardware");
+}

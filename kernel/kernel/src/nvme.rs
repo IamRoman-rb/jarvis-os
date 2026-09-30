@@ -69,6 +69,7 @@ pub fn probe() -> Vec<NvmeDisk> {
     for dev in pci::find_class(0x01, 0x08, 0x02) {
         match NvmeDisk::start(dev) {
             Some(d) => {
+                crate::hw::note("Disco", format!("NVMe: {}", d.model));
                 serial_println!(
                     "NVME_DISCO \"{}\", {} MiB",
                     d.model,

@@ -35,6 +35,8 @@ mod entropy;
 mod fw_cfg;
 mod gdt;
 mod hda;
+mod hw;
+mod installer;
 mod interrupts;
 mod irqlock;
 mod keyboard;
@@ -131,29 +133,15 @@ impl BlockDevice for Disk {
 }
 
 /// Modo en vivo: un FAT32 nuevo en RAM con las carpetas de siempre. Lo que se guarde se pierde
-/// al apagar (hasta que haya drivers de disco reales para instalar, K13).
+/// al apagar (para guardar, se instala en un disco: Configuración → Hardware, K13).
 fn live_disk() -> Option<FileSystem<Disk>> {
     let mut ram = MemDisk::new(alloc::vec![0u8; LIVE_DISK_BYTES]);
     jarvis_fs::format_fat32(&mut ram, "JARVIS VIVO").ok()?;
     let mut fs = FileSystem::mount(Disk::Ram(ram)).ok()?;
-    let now = jarvis_fs::Timestamp::EPOCH;
-    for dir in [
-        "/Documentos",
-        "/Descargas",
-        "/Imágenes",
-        "/Música",
-        "/Papelera",
-        "/Sincronizado",
-        "/Sistema",
-    ] {
-        let _ = fs.mkdir(dir, now);
-    }
-    let _ = fs.write_file(
-        "/Documentos/Bienvenida.txt",
+    storage::populate(
+        &mut fs,
         "JARVIS-OS en modo en vivo: lo que guardes se pierde al apagar.
-"
-        .as_bytes(),
-        now,
+",
     );
     Some(fs)
 }
@@ -284,6 +272,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     task::init("escritorio");
     let cpu_name = cpu::brand();
     serial_println!("CPU: {}", cpu_name);
+    hw::note("Procesador", cpu_name.clone());
     let thermal = cpu::Thermal::detect();
     match thermal.as_ref().and_then(cpu::Thermal::read) {
         Some(t) => serial_println!("TEMP {} C", t),
@@ -350,10 +339,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             {
                 serial_println!("virtio-net: avisa por la IRQ {line}");
             }
+            hw::note("Red", "virtio-net (QEMU)".into());
             Some(nic::Nic::Virtio(dev))
         }
         None => nic::probe().map(|(dev, name)| {
             serial_println!("RED_PLACA {name}");
+            hw::note("Red", name.into());
             nic::Nic::Ring(dev)
         }),
     };
@@ -379,6 +370,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             hda::probe().map(|h| alloc::boxed::Box::new(h) as alloc::boxed::Box<dyn audio::Output>)
         }
     };
+    if output.is_some() {
+        hw::note(
+            "Sonido",
+            if mic.is_some() {
+                "virtio-sound (QEMU)".into()
+            } else {
+                "Intel HDA".into()
+            },
+        );
+    }
     let sound_rate = match output {
         Some(out) => Some(audio::start(out)),
         None => {
@@ -493,6 +494,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         cpu_name,
         ram_total: ram,
         net: NetInfo::default(),
+        // K13: los discos que no son el del sistema, para Configuración → Hardware.
+        disks: installer::disks(),
         ..Default::default()
     };
     let decoder = if mouse == Some(true) {
@@ -691,6 +694,24 @@ fn run(
         if let Some(p) = requests.power {
             power_off(p);
         }
+        // K13: instalar en un disco vacío (ya confirmado dos veces en Configuración). Tarda unos
+        // segundos: la pantalla queda quieta mientras tanto.
+        if let Some(target) = requests.install {
+            let name = stats
+                .disks
+                .get(target)
+                .map(|d| d.name.clone())
+                .unwrap_or_default();
+            stats.install = jarvis_desktop::InstallState::Working(name);
+            desktop.set_stats(stats.clone());
+            let result = installer::install(target);
+            if let Err(e) = &result {
+                serial_println!("INSTALAR_ERROR {e}");
+            }
+            stats.install = jarvis_desktop::InstallState::Done(result);
+            stats.disks = installer::disks();
+            desktop.set_stats(stats.clone());
+        }
 
         if first {
             // La CI busca esta línea para saber que el kernel arrancó y dibujó sin errores.
@@ -726,6 +747,7 @@ fn run(
             stats.temp_c = thermal.as_ref().and_then(cpu::Thermal::read);
             stats.kernel_tasks = tasks;
             stats.context_switches = switches;
+            stats.devices = hw::list();
             desktop.set_stats(stats.clone());
             if now - last_report >= REPORT_MS {
                 serial_println!(

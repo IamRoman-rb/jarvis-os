@@ -11,7 +11,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use jarvis_drivers::gpt::{self, JARVIS_DATA, PartitionDevice};
-use jarvis_fs::BlockDevice;
+use jarvis_fs::{BlockDevice, FileSystem, Timestamp};
 use spin::Mutex;
 
 use crate::{ahci, nvme, serial_println, xhci};
@@ -74,4 +74,29 @@ pub fn take_system(found: &mut Vec<Found>) -> Option<(String, PartitionDevice<An
 /// Guarda los discos que no se usaron (para el instalador).
 pub fn park(found: Vec<Found>) {
     SPARE.lock().extend(found);
+}
+
+/// Usa los discos guardados (el instalador; desde la tarea del escritorio).
+pub fn with_spare<R>(f: impl FnOnce(&mut [Found]) -> R) -> R {
+    f(&mut SPARE.lock())
+}
+
+/// Las carpetas de un disco de JARVIS-OS (el del modo en vivo y el que deja el instalador).
+pub const FOLDERS: [&str; 7] = [
+    "/Documentos",
+    "/Descargas",
+    "/Imágenes",
+    "/Música",
+    "/Papelera",
+    "/Sincronizado",
+    "/Sistema",
+];
+
+/// Crea las carpetas de siempre y un texto de bienvenida en un FAT32 recién formateado.
+pub fn populate<D: BlockDevice>(fs: &mut FileSystem<D>, welcome: &str) {
+    let now = Timestamp::EPOCH;
+    for dir in FOLDERS {
+        let _ = fs.mkdir(dir, now);
+    }
+    let _ = fs.write_file("/Documentos/Bienvenida.txt", welcome.as_bytes(), now);
 }

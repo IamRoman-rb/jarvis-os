@@ -34,8 +34,20 @@ pub enum NetCard {
     Rtl8139,
 }
 
+/// De dónde arranca la máquina.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Boot {
+    /// La imagen como disco común (en la q35, el puerto 0 de la AHCI).
+    Disk,
+    /// La imagen como pendrive (`usb-storage`), como en una PC.
+    Usb,
+    /// Sin imagen: del disco de datos (el que dejó el instalador).
+    Data,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Hw {
+    pub boot: Boot,
     pub disk: DiskBus,
     pub net: NetCard,
     /// Teclado y mouse USB (`usb-kbd`, `usb-mouse`) en la controladora xHCI.
@@ -45,6 +57,7 @@ pub struct Hw {
 }
 
 pub const VIRTIO: Hw = Hw {
+    boot: Boot::Disk,
     disk: DiskBus::Virtio,
     net: NetCard::Virtio,
     usb_input: false,
@@ -77,11 +90,26 @@ pub fn get() -> Hw {
     *HW.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Los argumentos de QEMU del disco de datos y de lo que va por USB.
-pub fn disk_args(cmd: &mut Command, disk: &Path) {
+/// Los argumentos de QEMU de la imagen de arranque, del disco de datos y de lo que va por USB.
+pub fn disk_args(cmd: &mut Command, image: &Path, disk: &Path) {
     let hw = get();
-    if hw.disk == DiskBus::Usb || hw.usb_input {
+    if hw.disk == DiskBus::Usb || hw.usb_input || hw.boot == Boot::Usb {
         cmd.args(["-device", "qemu-xhci,id=xhci"]);
+    }
+    match hw.boot {
+        Boot::Disk => {
+            cmd.arg("-drive")
+                .arg(format!("format=raw,file={}", image.display()));
+        }
+        Boot::Usb => {
+            cmd.arg("-drive")
+                .arg(format!(
+                    "if=none,id=arranque,format=raw,file={}",
+                    image.display()
+                ))
+                .args(["-device", "usb-storage,bus=xhci.0,drive=arranque"]);
+        }
+        Boot::Data => {}
     }
     if hw.usb_input {
         // El mouse, detrás de un hub (el de QEMU es USB 1.1), para probar la enumeración de hubs.

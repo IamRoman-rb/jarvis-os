@@ -228,6 +228,21 @@ pub fn is_blank(disk: &mut dyn BlockDevice) -> Result<bool, IoError> {
     Ok(true)
 }
 
+/// ¿Este primer sector de una partición es el FAT del arranque de JARVIS-OS? El crate
+/// `bootloader` le pone al volumen el nombre del archivo del kernel ("jarvis-kern", recortado a
+/// 11 letras). La etiqueta está en el byte 43 en FAT12/16 y en el 71 en FAT32, cuando la firma
+/// extendida (0x29) está presente. Así el instalador distingue su medio de arranque de la ESP
+/// de Windows, que también es FAT y también es de tipo EFI.
+pub fn is_jarvis_boot(boot_sector: &[u8]) -> bool {
+    const LABEL: &[u8] = b"jarvis-kern";
+    if boot_sector.len() < 512 || boot_sector[510..512] != [0x55, 0xAA] {
+        return false;
+    }
+    let fat16 = boot_sector[38] == 0x29 && boot_sector[43..54].eq_ignore_ascii_case(LABEL);
+    let fat32 = boot_sector[66] == 0x29 && boot_sector[71..82].eq_ignore_ascii_case(LABEL);
+    fat16 || fat32
+}
+
 /// Una partición a crear: tipo, tamaño en sectores (0 = lo que queda) y nombre.
 pub struct NewPartition<'a> {
     pub kind: Guid,

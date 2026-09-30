@@ -49,6 +49,9 @@ use crate::{dma, interrupts, keyboard, mouse, pci, serial_println, task, time};
 const RING: usize = 64;
 const EVENTS: usize = 256;
 const TIMEOUT_MS: u64 = 1000;
+/// Las transferencias masivas pueden tardar mucho más: un pendrive lento, o uno que se está
+/// despertando, tarda segundos (la especificación de BOT habla de hasta 20 s).
+const BULK_TIMEOUT_MS: u64 = 15_000;
 /// Buffer de datos de las transferencias masivas: 64 KiB alineado a 64 KiB (un TRB no puede
 /// cruzar un límite de 64 KiB).
 const BULK: usize = 64 * 1024;
@@ -329,6 +332,14 @@ impl Controller {
         let t = time::millis();
         while op.r32(USBSTS) & 1 != 0 && time::millis() - t < 100 {}
 
+        crate::hw::note(
+            "USB",
+            format!(
+                "xHCI {:04x}:{:04x}, {ports} puertos",
+                dev.vendor(),
+                dev.device_id()
+            ),
+        );
         serial_println!(
             "xHCI {:02x}:{:02x}.{} ({:04x}:{:04x}): {} puertos, {} slots, contextos de {} bytes, MSI: {}",
             dev.bus,
@@ -371,13 +382,26 @@ impl Controller {
 
     /// El próximo evento, si hay.
     fn next_event(&mut self) -> Option<Event> {
+        // Primero la palabra de control (la del ciclo) y recién después las otras tres: si se
+        // leyera el TRB entero de una vez, el puntero podría ser el viejo de un evento que la
+        // controladora está terminando de escribir (pasaba con las lecturas largas del
+        // instalador: un evento "bien" con puntero 0, y la transferencia quedaba sin respuesta).
+        let p = self.events.wrapping_add(self.event_index) as *const u32;
         // SAFETY: `event_index < EVENTS`; la controladora escribe el anillo por DMA.
-        let raw = unsafe { core::ptr::read_volatile(self.events.add(self.event_index)) };
-        let t = Trb(raw);
-        if t.cycle() != self.event_cycle {
+        let control = unsafe { core::ptr::read_volatile(p.add(3)) };
+        if (control & 1 != 0) != self.event_cycle {
             return None;
         }
         fence(Ordering::SeqCst);
+        // SAFETY: ídem; el ciclo ya dice que el TRB es de esta vuelta.
+        let t = Trb(unsafe {
+            [
+                core::ptr::read_volatile(p),
+                core::ptr::read_volatile(p.add(1)),
+                core::ptr::read_volatile(p.add(2)),
+                control,
+            ]
+        });
         self.event_index += 1;
         if self.event_index == EVENTS {
             self.event_index = 0;
@@ -392,8 +416,12 @@ impl Controller {
 
     /// Espera un evento que cumpla `want`; los demás se atienden al pasar.
     fn wait_event(&mut self, want: impl Fn(&Event) -> bool) -> Option<Event> {
+        self.wait_event_for(TIMEOUT_MS, want)
+    }
+
+    fn wait_event_for(&mut self, timeout_ms: u64, want: impl Fn(&Event) -> bool) -> Option<Event> {
         let t = time::millis();
-        while time::millis() - t < TIMEOUT_MS {
+        while time::millis() - t < timeout_ms {
             match self.next_event() {
                 Some(e) if want(&e) => return Some(e),
                 Some(e) => self.dispatch(e),
@@ -450,7 +478,15 @@ impl Controller {
         let dev = self.devices.iter_mut().find(|d| d.slot == slot)?;
         let at = dev.ring(dci)?.push(Trb::normal(buf, len as u32));
         self.db.w32(4 * slot as usize, dci as u32);
-        let e = self.wait_event(|e| e.kind == trb::TRANSFER_EVENT && e.pointer == at)?;
+        let Some(e) = self.wait_event_for(BULK_TIMEOUT_MS, |e| {
+            e.kind == trb::TRANSFER_EVENT && e.pointer == at
+        }) else {
+            serial_println!("USB: sin evento de la transferencia (endpoint {dci})");
+            return None;
+        };
+        if e.code != CODE_SUCCESS && e.code != CODE_SHORT_PACKET {
+            serial_println!("USB: la transferencia terminó con el código {}", e.code);
+        }
         (e.code == CODE_SUCCESS || e.code == CODE_SHORT_PACKET)
             .then(|| len - (e.residue as usize).min(len))
     }
@@ -801,6 +837,18 @@ impl Controller {
             },
             dev.name
         );
+        crate::hw::note(
+            "USB",
+            format!(
+                "{} {}",
+                if kind == Kind::Keyboard {
+                    "Teclado"
+                } else {
+                    "Mouse"
+                },
+                dev.name
+            ),
+        );
     }
 
     // --- almacenamiento masivo --------------------------------------------------------------------
@@ -849,6 +897,7 @@ impl Controller {
             }
         }
         serial_println!("USB_DISCO \"{name}\", {} MiB", sectors / 2048);
+        crate::hw::note("Disco", format!("USB: {name}"));
     }
 
     fn bulk_slice(&self, len: usize) -> &[u8] {
@@ -871,18 +920,31 @@ impl Controller {
         let dev = self.devices.iter_mut().find(|d| d.slot == slot)?;
         let at = dev.ring(out_dci)?.push(Trb::normal(scratch, 31));
         self.db.w32(4 * slot as usize, out_dci as u32);
-        self.wait_event(|e| e.kind == trb::TRANSFER_EVENT && e.pointer == at)
-            .filter(|e| e.code == CODE_SUCCESS)?;
+        let e = self.wait_event_for(BULK_TIMEOUT_MS, |e| {
+            e.kind == trb::TRANSFER_EVENT && e.pointer == at
+        });
+        if e.is_none_or(|e| e.code != CODE_SUCCESS) {
+            serial_println!("USB: CBW falló ({:?})", e.map(|e| e.code));
+            return None;
+        }
         let mut moved = 0;
         if len > 0 {
-            moved = self.bulk(slot, if write { out_dci } else { in_dci }, len)?;
+            match self.bulk(slot, if write { out_dci } else { in_dci }, len) {
+                Some(n) => moved = n,
+                None => {
+                    serial_println!("USB: los datos fallaron ({len} bytes)");
+                    return None;
+                }
+            }
         }
         // El CSW (13 bytes), al final del buffer de control.
         let csw_at = scratch + 512;
         let dev = self.devices.iter_mut().find(|d| d.slot == slot)?;
         let at = dev.ring(in_dci)?.push(Trb::normal(csw_at, 13));
         self.db.w32(4 * slot as usize, in_dci as u32);
-        self.wait_event(|e| e.kind == trb::TRANSFER_EVENT && e.pointer == at)?;
+        self.wait_event_for(BULK_TIMEOUT_MS, |e| {
+            e.kind == trb::TRANSFER_EVENT && e.pointer == at
+        })?;
         let status = usb::csw(&self.scratch(525)[512..], tag)?;
         (status == 0).then_some(moved)
     }
