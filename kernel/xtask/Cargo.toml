@@ -9,6 +9,9 @@ publish.workspace = true
 [dependencies]
 bootloader = { version = "0.11.17", default-features = false, features = ["uefi"] }
 fatfs = "0.3.6"
+# K13: la GPT de los discos de prueba (la misma que usa el kernel).
+jarvis-drivers = { path = "../drivers" }
+jarvis-fs = { path = "../fs" }
 jarvis-relay = { path = "../relay" }
 png = "0.18"
 # Puente HTTPS del anfitrión: el kernel todavía no tiene TLS (ver xtask/src/puente.rs).

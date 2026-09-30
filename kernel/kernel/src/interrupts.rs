@@ -267,7 +267,6 @@ const MSI_BASE: u8 = 0x50;
 const MSI_COUNT: usize = 8;
 /// El evento que despierta cada vector MSI (0 = libre).
 static MSI_EVENTS: [AtomicU32; MSI_COUNT] = [const { AtomicU32::new(0) }; MSI_COUNT];
-#[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
 static MSI_NEXT: AtomicU8 = AtomicU8::new(0);
 
 macro_rules! msi_handlers {
@@ -298,7 +297,6 @@ fn msi_irq(i: usize) {
 /// Configura el MSI (o MSI-X) de `dev` con un vector propio que despierta `event`. `false` si
 /// no hay APIC, el dispositivo no tiene MSI o se acabaron los vectores: el driver espera
 /// revisando su anillo con plazo (polling).
-#[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
 pub fn enable_msi(dev: pci::Device, event: u32) -> bool {
     if !apic::active() {
         return false;

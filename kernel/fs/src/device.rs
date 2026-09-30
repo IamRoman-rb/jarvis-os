@@ -28,6 +28,19 @@ impl<D: BlockDevice + ?Sized> BlockDevice for &mut D {
     }
 }
 
+/// Un disco elegido al arrancar (virtio, SATA, NVMe, USB…) sin saber de qué tipo es.
+impl<D: BlockDevice + ?Sized> BlockDevice for alloc::boxed::Box<D> {
+    fn sector_count(&self) -> u64 {
+        (**self).sector_count()
+    }
+    fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), IoError> {
+        (**self).read(lba, buf)
+    }
+    fn write(&mut self, lba: u64, buf: &[u8]) -> Result<(), IoError> {
+        (**self).write(lba, buf)
+    }
+}
+
 /// Disco en memoria: para tests y para probar la app de archivos en el host.
 pub struct MemDisk {
     data: Vec<u8>,

@@ -867,6 +867,10 @@ dependencies = [
 [[package]]
 name = "jarvis-drivers"
 version = "0.1.0"
+dependencies = [
+ "gpt",
+ "jarvis-fs",
+]
 
 [[package]]
 name = "jarvis-fs"
@@ -2236,6 +2240,8 @@ dependencies = [
  "fatfs",
  "image",
  "jarvis-desktop",
+ "jarvis-drivers",
+ "jarvis-fs",
  "jarvis-relay",
  "png 0.18.1",
  "resvg",

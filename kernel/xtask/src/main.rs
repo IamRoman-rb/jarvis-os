@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 mod brave;
 mod cerebro;
+mod hardware;
 mod iso;
 mod puente;
 mod sincro;
@@ -41,6 +42,7 @@ fn main() -> ExitCode {
         "test" => build_user()
             .and_then(|_| build())
             .and_then(|img| test(&img, &fresh_disk("disco-test.img")?)),
+        "test-hardware" => build().and_then(|img| test_hardware(&img)),
         "usuario" => build_user().map(|d| println!("programas de Linux: {}", d.display())),
         "screenshot" => build().and_then(|img| screenshot(&img, &fresh_disk("disco-captura.img")?)),
         "vdi" => build().and_then(|img| vdi(&img)),
@@ -55,7 +57,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -375,14 +377,8 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     } else {
         cmd.arg("-drive")
             .arg(format!("format=raw,file={}", image.display()));
-        // Disco de datos: virtio-blk con la interfaz legacy (por puertos de E/S), que es la que
-        // implementa el driver del kernel.
-        cmd.arg("-drive")
-            .arg(format!(
-                "if=none,id=disco,format=raw,file={}",
-                disk.display()
-            ))
-            .args(["-device", "virtio-blk-pci,drive=disco,disable-modern=on"]);
+        // Disco de datos: virtio-blk, o el de `hardware::set` (K13: SATA o NVMe).
+        hardware::disk_args(&mut cmd, disk);
     }
     // Placa de video: virtio-vga (una virtio-gpu que arranca como VGA común, así el firmware
     // tiene dónde dibujar) con una salida por monitor del anfitrión. JARVIS_MONITORES la cambia.
@@ -497,6 +493,58 @@ fn iso_cmd(image: &Path) -> Result<()> {
         if !status.success() {
             return Err(format!("QEMU terminó con {status}"));
         }
+    }
+    Ok(())
+}
+
+/// K13: una corrida por combinación de hardware que emula QEMU. En cada una el kernel tiene que
+/// encontrar el disco, montar la partición de JARVIS de la GPT y escribir en ella (se verifica
+/// con `fatfs` adentro de la partición).
+fn test_hardware(image: &Path) -> Result<()> {
+    use hardware::{DiskBus, Hw};
+    let runs = [
+        (
+            Hw {
+                disk: DiskBus::Ahci,
+            },
+            "AHCI_DISCO puerto 1",
+            "SATA 1",
+        ),
+        (
+            Hw {
+                disk: DiskBus::Nvme,
+            },
+            "NVME_DISCO",
+            "NVMe",
+        ),
+    ];
+    for (hw, found, system) in runs {
+        println!("--- hardware: {hw:?}");
+        let fat = fresh_disk("disco-hw-fat.img")?;
+        let disk = target_dir().join("disco-hw.img");
+        hardware::gpt_disk(&fat, &disk)?;
+        hardware::set(hw);
+        let mut s = Session::start(image, &disk)?;
+        s.wait_for("APIC_LISTO", BOOT_TIMEOUT)?;
+        s.wait_for(found, BOOT_TIMEOUT)?;
+        s.wait_for(&format!("DISCO_SISTEMA {system}"), BOOT_TIMEOUT)?;
+        s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+        s.monitor("sendkey tab")?;
+        s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
+        s.monitor("sendkey f7")?;
+        s.type_text("hardware")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("ARCHIVOS_CREADO /hardware", STEP)?;
+        s.quit();
+        drop(s);
+        hardware::set(hardware::VIRTIO);
+        let mut part = hardware::Partition::open(&disk)?;
+        let fs = fatfs::FileSystem::new(&mut part, fatfs::FsOptions::new())
+            .map_err(|e| format!("la partición de JARVIS no es un FAT32 sano: {e}"))?;
+        fs.root_dir()
+            .open_dir("hardware")
+            .map_err(|e| format!("/hardware no quedó en la partición: {e}"))?;
+        println!("ok: {hw:?}: el disco se montó desde la GPT y /hardware quedó escrito");
     }
     Ok(())
 }

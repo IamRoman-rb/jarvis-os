@@ -23,19 +23,23 @@
 extern crate alloc;
 
 mod acpi;
+mod ahci;
 mod allocator;
 mod apic;
 mod audio;
 mod cpu;
 mod display;
+mod dma;
 mod entropy;
 mod fw_cfg;
 mod gdt;
 mod interrupts;
 mod irqlock;
 mod keyboard;
+mod mmio;
 mod mouse;
 mod nettask;
+mod nvme;
 mod paging;
 mod pci;
 mod pit;
@@ -45,6 +49,7 @@ mod queue;
 mod rtc;
 mod serial;
 mod speaker;
+mod storage;
 mod syscall;
 mod task;
 mod time;
@@ -64,6 +69,7 @@ use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::info::{MemoryRegionKind, PixelFormat as BootPixelFormat};
 use bootloader_api::{BootInfo, entry_point};
 use jarvis_desktop::{Desktop, Event, MouseDecoder, NetInfo, Power, SystemStats};
+use jarvis_drivers::gpt::PartitionDevice;
 use jarvis_fs::{BlockCache, BlockDevice, FileSystem, IoError, MemDisk};
 use jarvis_gfx::clock::{DateTime, StrBuf};
 use jarvis_gfx::{Canvas, Color, PixelFormat, text};
@@ -86,9 +92,11 @@ const DISK_CACHE_SECTORS: usize = 1024;
 /// Disco en RAM del modo en vivo (arranque desde la ISO, sin disco virtio): 48 MiB.
 const LIVE_DISK_BYTES: usize = 48 * 1024 * 1024;
 
-/// El disco del sistema: el virtio (con caché) o, en modo en vivo, uno en RAM.
+/// El disco del sistema: el virtio (con caché), la partición de JARVIS de un disco real (SATA,
+/// NVMe; K13) o, en modo en vivo, uno en RAM.
 enum Disk {
     Virtio(BlockCache<VirtioBlk>),
+    Hw(BlockCache<PartitionDevice<storage::AnyDisk>>),
     Ram(MemDisk),
 }
 
@@ -96,18 +104,21 @@ impl BlockDevice for Disk {
     fn sector_count(&self) -> u64 {
         match self {
             Disk::Virtio(d) => d.sector_count(),
+            Disk::Hw(d) => d.sector_count(),
             Disk::Ram(d) => d.sector_count(),
         }
     }
     fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), IoError> {
         match self {
             Disk::Virtio(d) => d.read(lba, buf),
+            Disk::Hw(d) => d.read(lba, buf),
             Disk::Ram(d) => d.read(lba, buf),
         }
     }
     fn write(&mut self, lba: u64, buf: &[u8]) -> Result<(), IoError> {
         match self {
             Disk::Virtio(d) => d.write(lba, buf),
+            Disk::Hw(d) => d.write(lba, buf),
             Disk::Ram(d) => d.write(lba, buf),
         }
     }
@@ -193,6 +204,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // K8: el kernel deja las tablas de páginas del bootloader y arma las suyas.
     let pg = paging::init(boot_info, phys_offset, heap_phys)
         .expect("no se pudieron armar las tablas de páginas propias");
+    dma::init(phys_offset);
     serial_println!(
         "PAGINACION_PROPIA {} tablas, RAM mapeada {} MiB, {} MiB de marcos libres, kernel {} segmentos{}",
         pg.tables,
@@ -290,6 +302,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             }
         }
     });
+    // K13: los discos reales (SATA, NVMe). El del sistema es el que tiene la partición de JARVIS;
+    // los demás quedan guardados para el instalador, sin montar.
+    let mut found = storage::probe();
+    let disk = disk.or_else(|| {
+        let (name, part) = storage::take_system(&mut found)?;
+        match FileSystem::mount(Disk::Hw(BlockCache::new(part, DISK_CACHE_SECTORS))) {
+            Ok(fs) => {
+                serial_println!("DISCO_SISTEMA {name}");
+                Some(fs)
+            }
+            Err(e) => {
+                serial_println!("disco {name}: la partición de JARVIS no se pudo montar: {e}");
+                None
+            }
+        }
+    });
+    storage::park(found);
     let disk = disk.or_else(|| {
         serial_println!("disco: no hay; modo en vivo (FAT32 en RAM)");
         let fs = live_disk();

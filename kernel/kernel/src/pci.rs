@@ -56,9 +56,7 @@ fn write32(bus: u8, slot: u8, function: u8, offset: u8, value: u32) {
 }
 
 /// Capacidades PCI que usa el kernel.
-#[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
 const CAP_MSI: u8 = 0x05;
-#[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
 const CAP_MSIX: u8 = 0x11;
 
 impl Device {
@@ -66,12 +64,10 @@ impl Device {
         read32(self.bus, self.slot, self.function, offset)
     }
 
-    #[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
     pub fn write(&self, offset: u8, value: u32) {
         write32(self.bus, self.slot, self.function, offset, value);
     }
 
-    #[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
     /// Escribe 16 bits sin pisar los otros 16 de la misma palabra.
     pub fn write16(&self, offset: u8, value: u16) {
         let aligned = offset & !3;
@@ -88,14 +84,12 @@ impl Device {
         (self.read(0) >> 16) as u16
     }
 
-    #[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
     /// (clase, subclase, interfaz): 01/06/01 = AHCI, 01/08/02 = NVMe, 0C/03/30 = xHCI…
     pub fn class(&self) -> (u8, u8, u8) {
         let c = self.read(0x08);
         ((c >> 24) as u8, (c >> 16) as u8, (c >> 8) as u8)
     }
 
-    #[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
     /// Configura MSI-X (si lo tiene) o MSI para que el dispositivo dispare `vector` en la CPU
     /// `apic_id`. Con MSI-X, todas las entradas de la tabla van a ese vector (los drivers usan
     /// una sola cola de eventos). Devuelve `false` si no tiene ninguno de los dos.
@@ -126,7 +120,6 @@ impl Device {
         true
     }
 
-    #[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
     fn enable_msix_at(&self, at: u8, apic_id: u8, vector: u8) -> bool {
         let control = (self.read(at) >> 16) as u16;
         let t = MsixTable::new(control, self.read(at + 4));
@@ -264,7 +257,6 @@ pub fn find(vendor: u16, device: u16) -> Option<Device> {
         .find(|d| d.vendor() == vendor && d.device_id() == device)
 }
 
-#[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
 /// Los dispositivos de esa clase, subclase e interfaz.
 pub fn find_class(class: u8, subclass: u8, prog_if: u8) -> Vec<Device> {
     devices()

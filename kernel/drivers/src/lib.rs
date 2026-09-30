@@ -11,6 +11,8 @@
 //! - [`acpi`]: las tablas fijas de ACPI (RSDP, XSDT, MADT, FADT, MCFG, HPET). El AML (el
 //!   bytecode de la DSDT) lo interpreta la crate `acpi` en el kernel.
 //! - [`apic`]: el formato de las entradas del IOAPIC y de los mensajes MSI/MSI-X.
+//! - [`gpt`]: la tabla de particiones de UEFI (leer, crear, ver una partición como disco).
+//! - [`ahci`] y [`nvme`]: los comandos de los discos SATA y NVMe y lo que responden.
 //!
 //! Referencias: especificación ACPI 6.5 (cap. 5), Intel SDM vol. 3A cap. 11 (APIC) y la
 //! especificación PCI Local Bus 3.0 §6.8 (MSI).
@@ -20,7 +22,10 @@
 extern crate alloc;
 
 pub mod acpi;
+pub mod ahci;
 pub mod apic;
+pub mod gpt;
+pub mod nvme;
 
 /// Lee un entero en little endian de `b` en `at`. Fuera de rango da 0: las tablas del firmware
 /// pueden venir cortas, y un campo que falta es un campo vacío.
@@ -32,4 +37,20 @@ pub(crate) fn le(b: &[u8], at: usize, n: usize) -> u64 {
         .iter()
         .rev()
         .fold(0u64, |acc, &x| (acc << 8) | x as u64)
+}
+
+/// Un texto ASCII de un campo fijo del hardware (modelo, número de serie): lo que no se puede
+/// mostrar pasa a espacio, y se recortan los espacios de relleno.
+pub(crate) fn ascii(bytes: &[u8]) -> alloc::string::String {
+    let s: alloc::string::String = bytes
+        .iter()
+        .map(|&c| {
+            if c.is_ascii_graphic() || c == b' ' {
+                c as char
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    s.trim().into()
 }
