@@ -344,9 +344,8 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
     let machine = match &audio {
         Some(driver) => {
             cmd.arg("-audiodev").arg(format!("{driver},id=sonido"));
-            // Micrófono (y parlantes) de JARVIS-OS: virtio-sound, conectado al audio del
-            // anfitrión (ver kernel/src/virtio_sound.rs).
-            cmd.args(["-device", "virtio-sound-pci,audiodev=sonido"]);
+            // Micrófono y parlantes: virtio-sound, o HDA en las pruebas de hardware (K13).
+            hardware::sound_args(&mut cmd);
             "q35,pcspk-audiodev=sonido"
         }
         None => "q35",
@@ -498,12 +497,15 @@ fn iso_cmd(image: &Path) -> Result<()> {
 fn test_hardware(image: &Path) -> Result<()> {
     use hardware::{DiskBus, Hw, NetCard};
     let port = puente::test_server(TEST_PAGE)?;
+    // El repositorio de paquetes (la música de la prueba de HDA).
+    puente::start();
     let runs = [
         (
             Hw {
                 disk: DiskBus::Ahci,
                 net: NetCard::E1000e,
                 usb_input: false,
+                hda: true,
             },
             "AHCI_DISCO puerto 1",
             "SATA 1",
@@ -514,6 +516,7 @@ fn test_hardware(image: &Path) -> Result<()> {
                 disk: DiskBus::Nvme,
                 net: NetCard::Rtl8139,
                 usb_input: false,
+                hda: false,
             },
             "NVME_DISCO",
             "NVMe",
@@ -525,6 +528,7 @@ fn test_hardware(image: &Path) -> Result<()> {
                 disk: DiskBus::Usb,
                 net: NetCard::Virtio,
                 usb_input: true,
+                hda: false,
             },
             "USB_DISCO",
             "USB",
@@ -554,6 +558,21 @@ fn test_hardware(image: &Path) -> Result<()> {
         thread::sleep(Duration::from_millis(300));
         s.monitor("sendkey alt-f4")?;
         thread::sleep(Duration::from_millis(300));
+        if hw.hda {
+            // Sonido por HDA: una canción suena entera (MUSICA_FIN llega cuando la placa terminó
+            // de reproducirla, contando lo que ya pasó por los buffers).
+            s.saw_or_wait("HDA_LISTO", STEP)?;
+            s.monitor("sendkey ctrl-alt-t")?;
+            s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+            s.type_text("apt install musica && cd /M* && open Escala.wav")?;
+            s.monitor("sendkey ret")?;
+            s.wait_for("MUSICA_ARCHIVO", STEP)?;
+            s.wait_for("MUSICA_FIN", STEP)?;
+            s.monitor("sendkey alt-f4")?;
+            thread::sleep(Duration::from_millis(300));
+            s.monitor("sendkey alt-f4")?;
+            thread::sleep(Duration::from_millis(300));
+        }
         s.monitor("sendkey tab")?;
         s.wait_for("ARCHIVOS_ABIERTO /", STEP)?;
         if hw.usb_input {

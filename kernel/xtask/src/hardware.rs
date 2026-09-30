@@ -40,13 +40,31 @@ pub struct Hw {
     pub net: NetCard,
     /// Teclado y mouse USB (`usb-kbd`, `usb-mouse`) en la controladora xHCI.
     pub usb_input: bool,
+    /// Sonido por HDA (`intel-hda` + `hda-output`) en vez de virtio-sound.
+    pub hda: bool,
 }
 
 pub const VIRTIO: Hw = Hw {
     disk: DiskBus::Virtio,
     net: NetCard::Virtio,
     usb_input: false,
+    hda: false,
 };
+
+/// Los argumentos de la placa de sonido, conectada al audio `sonido` del anfitrión.
+pub fn sound_args(cmd: &mut Command) {
+    if get().hda {
+        cmd.args([
+            "-device",
+            "intel-hda",
+            "-device",
+            "hda-output,audiodev=sonido",
+        ]);
+    } else {
+        // Micrófono (y parlantes) de JARVIS-OS: virtio-sound (ver kernel/src/virtio_sound.rs).
+        cmd.args(["-device", "virtio-sound-pci,audiodev=sonido"]);
+    }
+}
 
 static HW: Mutex<Hw> = Mutex::new(VIRTIO);
 

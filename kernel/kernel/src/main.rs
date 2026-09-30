@@ -34,6 +34,7 @@ mod e1000;
 mod entropy;
 mod fw_cfg;
 mod gdt;
+mod hda;
 mod interrupts;
 mod irqlock;
 mod keyboard;
@@ -371,10 +372,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     if mic.is_none() {
         serial_println!("microfono: no hay placa virtio-sound");
     }
-    let sound_rate = match speaker {
-        Some(sp) => Some(audio::start(sp)),
+    // Sin virtio-sound, la placa de sonido de una PC (HDA, K13).
+    let output: Option<alloc::boxed::Box<dyn audio::Output>> = match speaker {
+        Some(sp) => Some(alloc::boxed::Box::new(sp)),
         None => {
-            serial_println!("parlantes: no hay salida de audio virtio-sound");
+            hda::probe().map(|h| alloc::boxed::Box::new(h) as alloc::boxed::Box<dyn audio::Output>)
+        }
+    };
+    let sound_rate = match output {
+        Some(out) => Some(audio::start(out)),
+        None => {
+            serial_println!("parlantes: no hay salida de audio");
             None
         }
     };
