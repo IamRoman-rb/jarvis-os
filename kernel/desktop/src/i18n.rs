@@ -230,6 +230,7 @@ static EN: &[(&str, &str)] = &[
     ("CAMBIAR DE VENTANA", "SWITCH WINDOW"),
     ("CANCELAR", "CANCEL"),
     ("CANCIONES · PARLANTE DE LA PC", "SONGS · PC SPEAKER"),
+    ("CANCIONES · PARLANTES", "SONGS · SPEAKERS"),
     ("CEREBRO", "BRAIN"),
     ("CERRAR SESIÓN", "SIGN OUT"),
     ("CLIC: MONITOR", "CLICK: MONITOR"),
@@ -246,6 +247,7 @@ static EN: &[(&str, &str)] = &[
     ("Canal 2 del PIT (8254)", "PIT channel 2 (8254)"),
     ("Captura (Impr Pant)", "Screenshot (PrtSc)"),
     ("Carga cancelada.", "Loading canceled."),
+    ("Cargando el video...", "Loading the video..."),
     ("Carpeta", "Folder"),
     ("Carpeta vacía", "Empty folder"),
     ("Cerebro", "Brain"),
@@ -364,8 +366,8 @@ static EN: &[(&str, &str)] = &[
     ("El doble de tamaño", "Twice the size"),
     ("El foco sigue al mouse", "Focus follows mouse"),
     (
-        "El kernel todavía no tiene TLS: usa el puente del anfitrión",
-        "The kernel has no TLS yet: it uses the host bridge",
+        "El kernel cifra él mismo; con esto, lo hace el anfitrión",
+        "The kernel encrypts by itself; with this on, the host does it",
     ),
     (
         "El mismo en las dos máquinas (vacío = no sincroniza)",
@@ -459,6 +461,7 @@ static EN: &[(&str, &str)] = &[
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "CPU, memory, disk and network charts at the bottom left",
     ),
+    ("HTTPS por el puente", "HTTPS through the bridge"),
     ("HUD de JARVIS", "JARVIS HUD"),
     ("HUD oscuro", "Dark HUD"),
     (
@@ -655,6 +658,10 @@ static EN: &[(&str, &str)] = &[
         "No hay placa de sonido con entrada (en QEMU la agrega cargo xtask run)",
         "No sound card with an input (in QEMU, cargo xtask run adds one)",
     ),
+    (
+        "No hay placa de sonido para reproducir archivos.",
+        "There is no sound card to play files.",
+    ),
     ("No hay ventanas abiertas.", "No open windows."),
     (
         "No se cerró la sesión: hay cambios sin guardar.",
@@ -812,8 +819,8 @@ static EN: &[(&str, &str)] = &[
         "Digits only (up to 8). Empty = no PIN",
     ),
     (
-        "Solo puedo mostrar imágenes BMP sin compresión (por ahora).",
-        "I can only show uncompressed BMP images (for now).",
+        "Solo puedo mostrar imágenes BMP, PNG y JPEG.",
+        "I can only show BMP, PNG and JPEG images.",
     ),
     (
         "Solo si el puente corre en otra máquina (--red)",
@@ -912,7 +919,9 @@ static EN: &[(&str, &str)] = &[
     ("activa", "on"),
     ("apagada", "off"),
     ("archivo", "file"),
+    ("archivo WAV", "WAV file"),
     ("archivo comprimido", "archive"),
+    ("audio", "audio"),
     ("carpeta", "folder"),
     ("con sesión", "signed in"),
     ("conectado", "connected"),
@@ -921,11 +930,13 @@ static EN: &[(&str, &str)] = &[
     ("detectado, sin audio todavía", "detected, no audio yet"),
     ("do", "su"),
     ("en ejecución", "running"),
+    ("en pausa (espacio sigue)", "paused (space resumes)"),
     (
         "en una PC Intel se lee de la CPU.",
         "on an Intel PC it is read from the CPU.",
     ),
     ("enviados", "sent"),
+    ("espacio: pausa", "space: pause"),
     ("estéreo", "stereo"),
     ("imagen", "image"),
     ("ju", "th"),
@@ -947,8 +958,10 @@ static EN: &[(&str, &str)] = &[
     ("sin sensor", "no sensor"),
     ("sin sesión", "signed out"),
     ("sá", "sa"),
+    ("terminó", "finished"),
     ("texto", "text"),
     ("vi", "fr"),
+    ("video", "video"),
     ("voz", "voice"),
     (
         "¿Qué querés que haga la computadora?",
@@ -1093,6 +1106,7 @@ static PT: &[(&str, &str)] = &[
         "CANCIONES · PARLANTE DE LA PC",
         "MÚSICAS · ALTO-FALANTE DO PC",
     ),
+    ("CANCIONES · PARLANTES", "MÚSICAS · ALTO-FALANTES"),
     ("CEREBRO", "CÉREBRO"),
     ("CERRAR SESIÓN", "SAIR"),
     ("CLIC: MONITOR", "CLIQUE: MONITOR"),
@@ -1109,6 +1123,7 @@ static PT: &[(&str, &str)] = &[
     ("Canal 2 del PIT (8254)", "Canal 2 do PIT (8254)"),
     ("Captura (Impr Pant)", "Captura (PrtSc)"),
     ("Carga cancelada.", "Carregamento cancelado."),
+    ("Cargando el video...", "Carregando o vídeo..."),
     ("Carpeta", "Pasta"),
     ("Carpeta vacía", "Pasta vazia"),
     ("Cerebro", "Cérebro"),
@@ -1233,8 +1248,8 @@ static PT: &[(&str, &str)] = &[
     ("El doble de tamaño", "O dobro do tamanho"),
     ("El foco sigue al mouse", "O foco segue o mouse"),
     (
-        "El kernel todavía no tiene TLS: usa el puente del anfitrión",
-        "O kernel ainda não tem TLS: usa a ponte do anfitrião",
+        "El kernel cifra él mismo; con esto, lo hace el anfitrión",
+        "O kernel cifra sozinho; com isto, quem cifra é o anfitrião",
     ),
     (
         "El mismo en las dos máquinas (vacío = no sincroniza)",
@@ -1328,6 +1343,7 @@ static PT: &[(&str, &str)] = &[
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "Gráficos de CPU, memória, disco e rede no canto inferior esquerdo",
     ),
+    ("HTTPS por el puente", "HTTPS pela ponte"),
     ("HUD de JARVIS", "HUD do JARVIS"),
     ("HUD oscuro", "HUD escuro"),
     (
@@ -1533,6 +1549,10 @@ static PT: &[(&str, &str)] = &[
         "No hay placa de sonido con entrada (en QEMU la agrega cargo xtask run)",
         "Não há placa de som com entrada (no QEMU, cargo xtask run adiciona uma)",
     ),
+    (
+        "No hay placa de sonido para reproducir archivos.",
+        "Não há placa de som para reproduzir arquivos.",
+    ),
     ("No hay ventanas abiertas.", "Nenhuma janela aberta."),
     (
         "No se cerró la sesión: hay cambios sin guardar.",
@@ -1696,8 +1716,8 @@ static PT: &[(&str, &str)] = &[
         "Só números (até 8). Vazio = sem PIN",
     ),
     (
-        "Solo puedo mostrar imágenes BMP sin compresión (por ahora).",
-        "Só consigo mostrar imagens BMP sem compressão (por enquanto).",
+        "Solo puedo mostrar imágenes BMP, PNG y JPEG.",
+        "Só consigo mostrar imagens BMP, PNG e JPEG.",
     ),
     (
         "Solo si el puente corre en otra máquina (--red)",
@@ -1799,7 +1819,9 @@ static PT: &[(&str, &str)] = &[
     ("activa", "ativa"),
     ("apagada", "desligada"),
     ("archivo", "arquivo"),
+    ("archivo WAV", "arquivo WAV"),
     ("archivo comprimido", "arquivo compactado"),
+    ("audio", "áudio"),
     ("carpeta", "pasta"),
     ("con sesión", "conectado"),
     ("conectado", "conectado"),
@@ -1808,11 +1830,13 @@ static PT: &[(&str, &str)] = &[
     ("detectado, sin audio todavía", "detectado, sem áudio ainda"),
     ("do", "do"),
     ("en ejecución", "em execução"),
+    ("en pausa (espacio sigue)", "em pausa (espaço continua)"),
     (
         "en una PC Intel se lee de la CPU.",
         "num PC Intel é lido da CPU.",
     ),
     ("enviados", "enviados"),
+    ("espacio: pausa", "espaço: pausa"),
     ("estéreo", "estéreo"),
     ("imagen", "imagem"),
     ("ju", "qi"),
@@ -1834,8 +1858,10 @@ static PT: &[(&str, &str)] = &[
     ("sin sensor", "sem sensor"),
     ("sin sesión", "sem sessão"),
     ("sá", "sá"),
+    ("terminó", "terminou"),
     ("texto", "texto"),
     ("vi", "sx"),
+    ("video", "vídeo"),
     ("voz", "voz"),
     (
         "¿Qué querés que haga la computadora?",
@@ -1903,6 +1929,7 @@ static EN_F: &[(&str, &str)] = &[
         "No se pudo guardar la configuración: {}",
         "Couldn't save the settings: {}",
     ),
+    ("No se puede reproducir: {}", "Cannot play: {}"),
     (
         "Papelera vacía ({} elementos).",
         "Trash emptied ({} items).",
@@ -2015,6 +2042,10 @@ static PT_F: &[(&str, &str)] = &[
     (
         "No se pudo guardar la configuración: {}",
         "Não foi possível salvar as configurações: {}",
+    ),
+    (
+        "No se puede reproducir: {}",
+        "Não é possível reproduzir: {}",
     ),
     (
         "Papelera vacía ({} elementos).",

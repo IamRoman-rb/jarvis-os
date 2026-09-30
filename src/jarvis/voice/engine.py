@@ -29,6 +29,7 @@ from jarvis.voice.audio import (
     is_noise,
     jarvis_effect,
     level,
+    send_paced,
     split_wake,
 )
 
@@ -183,6 +184,29 @@ class Voice:
         if self._speaking.is_set():
             self._hush.set()
 
+    def _render(self, text: str) -> tuple[int, list[bytes]]:
+        """El audio de `text`, con el efecto y la velocidad de la voz elegida."""
+        rate, chunks = self._synthesize(text)
+        if self._effect:
+            chunks = [jarvis_effect(c, rate) for c in chunks]
+        # Más lenta = más grave y pausada.
+        return int(rate * self._speed), chunks
+
+    def speak_pcm(self, text: str, on_chunk: Callable[[int, bytes], None]) -> None:
+        """Como `speak`, pero el audio lo reproduce JARVIS-OS (K12): se le manda de a pedazos
+        (`on_chunk(frecuencia, pcm)`), al ritmo en que suena."""
+        text = for_speech(text)
+        if not text:
+            return
+        self._hush.clear()
+        self._speaking.set()
+        try:
+            rate, chunks = self._render(text)
+            send_paced(b"".join(chunks), rate, on_chunk, self._hush.is_set)
+        finally:
+            self._hush.clear()
+            self._speaking.clear()
+
     def speak(self, text: str, on_level: Callable[[int], None]) -> None:
         """Dice `text` por los parlantes; `on_level` recibe el nivel cada ~50 ms."""
         import sounddevice as sd
@@ -193,11 +217,7 @@ class Voice:
         self._hush.clear()
         self._speaking.set()
         try:
-            rate, chunks = self._synthesize(text)
-            if self._effect:
-                chunks = [jarvis_effect(c, rate) for c in chunks]
-            # Más lenta = más grave y pausada.
-            rate = int(rate * self._speed)
+            rate, chunks = self._render(text)
             step = rate // 20 * 2  # 50 ms de audio de 16 bits
             with sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16") as out:
                 for pcm in chunks:

@@ -222,8 +222,10 @@ pub enum Launch {
     Edit(String),
     /// Navegador en una dirección.
     Browse(String),
-    /// Visor de imágenes.
+    /// Visor de imágenes (y de videos, K12).
     View(String),
+    /// Música con un archivo de audio (K12).
+    Play(String),
     /// Terminal, opcionalmente ejecutando un comando.
     Terminal(Option<String>),
     /// Configuración en una sección (0 = Sistema).
@@ -329,6 +331,14 @@ pub struct Outbox {
     pub identify: bool,
     /// Cerrar la ventana de la app que lo pide (`exit` en la terminal).
     pub close_self: bool,
+    /// Programas de Linux a lanzar (K11): los crea el kernel.
+    pub spawn: Vec<crate::procs::SpawnRequest>,
+    /// Entrada para un programa: (pid, bytes). Vacío: fin de la entrada (Ctrl+D).
+    pub proc_input: Vec<(u32, Vec<u8>)>,
+    /// Programas a terminar (Ctrl+C).
+    pub proc_kill: Vec<u32>,
+    /// Número del último proceso (no se repiten).
+    pub(crate) next_pid: u32,
     /// Número del último pedido de red (los números no se repiten).
     pub(crate) next_net: u32,
     /// La app que está trabajando ahora (el escritorio lo pone antes de llamarla): los
@@ -392,6 +402,17 @@ impl Outbox {
 
     pub fn close_stream(&mut self, id: u32) {
         self.streams.push(StreamOp::Close(id));
+    }
+
+    /// Pide lanzar un programa de Linux. Devuelve su número de proceso: su salida y su fin
+    /// llegan con él.
+    pub fn spawn(&mut self, mut req: crate::procs::SpawnRequest) -> u32 {
+        self.next_pid += 1;
+        // Los números bajos son de las tareas del kernel (`ps`).
+        req.pid = 100 + self.next_pid;
+        let pid = req.pid;
+        self.spawn.push(req);
+        pid
     }
 
     pub fn notify(&mut self, text: impl Into<String>, error: bool) {

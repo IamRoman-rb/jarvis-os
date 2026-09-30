@@ -57,6 +57,12 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   virtio-sound conectada al micrófono del anfitrión; el kernel configura su entrada (PCM de 16 bits
   a 16 kHz) y recibe audio en buffers de 20 ms. Configuración → **Micrófono** muestra si se
   detectó, el nivel en vivo y el estado de la voz de JARVIS.
+- **Sonido** (K12): la misma placa virtio-sound tiene salida a los parlantes del anfitrión. Un
+  mezclador suma lo que suena: la app **Música** (las partituras con un sintetizador, y los WAV
+  de `/Música`), el **Visor**, que ahora también reproduce **videos** AVI (MJPEG con audio), y la
+  **voz de JARVIS**, que el cerebro manda como audio y el kernel reproduce: la esfera se mueve
+  con lo que está sonando. `apt install musica videos` trae ejemplos. Sin placa de sonido,
+  Música vuelve al parlante de la PC.
 - **Sincronización entre máquinas**: la carpeta `/Sincronizado` se copia sola entre dos (o más)
   JARVIS, aunque estén en redes distintas. En Configuración → Sincronización se genera un código
   en una y se escribe en la otra; las dos se conectan a un **relé** (`cargo xtask relay`) que solo
@@ -355,6 +361,11 @@ firmware UEFI (OVMF en QEMU)
             ├─ nettask.rs     la tarea de la red: colas de pedidos y respuestas con el escritorio
             ├─ entropy.rs     entropía (K10): RDSEED/RDRAND y variación del TSC → generador global
             ├─ tls.rs         TLS (K10): une jarvis-tls con la entropía y la hora; prueba al arrancar
+            ├─ audio.rs       la tarea "audio" (K12): del anillo que llena el escritorio a la placa
+            ├─ syscall.rs     syscall/sysret (K11): MSR, la entrada, SSE y el salto al anillo 3
+            ├─ process.rs     procesos (K11): crear, llamadas, fallos de página, terminar
+            ├─ tareas "proceso" (anillo 3): un programa de Linux cada una, con su PML4
+            │    └─ jarvis-linux   ELF, pila inicial, memoria y llamadas al sistema de Linux
             ├─ time.rs        reloj en ms con el TSC
             ├─ queue.rs       cola de bytes sin locks (interrupción → bucle)
             ├─ keyboard.rs    teclado PS/2 → teclas y modificadores (Alt, Ctrl, Win, AltGr),
@@ -378,6 +389,8 @@ firmware UEFI (OVMF en QEMU)
                     │               firewall, idiomas, terminal (jsh, apt, snap, winget, ufw),
                     │               web (DOM, CSS, estilos, maquetación en cajas, HTTP)
                       ├─ jarvis-fs   FAT32 sobre el disco (con caché de sectores)
+                      ├─ jarvis-image PNG (propio, con inflate) y JPEG (zune-jpeg) → RGBA
+                      ├─ jarvis-audio WAV, IMA ADPCM, remuestreo, mezclador, sintetizador, AVI
                       └─ jarvis-gfx  dibujo: HUD, esfera, texto, fuente vectorial, fuente de las
                                      páginas (DejaVu + fontdue), figuras
 ```
@@ -388,14 +401,105 @@ firmware UEFI (OVMF en QEMU)
 | `fs` (`jarvis-fs`) | FAT32 propio: montaje, FAT (dos copias), nombres largos, lectura, escritura, carpetas, renombrar, mover, **copiar**, borrar, **caché de sectores**. Sobre un trait `BlockDevice`. | 22 tests, 14 de ellos **cruzados contra `fatfs`**: cada uno lee lo que escribe el otro, y el espacio libre se cuenta sobre la FAT cruda |
 | `desktop` (`jarvis-desktop`) | Escritorio: gestor de ventanas (con escritorios virtuales), atajos, barra, panel de estado, menús y paneles, configuración, firewall, idiomas, composición; apps (Archivos, Terminal, Configuración, Monitor, Consola, Editor, Música, Visor, Navegador); shell `jsh`, `apt`, `snap`, `winget`, `ufw`, formatos PE/ELF/squashfs; web: URL, HTTP, DOM, selectores y cascada, maquetación en cajas (flujo, flotantes, flex, grid, tablas), JSON, adaptador de YouTube; teclado latinoamericano. | 116 tests: el escritorio manejado con teclas y clics sobre un disco en memoria, verificado con `fatfs`; la terminal, `apt`, `snap` y `winget` contra el repositorio real y respuestas grabadas; el firewall; la maquetación sobre HTML de prueba; incluye "render incremental == redibujar todo". Más `vista_previa` (a mano): arma una página real, con imágenes, y la guarda en BMP |
 | `net` (`jarvis-net`) | Red: smoltcp, DHCP, DNS (con respaldo), descargas HTTP con redirecciones, HTTPS por el puente, conexiones TCP largas. | 6 tests de punta a punta en memoria (placa "loopback" + servidores de juguete), incluido `poll_delay` |
+| `audio` (`jarvis-audio`) | Audio y video (K12), todo entero (sin punto flotante): WAV (PCM de 8/16/24 bits) e IMA ADPCM propios, remuestreo a la frecuencia de la placa, mezclador con volumen y el nivel de la voz por momento, sintetizador para las partituras y el contenedor AVI (MJPEG + audio). | 17 tests, dos **cruzados** contra el generador en Python de `paquetes/` (el ADPCM coincide muestra a muestra; el AVI y sus JPEG los armó Pillow), y `cargo xtask test` (una canción y un video suenan en la placa virtio-sound de QEMU) |
+| `image` (`jarvis-image`) | Imágenes (K10): inflate (DEFLATE + zlib) y PNG propios (todos los tipos de color y profundidades, paletas, `tRNS`, Adam7, CRC y Adler-32), JPEG con `zune-jpeg` (progresivos incluidos), topes de tamaño y achicado por promedio. | 13 tests, los de PNG **cruzados contra la crate `png`** (todas las combinaciones de color, bits y filtro; entrelazado; cortado en cada byte) y los de JPEG contra `image`; y `cargo xtask test` (el visor abre un PNG y un JPEG progresivo en el kernel) |
 | `mem` (`jarvis-mem`) | Memoria: allocator de marcos físicos (mapa de bits), tablas de páginas de 4 niveles (mapear, traducir, desmapear, recorrer; páginas de 4 KiB, 2 MiB y 1 GiB) y segmentos del ELF del kernel para W^X. Sobre un trait `PhysMem`. | 8 tests sobre una RAM de mentira (copiar una jerarquía da las mismas traducciones) y `cargo xtask test` (el kernel arranca con sus tablas y verifica W^X) |
 | `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
+| `linux` (`jarvis-linux`) | La ABI de Linux x86_64 (K11): cargador de ELF (estáticos y static-pie), pila inicial con el vector auxiliar, zonas de memoria (brk, mmap, mprotect, páginas al primer uso) y ~90 llamadas al sistema (archivos, directorios, consola, tiempo, azar, sockets TCP, señales mínimas). Sobre un trait `System`. | 20 tests: un proceso de mentira de punta a punta (cargar, archivos, directorios, memoria, punteros del kernel → EFAULT, sockets) y `cargo xtask test` (programas de verdad, compilados con musl) |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
 
-### K10: TLS en el kernel (en curso)
+### K12: audio y video
+
+- **La placa de sonido manda el tiempo.** virtio-sound devuelve cada buffer de salida cuando lo
+  terminó de consumir: ese es el reloj más confiable que hay. Todo se mide con él: cuánto va de
+  una canción, qué cuadro de un video se muestra (el video sigue a su audio: si un cuadro tarda
+  en dibujarse, se saltea, no se atrasa) y el nivel de la voz que mueve la esfera.
+- **Mezclar por adelantado, reproducir aparte.** El mezclador vive en el escritorio (lo usan las
+  apps y la voz), pero un cuadro lento no puede cortar el sonido. El escritorio deja ~120 ms de
+  audio mezclado en un anillo y una tarea "audio" de prioridad alta lo pasa a la placa cada 5 ms.
+  Como lo que se mezcla va adelantado a lo que suena, el mezclador anota el nivel de la voz de
+  cada bloque de 20 ms con el cuadro en que empieza, y la esfera pregunta por el cuadro que la
+  placa está reproduciendo **ahora**.
+- **Un bug del planificador que K9 no mostraba.** La ronda de turnos arrancaba desde la tarea que
+  acababa de correr. Con el audio despertando cada 5 ms (más seguido que el turno de 10 ms), la
+  ronda siempre arrancaba después del audio y le tocaba a la misma tarea de abajo: un programa
+  que calcula sin parar dejaba al escritorio sin CPU. Ahora cada prioridad recuerda por dónde iba
+  su ronda (el test lo reproduce: con el planificador viejo, el escritorio corría 0 veces).
+- **Códecs enteros.** El kernel no tiene SSE: el punto flotante es por software. MP3 y Vorbis
+  decodifican con `float` y no llegarían a tiempo real, así que se eligieron códecs de
+  aritmética entera: **PCM** (no hay nada que decodificar) e **IMA ADPCM**, que predice cada
+  muestra con la anterior y guarda la diferencia en 4 bits, con un paso que se adapta (un cuarto
+  del tamaño, calidad de radio). El video es **MJPEG**: cada cuadro es un JPEG (el decodificador
+  de K10, IDCT entera) y ninguno depende de otro, así que no hace falta un decodificador de
+  video "de verdad" (H.264 predice cada cuadro a partir de otros).
+- **Remuestrear** es preguntarse cuánto vale la onda en instantes donde no hay muestras. Se
+  interpola en línea recta con la posición en punto fijo (16 bits de fracción): 22 050 Hz mono
+  → 48 000 Hz estéreo. Al sumar señales de 16 bits se suma en 32 y se recorta.
+- **La voz de JARVIS, ahora en JARVIS-OS.** El kernel le dice al cerebro en `hola` que tiene
+  parlantes (`parlantes: 48000`); entonces la voz sintetizada viaja como audio (`audio{tasa,
+  pcm}`, en base64) en vez de sonar en el anfitrión. El cerebro la manda **al ritmo en que
+  suena** (con 300 ms de ventaja): así "callar" corta enseguida y el micrófono sabe cuándo está
+  hablando para no escucharse.
+- **Qué queda**: HDA (la placa de sonido de las PC reales, para K13), un filtro mejor para
+  remuestrear, códecs con punto flotante (MP3, Vorbis, Opus) y video con compresión entre
+  cuadros (H.264).
+
+### K11: espacio de usuario
+
+- **Un proceso es una tarea con otra PML4.** Los primeros 512 GiB (la entrada 0 de la PML4) son
+  del programa; las otras 511 entradas se copian de la PML4 del kernel, así el kernel está en
+  todos los espacios. Truco necesario: al arrancar se crean **todas** esas entradas (511 tablas
+  vacías, 2 MiB): si el kernel agregara una después, los procesos que ya existen no la verían.
+  El bootloader dejaba en la entrada 0 el código con el que salta al kernel (mapeado
+  "identidad", virtual = física): ya no se usa y se descarta.
+- **Entrar y salir del anillo 3.** La primera vez se "vuelve" de una interrupción que nunca
+  pasó: `iretq` con los selectores de usuario (RPL 3). Después, el programa entra al kernel con
+  `syscall`, que salta a LSTAR **sin cambiar de pila**: lo primero es pasar a la pila del kernel
+  de esa tarea. Las interrupciones que llegan con el programa corriendo usan `rsp0` de la TSS.
+  Las dos cosas cambian con cada tarea, igual que CR3, FS (el TLS del programa, `arch_prctl`) y
+  los registros XMM (`fxsave`/`fxrstor`: el kernel no usa SSE, los programas sí). El orden de la
+  GDT no es libre: `sysret` calcula los selectores sumando 8 y 16 al de STAR.
+- **Nunca creerle a un puntero del programa.** `read(fd, buf, n)` con `buf` apuntando al kernel
+  sería una forma de pisarlo. El kernel no usa esos punteros: recorre las tablas del proceso,
+  exige el bit USER (y WRITABLE para escribir) y copia por el mapeo de la RAM. Si la página no
+  está todavía pero es de una zona válida, se asigna y se reintenta; si no, `EFAULT`.
+- **Memoria al primer uso.** `mmap` de 1 GiB o una pila de 8 MiB no gastan nada: solo se anota la
+  zona. La página aparece cuando el programa la toca (fallo de página → ¿es de una zona? → una
+  página en cero). El malloc de musl me enseñó que las zonas se superponen de formas
+  inesperadas: pone una página de guarda (`mmap` PROT_NONE fijo) en el medio de su heap, y un
+  `brk` que rehacía toda la zona del heap la pisaba (el programa moría en la asignación 20000).
+- **Los procesos no tocan el disco.** El FAT32 y la Terminal son de la tarea del escritorio: un
+  `open` deja un pedido en una cola, despierta al escritorio (`EV_PROC`) y espera la respuesta,
+  como un microkernel con su servidor de archivos. Un archivo se lee entero al abrirlo y se
+  escribe entero al cerrarlo; `unlink` lo manda a la Papelera. El escritorio dejó de dormir
+  "hasta el próximo cuadro": duerme hasta el cuadro **o** hasta que un programa pida algo.
+- **Un programa que se porta mal termina él, no el sistema.** Un fallo de página inválido, una
+  instrucción ilegal o una división por cero en el anillo 3 terminan el proceso con la señal de
+  Linux (139 = SIGSEGV, como en bash). Ctrl+C marca al proceso; se termina en su próxima
+  llamada, espera o **tick del timer** (así también se corta un bucle que no llama al sistema).
+- **Programas de verdad, sin compilador de C.** `kernel/usuario/` se compila para
+  `x86_64-unknown-linux-musl` con `rust-lld` y los objetos de musl que trae Rust: estáticos
+  *static-pie* con la biblioteca estándar entera. `std::fs`, `println!`, `Vec`, `f64` y
+  `TcpStream` funcionan sin tocar una línea. Para saber qué llamadas hacían falta alcanzó con
+  correrlos: lo que no existe devuelve `ENOSYS` y se anota en el log.
+- **Sockets con firewall.** `connect` es una conexión larga del `Outbox` (ADR 0007) a nombre de la
+  app `programas`: pasa por las reglas de `ufw` como todo lo demás, y un bloqueo llega al
+  programa como `EACCES` ("Permission denied").
+- **Un intérprete de JavaScript, sin escribirlo.** `js` es el motor Boa (Rust) compilado como
+  cualquier otro programa de Linux: 5,7 MB, se instala con `apt install js` y corre código
+  suelto (`js -e`), archivos y una consola interactiva cuya entrada es la Terminal. No pidió
+  ninguna llamada al sistema nueva: esa es la gracia de implementar la ABI de Linux en vez de
+  una propia. Se compila sin Temporal ni Intl (los datos de zonas horarias e idiomas pesan
+  megas).
+- **Qué queda para más adelante** (ADR 0010): bibliotecas dinámicas (`ld.so`), hilos (`clone` y
+  `futex` de verdad), `fork`/`exec` desde un programa, señales entregadas al programa, `pipe`,
+  UDP (y con eso el DNS de musl: hoy `connect` necesita una IP) y programas de Windows. Brave
+  nativo necesita todo eso más un servidor gráfico.
+
+### K10: TLS y decodificadores en el kernel
 
 - **Primero, el azar.** TLS entero se apoya en claves efímeras impredecibles: si el generador es
   malo, el cifrado más fuerte no sirve (le pasó a Debian con OpenSSL en 2008). `jarvis_tls::rng`
@@ -434,6 +538,42 @@ firmware UEFI (OVMF en QEMU)
   así la tarea de la red no toca los puertos del CMOS a la vez que el reloj del escritorio. Sin
   hora válida o sin entropía suficiente, TLS no arranca: es preferible a aceptar certificados
   vencidos o usar claves adivinables.
+- **HTTPS directo** (`kernel/net`): el cliente TLS se sienta entre el socket de smoltcp y el
+  HTTP. Lo que llega por TCP entra a `receive` y sale descifrado (`take_plaintext`) hacia la
+  respuesta; lo que TLS quiere mandar (el ClientHello con el pedido ya encolado detrás, las
+  claves, el Finished) se junta en un buffer de salida y se manda **en la misma vuelta**: el
+  saludo son varias idas y vueltas, y esperar al siguiente `poll` las haría más lentas. El fin de
+  la respuesta es el `close_notify` o el FIN de TCP (muchos servidores no mandan el primero; el
+  HTTP dice su largo igual). Si TCP se corta antes de terminar el saludo, es un error. Las
+  imágenes y los nombres `.jarvis` siguen yendo al puente (las convierte; el repositorio vive
+  ahí), y el interruptor "HTTPS por el puente" de Configuración deja el camino viejo de
+  respaldo. El handshake corre en la tarea de la red, cuya pila pasó a 512 KiB. Un certificado
+  vencido o de una autoridad desconocida corta la descarga: la página de error lo dice y no hay
+  "continuar de todos modos". Se prueba en memoria (`net/tests/https.rs`: un servidor rustls con
+  *ring* sobre la placa loopback, con un certificado para 127.0.0.1) y contra sitios reales en
+  `cargo xtask test` con `JARVIS_TEST_INTERNET=1` (example.org llega; expired.badssl.com no).
+- **PNG propio** (`image/src/png.rs` e `inflate.rs`). DEFLATE son dos ideas apiladas: LZ77
+  ("copiá 12 bytes de 300 atrás") y códigos de Huffman (lo frecuente, con menos bits). La
+  sorpresa: los códigos se leen desde el bit menos significativo de cada byte, pero cada código
+  va con su bit más alto primero; por eso la tabla rápida (códigos de hasta 9 bits de una sola
+  consulta) se indexa con el código **invertido**, y los raros de más de 9 bits se decodifican
+  bit a bit como en `puff.c`. Una copia puede pisarse a sí misma (distancia 1, largo 100 = repetir
+  un byte 100 veces), así que se copia byte a byte. Encima de eso PNG filtra cada fila (la
+  diferencia con el píxel de la izquierda, el de arriba, su promedio o el predictor de Paeth),
+  que no comprime nada por sí mismo pero deja números chicos que DEFLATE aprovecha. Se sabe de
+  antemano cuánto tienen que ocupar los píxeles descomprimidos: ese es el tope del inflate, y
+  así un PNG de 1 KB que se descomprime en 4 GB (una "bomba") falla enseguida. Los chunks
+  críticos verifican su CRC; los opcionales no, como hacen los navegadores.
+- **JPEG con `zune-jpeg`**: sin `std` ni SIMD compila tal cual para el kernel. Se pide la salida
+  directo en RGBA y con tope de tamaño (una cabecera de 20 bytes puede decir 65535 × 65535). Su
+  IDCT es entera: el punto flotante por software no lo frena.
+- **Qué va directo y qué al puente**: las imágenes PNG y JPEG se piden sin `X-Jarvis-Imagen` y
+  las decodifica el navegador; las `.svg`, `.gif`, `.webp` e `.ico` van al puente de entrada. Como
+  la dirección no siempre dice el formato (`/foto?id=3`), si lo que llega directo no es PNG,
+  JPEG ni BMP (se mira la firma, no el `Content-Type`), se vuelve a pedir al puente. Las imágenes
+  de la web se achican a 900 px de lado (como hacía el puente) promediando cajas de píxeles,
+  pesando el color por la opacidad para que los bordes transparentes no se oscurezcan. El visor,
+  los fondos de pantalla y `open` también abren PNG y JPEG.
 
 ### K9: multitarea
 - **Una tarea es una pila y un `rsp` guardado**. Cambiar de tarea (`jarvis_switch`, 14
@@ -719,8 +859,11 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K9 terminados; sigue K10 (TLS en el kernel). Son 10 de 15 hitos, pero los que faltan son los más pesados: K11 (espacio de usuario, programas de Linux),
-K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los anteriores juntos.
+**Dónde estamos:** K0–K12 terminados (13 de 15 hitos); sigue K13 (hardware real). Lo último:
+espacio de usuario con programas de Linux estáticos y un intérprete de JavaScript (K11), y audio
+y video (K12): salida por la placa de sonido, mezclador, música, videos y la voz de JARVIS
+sonando en JARVIS-OS. Los que faltan son los más pesados: K13 (hardware real) y K14 (Wi-Fi) son,
+cada uno, más trabajo que varios de los anteriores juntos.
 
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
@@ -734,9 +877,9 @@ K13 (hardware real) y K14 (Wi-Fi) son, cada uno, más trabajo que varios de los 
 | **K7** ✅ | **JARVIS con Claude** (ADR 0008): la consola le habla a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code) y la esfera pulsa con la respuesta ✅; acciones en JARVIS-OS con 3 niveles de permiso ✅; "abrí tal proyecto y seguí" ✅; **voz** con el micrófono y los parlantes del anfitrión (adelantada de K12) ✅; micrófono virtio-sound ✅; cuenta de Claude e inicio de sesión con Google desde Configuración ✅ | Protocolos, agentes, permisos, voz |
 | **K8** ✅ | Paginación propia (tablas de páginas del kernel, no las del bootloader): allocator de marcos, W^X, páginas grandes, `map_mmio` sin caché | Memoria virtual, allocators de frames |
 | **K9** ✅ | Multitarea: planificador con prioridades y desalojo, tareas del kernel con pila propia (escritorio, red, ociosa), disco y red por interrupciones | Cambio de contexto, sincronización |
-| K10 | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo; decodificadores PNG (propio) y JPEG (`zune-jpeg`) | Criptografía, certificados, compresión |
-| K11 | Espacio de usuario: ring 3, syscalls, cargador ELF. Los primeros programas de Linux estáticos; sockets (y el firewall en la pila de red); un intérprete de JavaScript. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
-| K12 | Audio (virtio-sound/HDA) → voz real; la envolvente de la esfera sale del audio; video | Drivers de audio, códecs |
+| **K10** ✅ | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo ✅; decodificadores PNG (propio) y JPEG (`zune-jpeg`) ✅ | Criptografía, certificados, compresión |
+| **K11** ✅ | Espacio de usuario (ADR 0010): ring 3, syscalls, cargador ELF ✅. Los primeros programas de Linux estáticos ✅; sockets (y el firewall en la pila de red) ✅; un intérprete de JavaScript (Boa, `apt install js`) ✅. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
+| **K12** ✅ | Audio y video: salida por virtio-sound con su propia tarea ✅; mezclador, WAV e IMA ADPCM propios ✅; la voz de JARVIS suena en JARVIS-OS y la envolvente de la esfera sale del audio que suena ✅; Música con archivos y el sintetizador ✅; videos AVI (MJPEG + audio) en el Visor ✅. HDA queda para K13 (hardware real) | Drivers de audio, códecs |
 | K13 | Hardware real: placas de red Intel/Realtek, AHCI/NVMe (instalar desde la ISO al disco), USB, ACPI (suspensión S3 de verdad, sensores térmicos por AML), arranque en la PC | Drivers reales |
 | K14 | **Wi-Fi**: un driver de placa real (firmware del fabricante), 802.11 y WPA2. La sincronización no cambia: ya funciona entre redes distintas | Redes inalámbricas, criptografía de enlace |
 

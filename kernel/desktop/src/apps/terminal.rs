@@ -275,6 +275,34 @@ impl Terminal {
         }
     }
 
+    /// La salida o el fin de un programa de Linux lanzado desde esta terminal.
+    pub fn proc_event<D: BlockDevice>(
+        &mut self,
+        ev: &crate::procs::ProcEvent,
+        ctx: &mut Ctx<'_, D>,
+    ) {
+        use crate::procs::ProcEvent;
+        match ev {
+            ProcEvent::Output { pid, data } => {
+                if let Some(text) = self.shell.proc_output(*pid, data) {
+                    self.write(&text);
+                    self.dirty = true;
+                }
+            }
+            ProcEvent::Exited { pid, code, why } => {
+                if let Some(out) = self.shell.proc_exit(*pid, *code, why.as_deref(), ctx) {
+                    // La salida del programa no terminó con un salto de línea: el prompt va abajo.
+                    if !self.partial.is_empty() {
+                        self.write("\n");
+                    }
+                    self.after(out, ctx);
+                    self.dirty = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn tick<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) {
         if let Some(out) = self.shell.tick(ctx) {
             self.after(out, ctx);
@@ -338,6 +366,23 @@ impl Terminal {
         self.last_blink = ctx.now_ms;
         if mods.ctrl {
             match key {
+                Key::Char('c' | 'C') if self.shell.process_pid().is_some() => {
+                    // El programa termina y la shell sigue cuando llegue su fin.
+                    if let Some(pid) = self.shell.process_pid() {
+                        ctx.out.proc_kill.push(pid);
+                    }
+                    self.write("^C\n");
+                    self.input.clear();
+                    self.cursor = 0;
+                    return true;
+                }
+                Key::Char('d' | 'D') if self.shell.process_pid().is_some() => {
+                    // Fin de la entrada del programa.
+                    if let Some(pid) = self.shell.process_pid() {
+                        ctx.out.proc_input.push((pid, Vec::new()));
+                    }
+                    return true;
+                }
                 Key::Char('c' | 'C') => {
                     if self.shell.cancel() {
                         self.write("^C\n");
@@ -392,6 +437,33 @@ impl Terminal {
                     }
                 }
                 _ => return false,
+            }
+            return true;
+        }
+        if let Some(pid) = self.shell.process_pid() {
+            // Un programa corriendo: lo que se tipea es su entrada, de a líneas.
+            match key {
+                Key::Enter => {
+                    let mut line = self.input_string();
+                    self.write(&format!("{line}\n"));
+                    line.push('\n');
+                    ctx.out.proc_input.push((pid, line.into_bytes()));
+                    self.input.clear();
+                    self.cursor = 0;
+                }
+                Key::Char(c) => {
+                    self.input.insert(self.cursor, c);
+                    self.cursor += 1;
+                }
+                Key::Backspace if self.cursor > 0 => {
+                    self.cursor -= 1;
+                    self.input.remove(self.cursor);
+                }
+                Key::Left => self.cursor = self.cursor.saturating_sub(1),
+                Key::Right => self.cursor = (self.cursor + 1).min(self.input.len()),
+                Key::PageUp => self.wheel(-5),
+                Key::PageDown => self.wheel(5),
+                _ => {}
             }
             return true;
         }
@@ -474,7 +546,12 @@ impl Terminal {
         let mut all: Vec<Line> = self.lines.clone();
         let mut last = self.partial.clone();
         let mut cursor = None;
-        if !self.shell.waiting() {
+        if self.shell.process_pid().is_some() {
+            // Lo que se va tipeando para el programa (sin prompt).
+            let start: usize = self.partial.iter().map(|(_, t)| t.chars().count()).sum();
+            last.push((Sgr::default(), self.input_string()));
+            cursor = Some(start + self.cursor);
+        } else if !self.shell.waiting() {
             // El prompt (con colores) y lo escrito.
             let mut tmp = Terminal {
                 dirty: false,

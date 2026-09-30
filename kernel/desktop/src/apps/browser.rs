@@ -422,7 +422,10 @@ impl Browser {
                         let lower = path.to_ascii_lowercase();
                         if lower.ends_with(".html") || lower.ends_with(".htm") {
                             self.show_html(html::decode_bytes(&bytes), ctx);
-                        } else if lower.ends_with(".bmp") {
+                        } else if [".bmp", ".png", ".jpg", ".jpeg"]
+                            .iter()
+                            .any(|e| lower.ends_with(e))
+                        {
                             self.show_image(bytes);
                         } else {
                             self.show_html(html::plain_html(&html::decode_bytes(&bytes)), ctx);
@@ -512,7 +515,7 @@ impl Browser {
     }
 
     fn show_image(&mut self, bytes: Vec<u8>) {
-        match bmp::decode(&bytes) {
+        match bmp::decode_any(&bytes, bmp::DISK_MAX_SIDE) {
             Some(img) => {
                 let prep = html::prepare(
                     "<body style='margin:0;background:#202124;text-align:center'>\
@@ -667,7 +670,9 @@ impl Browser {
             .find(|s| matches!(s, Img::Loading(i) if *i == id))
         {
             *slot = match result {
-                Ok(r) if r.status < 400 => bmp::decode(&r.body).map_or(Img::Failed, Img::Ready),
+                Ok(r) if r.status < 400 => {
+                    bmp::decode_any(&r.body, bmp::WEB_MAX_SIDE).map_or(Img::Failed, Img::Ready)
+                }
                 _ => Img::Failed,
             };
             self.layout = None;

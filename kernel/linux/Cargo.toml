@@ -1,0 +1,12 @@
+[package]
+name = "jarvis-linux"
+description = "La ABI de Linux x86_64 de JARVIS-OS (K11, ADR 0010): cargador de ELF, pila inicial, mapa de memoria y llamadas al sistema. no_std, testeable en el host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

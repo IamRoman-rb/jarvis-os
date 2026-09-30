@@ -42,6 +42,10 @@ pub enum Kind {
     Code,
     Image,
     Archive,
+    /// WAV (K12).
+    Audio,
+    /// AVI (K12).
+    Video,
     Binary,
 }
 
@@ -66,6 +70,8 @@ impl Kind {
             }
             "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" => Kind::Image,
             "zip" | "tar" | "gz" | "7z" | "rar" => Kind::Archive,
+            "wav" => Kind::Audio,
+            "avi" => Kind::Video,
             _ => Kind::Binary,
         }
     }
@@ -79,6 +85,8 @@ impl Kind {
             Kind::Code => tr("código"),
             Kind::Image => tr("imagen"),
             Kind::Archive => tr("archivo comprimido"),
+            Kind::Audio => tr("audio"),
+            Kind::Video => tr("video"),
             Kind::Binary => tr("archivo"),
         }
     }

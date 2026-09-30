@@ -10,6 +10,10 @@
 //! - **Descargas**: el escritorio pide una dirección; acá se resuelve el nombre, se abre la
 //!   conexión TCP, se manda el pedido HTTP, se junta la respuesta y se siguen las redirecciones
 //!   (`jarvis_desktop::web::http::Fetch`).
+//! - **HTTPS** (K10, ADR 0009): con una configuración de TLS ([`Net::set_tls`]), el cifrado lo
+//!   hace el kernel: el cliente de `jarvis_tls` se sienta entre el socket y el HTTP (lo que llega
+//!   se descifra antes de juntarlo; el pedido se cifra antes de mandarlo). Sin ella, o con el
+//!   puente elegido en Configuración, HTTPS va al puente del anfitrión como antes.
 //!
 //! Una sola tarea del kernel (la de la red, K9) llama a [`Net::poll`] cuando llega un paquete
 //! (interrupción), cuando el escritorio pide algo o cuando vence [`Net::poll_delay`].
@@ -20,8 +24,10 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -29,6 +35,7 @@ use jarvis_desktop::web::http::{
     Connect, Fetch, PROXY_HOST, PROXY_PORT, Step, Target, max_body, request_kind,
 };
 use jarvis_desktop::{HttpResponse, NetInfo, NetRequest, StreamEvent, StreamOp};
+use jarvis_tls::{ClientConfig, TlsClient};
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::Device;
 use smoltcp::socket::dns::{self, GetQueryResultError};
@@ -55,12 +62,17 @@ enum Stage {
         host: String,
         port: u16,
         query: Option<dns::QueryHandle>,
+        /// Con TLS (HTTPS hecho por el kernel).
+        tls: bool,
     },
     /// Conexión TCP abierta (o abriéndose): mandando el pedido y juntando la respuesta.
     Transfer {
         socket: SocketHandle,
-        sent: usize,
+        /// Lo que falta mandar por TCP (el pedido, o lo que produjo TLS).
+        out: Vec<u8>,
         established: bool,
+        /// El cliente TLS, si la conexión es HTTPS directa.
+        tls: Option<Box<TlsClient>>,
     },
 }
 
@@ -118,6 +130,10 @@ pub struct Net<D: Device> {
     draining: Vec<(SocketHandle, u64)>,
     next_port: u16,
     proxy: IpEndpoint,
+    /// Configuración de TLS: si está, el kernel hace HTTPS él mismo.
+    tls: Option<Arc<ClientConfig>>,
+    /// El usuario prefiere el puente del anfitrión para HTTPS (Configuración → Red).
+    https_bridge: bool,
 }
 
 fn instant(ms: u64) -> Instant {
@@ -154,6 +170,8 @@ impl<D: Device> Net<D> {
             draining: Vec::new(),
             next_port: 49152,
             proxy: IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::from(PROXY_HOST)), PROXY_PORT),
+            tls: None,
+            https_bridge: false,
         }
     }
 
@@ -173,6 +191,21 @@ impl<D: Device> Net<D> {
     /// A dónde se mandan los pedidos HTTPS (el puente del anfitrión).
     pub fn set_proxy(&mut self, ip: [u8; 4], port: u16) {
         self.proxy = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::from(ip)), port);
+    }
+
+    /// Con `Some`, HTTPS lo hace el kernel (TLS propio); con `None`, va al puente del anfitrión.
+    pub fn set_tls(&mut self, config: Option<Arc<ClientConfig>>) {
+        self.tls = config;
+    }
+
+    /// Mandar igual HTTPS al puente del anfitrión (el interruptor de Configuración).
+    pub fn set_https_bridge(&mut self, on: bool) {
+        self.https_bridge = on;
+    }
+
+    /// ¿Los pedidos HTTPS nuevos los cifra el kernel?
+    pub fn https_direct(&self) -> bool {
+        self.tls.is_some() && !self.https_bridge
     }
 
     pub fn info(&self) -> &NetInfo {
@@ -271,7 +304,7 @@ impl<D: Device> Net<D> {
         req: NetRequest,
         now_ms: u64,
     ) -> Option<(u32, Result<HttpResponse, String>)> {
-        let (fetch, step) = Fetch::start_kind(&req.url, req.kind);
+        let (fetch, step) = Fetch::start_with(&req.url, req.kind, self.https_direct());
         let connect = match step {
             Step::Connect(c) => c,
             Step::Failed(e) => return Some((req.id, Err(e))),
@@ -285,6 +318,7 @@ impl<D: Device> Net<D> {
                 host: String::new(),
                 port: 0,
                 query: None,
+                tls: false,
             },
             since: now_ms,
             raw: Vec::new(),
@@ -301,37 +335,61 @@ impl<D: Device> Net<D> {
         job.request = c.request;
         job.raw.clear();
         job.since = now_ms;
-        match c.target {
+        let (host, port, tls) = match c.target {
             Target::Proxy => {
                 let proxy = self.proxy;
-                job.stage = self.connect(proxy)?;
+                job.stage = self.connect(proxy, None, job.request.clone())?;
+                return Ok(());
             }
-            Target::Direct { host, port } => {
-                // ¿Ya es una dirección IP? Entonces no hace falta DNS.
-                match parse_ipv4(&host) {
-                    Some(ip) => {
-                        let ep = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::from(ip)), port);
-                        job.stage = self.connect(ep)?;
-                    }
-                    None => {
-                        job.stage = Stage::Resolve {
-                            host,
-                            port,
-                            query: None,
-                        }
-                    }
+            Target::Direct { host, port } => (host, port, false),
+            Target::Tls { host, port } => (host, port, true),
+        };
+        // ¿Ya es una dirección IP? Entonces no hace falta DNS.
+        match parse_ipv4(&host) {
+            Some(ip) => {
+                let ep = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::from(ip)), port);
+                let sni = tls.then_some(host.as_str());
+                job.stage = self.connect(ep, sni, job.request.clone())?;
+            }
+            None => {
+                job.stage = Stage::Resolve {
+                    host,
+                    port,
+                    query: None,
+                    tls,
                 }
             }
         }
         Ok(())
     }
 
-    fn connect(&mut self, to: IpEndpoint) -> Result<Stage, String> {
+    /// Abre la conexión TCP. Con `tls_host`, arranca también el cliente TLS (el nombre es el que
+    /// tiene que estar en el certificado): el pedido queda esperando, cifrado, detrás del saludo.
+    fn connect(
+        &mut self,
+        to: IpEndpoint,
+        tls_host: Option<&str>,
+        request: Vec<u8>,
+    ) -> Result<Stage, String> {
+        let (out, tls) = match tls_host {
+            None => (request, None),
+            Some(host) => {
+                let config = self
+                    .tls
+                    .clone()
+                    .ok_or("el kernel no tiene TLS (falta entropía o la hora)")?;
+                let mut client =
+                    TlsClient::new(config, host).map_err(|e| format!("{host}: {e}"))?;
+                client.send(&request).map_err(|e| format!("{host}: {e}"))?;
+                (client.take_outgoing(), Some(Box::new(client)))
+            }
+        };
         let handle = self.open_socket(to, TCP_RX, TCP_TX)?;
         Ok(Stage::Transfer {
             socket: handle,
-            sent: 0,
+            out,
             established: false,
+            tls,
         })
     }
 
@@ -591,6 +649,7 @@ impl<D: Device> Net<D> {
                 host: String::new(),
                 port: 0,
                 query: None,
+                tls: false,
             };
         }
     }
@@ -607,7 +666,12 @@ impl<D: Device> Net<D> {
             });
         }
         match &mut job.stage {
-            Stage::Resolve { host, port, query } => {
+            Stage::Resolve {
+                host,
+                port,
+                query,
+                tls,
+            } => {
                 if self.info.dns.is_none() && self.dhcp.is_some() {
                     return Ok(None); // todavía no hay DNS (esperando al DHCP)
                 }
@@ -633,7 +697,8 @@ impl<D: Device> Net<D> {
                             })
                             .ok_or_else(|| format!("{host} no tiene dirección IPv4"))?;
                         let ep = IpEndpoint::new(IpAddress::Ipv4(ip), *port);
-                        job.stage = self.connect(ep)?;
+                        let sni = tls.then(|| host.clone());
+                        job.stage = self.connect(ep, sni.as_deref(), job.request.clone())?;
                         job.since = now_ms;
                         Ok(None)
                     }
@@ -643,7 +708,7 @@ impl<D: Device> Net<D> {
                         // el nombre con el DNS de la computadora anfitriona.
                         let request = request_kind(&job.fetch.url, true, job.fetch.kind);
                         let proxy = self.proxy;
-                        match self.connect(proxy) {
+                        match self.connect(proxy, None, request.clone()) {
                             Ok(stage) => {
                                 job.request = request;
                                 job.stage = stage;
@@ -658,18 +723,15 @@ impl<D: Device> Net<D> {
             }
             Stage::Transfer {
                 socket,
-                sent,
+                out,
                 established,
+                tls,
             } => {
                 let s = self.sockets.get_mut::<tcp::Socket>(*socket);
                 if s.state() == tcp::State::Established {
                     *established = true;
                 }
-                if s.can_send() && *sent < job.request.len() {
-                    *sent += s
-                        .send_slice(&job.request[*sent..])
-                        .map_err(|e| format!("error al mandar el pedido: {e:?}"))?;
-                }
+                send_pending(s, out)?;
                 while s.can_recv() {
                     let mut buf = [0u8; 4096];
                     let n = s.recv_slice(&mut buf).map_err(|e| format!("{e:?}"))?;
@@ -677,7 +739,16 @@ impl<D: Device> Net<D> {
                         break;
                     }
                     *established = true;
-                    job.raw.extend_from_slice(&buf[..n]);
+                    match tls {
+                        Some(c) => {
+                            // Descifrar; el handshake puede contestar algo (Finished, claves).
+                            c.receive(&buf[..n])
+                                .map_err(|e| format!("conexión segura: {e}"))?;
+                            job.raw.extend_from_slice(&c.take_plaintext());
+                            out.extend_from_slice(&c.take_outgoing());
+                        }
+                        None => job.raw.extend_from_slice(&buf[..n]),
+                    }
                     job.since = now_ms; // mientras lleguen datos, no vence
                     let max = max_body(job.fetch.kind);
                     if job.raw.len() > max {
@@ -687,7 +758,21 @@ impl<D: Device> Net<D> {
                         ));
                     }
                 }
-                let finished = *established && !s.may_recv() && !s.can_recv();
+                // Lo que TLS contestó sale en esta misma vuelta (el saludo son varias idas y
+                // vueltas: esperar a la próxima las haría más lentas).
+                send_pending(s, out)?;
+                let tcp_done = *established && !s.may_recv() && !s.can_recv();
+                if let Some(c) = tls
+                    && tcp_done
+                    && !c.is_established()
+                {
+                    return Err(
+                        "el servidor cortó la conexión segura antes de terminar el saludo".into(),
+                    );
+                }
+                // Con TLS, el servidor avisa que terminó con close_notify; muchos cierran TCP
+                // sin mandarlo, y la respuesta HTTP igual dice su largo.
+                let finished = tcp_done || tls.as_ref().is_some_and(|c| c.peer_closed());
                 if !*established && s.state() == tcp::State::Closed {
                     return Err(if job.via_proxy_fallback {
                         "el DNS no respondió y el puente del anfitrión no está (¿QEMU se abrió sin cargo xtask run?)".into()
@@ -711,6 +796,7 @@ impl<D: Device> Net<D> {
                             host: String::new(),
                             port: 0,
                             query: None,
+                            tls: false,
                         };
                         self.begin(job, c, now_ms)?;
                         Ok(None)
@@ -719,6 +805,17 @@ impl<D: Device> Net<D> {
             }
         }
     }
+}
+
+/// Manda lo que entre en el buffer del socket.
+fn send_pending(s: &mut tcp::Socket, out: &mut Vec<u8>) -> Result<(), String> {
+    if s.can_send() && !out.is_empty() {
+        let n = s
+            .send_slice(out)
+            .map_err(|e| format!("error al mandar el pedido: {e:?}"))?;
+        out.drain(..n);
+    }
+    Ok(())
 }
 
 /// "10.0.2.2" → [10, 0, 2, 2]

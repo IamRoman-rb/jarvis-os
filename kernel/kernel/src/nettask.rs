@@ -8,6 +8,10 @@
 //! El escritorio y la red se hablan por dos colas (**paso de mensajes**): pedidos para allá
 //! (descargas y conexiones largas) y respuestas para acá. Ninguno toca los datos del otro; lo
 //! único compartido son las colas, cada una con su `IrqMutex`, tomadas solo para meter o sacar.
+//!
+//! HTTPS (K10): si `tls::init` pudo armar la configuración, el TLS lo hace esta tarea (el
+//! handshake corre acá, no en el escritorio). El interruptor de Configuración que manda HTTPS
+//! al puente del anfitrión llega por [`set_https_bridge`].
 
 use alloc::collections::VecDeque;
 use alloc::string::String;
@@ -20,7 +24,7 @@ use jarvis_task::Priority;
 
 use crate::irqlock::IrqMutex;
 use crate::virtio_net::VirtioNet;
-use crate::{serial_println, task, time};
+use crate::{serial_println, task, time, tls};
 
 /// Lo que la tarea de la red le devuelve al escritorio.
 pub enum Answer {
@@ -37,10 +41,13 @@ static ORDERS: IrqMutex<VecDeque<Order>> = IrqMutex::new(VecDeque::new());
 static ANSWERS: IrqMutex<Vec<Answer>> = IrqMutex::new(Vec::new());
 /// El estado de la placa (IP, DNS), copiado para el escritorio. `None`: no hay placa.
 static INFO: IrqMutex<Option<NetInfo>> = IrqMutex::new(None);
+/// HTTPS por el puente del anfitrión (Configuración → Red) en vez del TLS del kernel.
+static HTTPS_BRIDGE: AtomicBool = AtomicBool::new(false);
 static FIRST_IRQ: AtomicBool = AtomicBool::new(true);
 
-/// Pila de la tarea: smoltcp y el HTTP no usan mucha (lo grande va en el heap).
-const STACK: usize = 256 * 1024;
+/// Pila de la tarea: smoltcp y el HTTP no usan mucha (lo grande va en el heap), pero el
+/// handshake de TLS sí (RSA y las curvas elípticas guardan números grandes en la pila).
+const STACK: usize = 512 * 1024;
 /// Aunque no pase nada, se revisa cada tanto: los plazos de las descargas (20 s) y los
 /// reintentos de DNS se miran en `poll`, que `poll_delay` no conoce.
 const MAX_SLEEP_MS: u64 = 50;
@@ -61,6 +68,11 @@ pub fn present() -> bool {
 
 pub fn fetch(req: NetRequest) {
     ORDERS.with(|q| q.push_back(Order::Fetch(req)));
+}
+
+/// Lo pone el escritorio en cada cuadro (es un bool: más barato que avisar solo si cambia).
+pub fn set_https_bridge(on: bool) {
+    HTTPS_BRIDGE.store(on, Ordering::Relaxed);
 }
 
 pub fn stream(op: StreamOp) {
@@ -85,8 +97,18 @@ pub fn info() -> NetInfo {
 fn run(mut net: Net<VirtioNet>) {
     let mut last_ip = None;
     let mut busy = 0;
+    net.set_tls(tls::config());
+    serial_println!(
+        "RED_HTTPS {}",
+        if net.https_direct() {
+            "TLS del kernel"
+        } else {
+            "por el puente del anfitrión (sin TLS en el kernel)"
+        }
+    );
     loop {
         let now = time::millis();
+        net.set_https_bridge(HTTPS_BRIDGE.load(Ordering::Relaxed));
         let orders = ORDERS.with(core::mem::take);
         let mut out = Vec::new();
         for order in orders {

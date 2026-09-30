@@ -1,0 +1,2 @@
+# El interprete de JavaScript (motor Boa), un programa de Linux compilado desde kernel/usuario/.
+usuario:js -> /Programas/bin/js

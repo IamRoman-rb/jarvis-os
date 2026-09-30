@@ -292,6 +292,7 @@ impl Brave {
     fn launch(exe: &PathBuf, profile: &PathBuf, w: u16, h: u16) -> Result<Brave, String> {
         std::fs::create_dir_all(profile).map_err(|e| e.to_string())?;
         kill_orphans(profile);
+        set_aside_sessions(profile);
         let port_file = profile.join("DevToolsActivePort");
         let _ = std::fs::remove_file(&port_file);
         let child = Command::new(exe)
@@ -860,6 +861,28 @@ fn kill_orphans(profile: &std::path::Path) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+/// Aparta las pestañas guardadas de la corrida anterior para que Brave no las restaure.
+///
+/// Desde Brave 154 (2026-09), restaurar varias pestañas en modo headless lo hace crashear al
+/// poco de conectar DevTools (volcados en `Crashpad/reports`), y además se acumulaba una pestaña
+/// por corrida. No hay un switch que lo apague: ni `--no-startup-window` sirve, porque Chromium
+/// restaura igual al abrir la primera ventana. `Default/Sessions` guarda solo las pestañas; las
+/// cookies y las sesiones iniciadas están en otros archivos y no se tocan. Se mueve (no se
+/// borra) a `Sessions.anterior`, que guarda las de la última corrida por si hicieran falta.
+fn set_aside_sessions(profile: &std::path::Path) {
+    let dir = profile.join("Default");
+    let sessions = dir.join("Sessions");
+    if !sessions.exists() {
+        return;
+    }
+    let previous = dir.join("Sessions.anterior");
+    // Solo se reemplaza la copia que dejó este mismo puente en la corrida de antes.
+    let _ = std::fs::remove_dir_all(&previous);
+    if let Err(e) = std::fs::rename(&sessions, &previous) {
+        eprintln!("[brave] no se pudieron apartar las pestañas guardadas: {e}");
+    }
 }
 
 fn button_name(b: Button) -> &'static str {

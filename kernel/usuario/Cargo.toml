@@ -1,0 +1,24 @@
+# Programas de Linux para probar el espacio de usuario de JARVIS-OS (K11, ADR 0010).
+# Es un workspace aparte: se compila para x86_64-unknown-linux-musl (estático, con la biblioteca
+# estándar entera) y se enlaza con rust-lld, sin compilador de C. Lo arma `cargo xtask usuario`.
+[workspace]
+
+[package]
+name = "jarvis-usuario"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[profile.release]
+opt-level = "s"
+panic = "abort"
+strip = true
+lto = true
+codegen-units = 1
+
+[dependencies]
+# El intérprete de JavaScript (`js`): el motor Boa, escrito en Rust.
+# Sin Temporal ni Intl (datos de zonas horarias e idiomas: megas que no hacen falta) ni fetch.
+boa_engine = { version = "0.22", default-features = false }
+boa_runtime = { version = "0.22", default-features = false }

@@ -1895,8 +1895,13 @@ impl Shell {
         let lower = p.to_lowercase();
         let launch = if st.is_dir || p == "/" {
             Launch::Folder(p)
-        } else if lower.ends_with(".bmp") {
+        } else if [".bmp", ".png", ".jpg", ".jpeg", ".avi"]
+            .iter()
+            .any(|e| lower.ends_with(e))
+        {
             Launch::View(p)
+        } else if lower.ends_with(".wav") {
+            Launch::Play(p)
         } else if lower.ends_with(".html") || lower.ends_with(".htm") {
             Launch::Browse(format!("file://{p}"))
         } else {
@@ -2011,6 +2016,9 @@ impl Shell {
                 return Res::Code(126);
             }
         };
+        if binfmt::runnable(&data) {
+            return self.spawn_program(argv, &path, stdin, ctx, e);
+        }
         if let Some(why) = binfmt::why_not(&data) {
             e.push_str(&why);
             e.push('\n');
@@ -2032,6 +2040,62 @@ impl Shell {
                 Res::Code(126)
             }
         }
+    }
+
+    /// Un programa de Linux (K11): se lee entero y se le pide al kernel que lo corra. La shell
+    /// queda esperando a que termine.
+    fn spawn_program<D: BlockDevice>(
+        &mut self,
+        argv: &[String],
+        path: &str,
+        stdin: Option<&str>,
+        ctx: &mut Ctx<'_, D>,
+        e: &mut String,
+    ) -> Res {
+        if self.no_wait > 0 {
+            e.push_str(&format!(
+                "{}: los programas de Linux no pueden correr adentro de $(...) ni de un script\n",
+                argv[0]
+            ));
+            return Res::Code(126);
+        }
+        let Some(fs) = Self::fs(ctx, e) else {
+            return Res::Code(1);
+        };
+        let image = match fs.read_file(path) {
+            Ok(d) => d,
+            Err(err) => {
+                e.push_str(&format!("{}: {err}\n", argv[0]));
+                return Res::Code(126);
+            }
+        };
+        let envp = [
+            "HOME", "USER", "LOGNAME", "HOSTNAME", "PATH", "SHELL", "TERM", "LANG", "PWD",
+        ]
+        .iter()
+        .filter_map(|k| self.var(k).map(|v| format!("{k}={v}")))
+        .collect();
+        let pid = ctx.out.spawn(crate::procs::SpawnRequest {
+            pid: 0,
+            path: path.to_string(),
+            image,
+            argv: argv.to_vec(),
+            envp,
+            cwd: self.cwd.clone(),
+            size: (24, self.cols.min(u16::MAX as usize) as u16),
+        });
+        ctx.log.push(format!("TERMINAL_PROGRAMA {pid} {path}"));
+        // Con una entrada de una tubería (`echo hola | programa`), esa es toda su entrada.
+        if let Some(input) = stdin {
+            if !input.is_empty() {
+                ctx.out.proc_input.push((pid, input.as_bytes().to_vec()));
+            }
+            ctx.out.proc_input.push((pid, Vec::new()));
+        }
+        Res::Wait(Job::Process {
+            pid,
+            buf: String::new(),
+        })
     }
 
     pub(crate) fn find_program<D: BlockDevice>(

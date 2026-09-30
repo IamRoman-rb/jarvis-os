@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import array
 import math
+import time
+from collections.abc import Callable
 
 RATE = 16_000
 #: Pedazos de 80 ms: lo que espera openWakeWord.
@@ -208,3 +210,40 @@ def for_speech(text: str) -> str:
     t = re.sub(r"\s*\n\s*", ". ", t.strip())
     t = re.sub(r"\.(\s*\.)+", ".", t)
     return re.sub(r"[ \t]+", " ", t).strip()
+
+
+def send_paced(
+    pcm: bytes,
+    rate: int,
+    send: Callable[[int, bytes], None],
+    stop: Callable[[], bool],
+    piece_ms: int = 200,
+    lead_ms: int = 300,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> bool:
+    """Manda `pcm` (mono, 16 bits, a `rate` Hz) de a pedazos de `piece_ms`, al ritmo en que suena.
+
+    JARVIS-OS reproduce la voz (K12): no hace falta mandarle todo de golpe, y mandarlo al ritmo
+    del audio (con `lead_ms` de ventaja, para que nunca le falte) tiene dos ventajas: callar
+    (`stop`) corta enseguida, y quien llama sabe cuándo terminó de sonar (el micrófono no se
+    escucha a sí mismo mientras tanto). Devuelve `False` si se cortó.
+    """
+    step = max(2, rate * piece_ms // 1000 * 2)
+    start = clock()
+    sent_ms = 0.0
+    for i in range(0, len(pcm), step):
+        ahead = sent_ms - (clock() - start) * 1000
+        if ahead > lead_ms:
+            sleep((ahead - lead_ms) / 1000)
+        if stop():
+            return False
+        piece = pcm[i : i + step]
+        send(rate, piece)
+        sent_ms += len(piece) // 2 * 1000 / rate
+    # Esperar a que termine de sonar.
+    while (remaining := sent_ms - (clock() - start) * 1000) > 0:
+        if stop():
+            return False
+        sleep(min(0.05, remaining / 1000))
+    return True

@@ -38,6 +38,13 @@ pub fn tsc_to_us(cycles: u64) -> u64 {
     cycles * 1000 / per_ms
 }
 
+/// Nanosegundos desde la calibración (para el reloj monótono de los programas).
+pub fn nanos() -> u64 {
+    let per_ms = TSC_PER_MS.load(Ordering::Relaxed).max(1) as u128;
+    let cycles = rdtsc().saturating_sub(TSC_START.load(Ordering::Relaxed)) as u128;
+    (cycles * 1_000_000 / per_ms) as u64
+}
+
 pub fn millis() -> u64 {
     let per_ms = TSC_PER_MS.load(Ordering::Relaxed);
     if per_ms == 0 {

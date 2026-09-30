@@ -1,0 +1,21 @@
+[package]
+name = "jarvis-image"
+description = "Decodificadores de imágenes de JARVIS-OS (K10, ADR 0009): PNG propio (inflate incluido) y JPEG con zune-jpeg. no_std, testeable en el host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# JPEG (ADR 0009): sin std ni SIMD (el kernel compila sin SSE ni AVX).
+zune-jpeg = { version = "0.5", default-features = false }
+zune-core = { version = "0.5", default-features = false }
+
+[dev-dependencies]
+# Referencias para los tests cruzados: otra implementación codifica y decodifica.
+png = "0.18"
+miniz_oxide = "0.8"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[lints]
+workspace = true

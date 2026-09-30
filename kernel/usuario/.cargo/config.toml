@@ -1,0 +1,8 @@
+# Programas de Linux estáticos (musl) enlazados con rust-lld y los objetos de musl que trae Rust:
+# así se compilan desde Windows, macOS o Linux sin un compilador de C ni una libc instalada.
+[build]
+target = "x86_64-unknown-linux-musl"
+
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes"]

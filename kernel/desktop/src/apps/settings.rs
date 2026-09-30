@@ -184,6 +184,7 @@ pub enum Opt {
     Search,
     LightPages,
     Images,
+    HttpsBridge,
     Reader,
     Sounds,
     TestSound,
@@ -688,10 +689,10 @@ impl Settings {
                         ))
                     ),
                     Row::new(
-                        Opt::Info,
-                        "HTTPS",
-                        tr("El kernel todavía no tiene TLS: usa el puente del anfitrión"),
-                        Value("10.0.2.2:8118".into())
+                        Opt::HttpsBridge,
+                        tr("HTTPS por el puente"),
+                        tr("El kernel cifra él mismo; con esto, lo hace el anfitrión"),
+                        on(c.https_bridge)
                     ),
                     Row::new(
                         Opt::TestNet,
@@ -1705,6 +1706,7 @@ impl Settings {
             }
             Opt::LightPages => c.light_pages = !c.light_pages,
             Opt::Images => c.load_images = !c.load_images,
+            Opt::HttpsBridge => c.https_bridge = !c.https_bridge,
             Opt::Reader => c.reader_mode = !c.reader_mode,
             Opt::Sounds => c.sounds = !c.sounds,
             Opt::TestSound => {
@@ -2014,12 +2016,17 @@ fn wallpaper_name(w: &Wallpaper) -> String {
     }
 }
 
-/// Imágenes BMP en /Imágenes/Fondos y /Imágenes.
+/// Imágenes (BMP, PNG y JPEG) en /Imágenes/Fondos y /Imágenes.
 fn find_wallpapers<D: BlockDevice>(fs: &mut FileSystem<D>) -> Vec<String> {
     let mut out = Vec::new();
     for dir in ["/Imágenes/Fondos", "/Imágenes"] {
         for e in fs.list(dir).unwrap_or_default() {
-            if !e.is_dir && e.name.to_ascii_lowercase().ends_with(".bmp") {
+            let lower = e.name.to_ascii_lowercase();
+            if !e.is_dir
+                && [".bmp", ".png", ".jpg", ".jpeg"]
+                    .iter()
+                    .any(|x| lower.ends_with(x))
+            {
                 out.push(join(dir, &e.name));
             }
         }

@@ -204,6 +204,61 @@ impl PageTable {
         Some(leaf)
     }
 
+    /// Cambia los permisos de la página chica que mapea `virt` (la dirección física queda).
+    /// Devuelve la hoja como estaba. Después hay que invalidar la TLB.
+    pub fn set_flags(&self, mem: &mut dyn PhysMem, virt: u64, flags: u64) -> Option<Leaf> {
+        let leaf = self.leaf(mem, virt)?;
+        if leaf.size != Size::Small {
+            return None;
+        }
+        let mut table = self.root;
+        for level in (2..=4).rev() {
+            table = mem.read(table + index(virt, level) as u64 * 8) & ADDR_MASK;
+        }
+        mem.write(
+            table + index(virt, 1) as u64 * 8,
+            leaf.phys | (flags & !ADDR_MASK) | flags::PRESENT,
+        );
+        Some(leaf)
+    }
+
+    /// Saca los mapeos de páginas chicas en `[start, end)` y llama a `f` con cada una (para
+    /// liberar su marco). Solo recorre las tablas que existen: desmapear 1 GiB vacío es
+    /// instantáneo. Las tablas intermedias quedan.
+    pub fn unmap_range(
+        &self,
+        mem: &mut dyn PhysMem,
+        start: u64,
+        end: u64,
+        f: &mut dyn FnMut(Leaf),
+    ) {
+        unmap_level(mem, self.root, 4, 0, start, end, f);
+    }
+
+    /// Libera todo lo que cuelga de la entrada `slot` de la PML4: llama a `f` con cada hoja (su
+    /// marco es del llamador), devuelve al allocator las tablas intermedias y deja la entrada en
+    /// cero. Así se desarma el espacio de un proceso sin tocar la mitad del kernel.
+    pub fn free_slot(
+        &self,
+        mem: &mut dyn PhysMem,
+        frames: &mut FrameAllocator,
+        slot: usize,
+        f: &mut dyn FnMut(Leaf),
+    ) {
+        let e = mem.read(self.root + slot as u64 * 8);
+        if e & flags::PRESENT != 0 && e & flags::HUGE == 0 {
+            free_level(
+                mem,
+                frames,
+                e & ADDR_MASK,
+                3,
+                canonical((slot as u64) << 39),
+                f,
+            );
+        }
+        mem.write(self.root + slot as u64 * 8, 0);
+    }
+
     /// Todas las hojas, en orden de dirección virtual.
     pub fn walk(&self, mem: &dyn PhysMem, f: &mut dyn FnMut(Leaf)) {
         walk_level(mem, self.root, 4, 0, f);
@@ -251,4 +306,73 @@ fn count_tables(mem: &dyn PhysMem, table: u64, level: usize) -> usize {
         }
     }
     n
+}
+
+fn unmap_level(
+    mem: &mut dyn PhysMem,
+    table: u64,
+    level: usize,
+    base: u64,
+    start: u64,
+    end: u64,
+    f: &mut dyn FnMut(Leaf),
+) {
+    let span = 1u64 << (12 + 9 * (level - 1));
+    for i in 0..512u64 {
+        let virt = canonical(base | (i << (12 + 9 * (level - 1))));
+        // Sin la forma canónica para comparar: las direcciones de usuario son bajas.
+        let lo = base | (i * span);
+        if lo >= end || lo + span <= start {
+            continue;
+        }
+        let slot = table + i * 8;
+        let e = mem.read(slot);
+        if e & flags::PRESENT == 0 {
+            continue;
+        }
+        if level == 1 {
+            mem.write(slot, 0);
+            f(Leaf {
+                virt,
+                phys: e & ADDR_MASK,
+                size: Size::Small,
+                flags: e & !ADDR_MASK,
+            });
+        } else if e & flags::HUGE == 0 {
+            unmap_level(mem, e & ADDR_MASK, level - 1, lo, start, end, f);
+        }
+    }
+}
+
+fn free_level(
+    mem: &mut dyn PhysMem,
+    frames: &mut FrameAllocator,
+    table: u64,
+    level: usize,
+    base: u64,
+    f: &mut dyn FnMut(Leaf),
+) {
+    for i in 0..512u64 {
+        let e = mem.read(table + i * 8);
+        if e & flags::PRESENT == 0 {
+            continue;
+        }
+        let virt = canonical(base | (i << (12 + 9 * (level - 1))));
+        let size = match level {
+            1 => Some(Size::Small),
+            2 if e & flags::HUGE != 0 => Some(Size::Large),
+            3 if e & flags::HUGE != 0 => Some(Size::Huge),
+            _ => None,
+        };
+        match size {
+            Some(size) => f(Leaf {
+                virt,
+                phys: e & ADDR_MASK & !(size.bytes() - 1),
+                size,
+                flags: e & !ADDR_MASK & !flags::HUGE,
+            }),
+            None => free_level(mem, frames, e & ADDR_MASK, level - 1, virt, f),
+        }
+    }
+    frames.free(table);
 }

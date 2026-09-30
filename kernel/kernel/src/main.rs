@@ -23,6 +23,7 @@
 extern crate alloc;
 
 mod allocator;
+mod audio;
 mod cpu;
 mod display;
 mod entropy;
@@ -37,10 +38,12 @@ mod paging;
 mod pci;
 mod pit;
 mod power;
+mod process;
 mod queue;
 mod rtc;
 mod serial;
 mod speaker;
+mod syscall;
 mod task;
 mod time;
 mod tls;
@@ -200,6 +203,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             " (sin W^X: no se pudo leer el ELF)"
         }
     );
+    // K11: `syscall`/`sysret` y SSE para los programas del anillo 3.
+    syscall::init();
+    if pg.user_space {
+        serial_println!("ESPACIO_USUARIO listo: los primeros 512 GiB son de los procesos");
+    } else {
+        serial_println!("ESPACIO_USUARIO no disponible (la memoria baja está ocupada)");
+    }
     // K10: entropía para las claves de TLS (RDSEED/RDRAND si hay, y la variación del TSC).
     let e = entropy::init();
     serial_println!(
@@ -291,10 +301,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Placa de video con varias salidas (virtio-gpu). Sin ella, la pantalla del firmware.
     // Micrófono (virtio-sound). Sin placa, Configuración → Micrófono lo dice.
-    let mic = virtio_sound::Mic::init(phys_offset);
+    // Micrófono y parlantes (virtio-sound). Los parlantes los alimenta su propia tarea (K12).
+    let (mic, speaker) = virtio_sound::init(phys_offset);
     if mic.is_none() {
         serial_println!("microfono: no hay placa virtio-sound");
     }
+    let sound_rate = match speaker {
+        Some(sp) => Some(audio::start(sp)),
+        None => {
+            serial_println!("parlantes: no hay salida de audio virtio-sound");
+            None
+        }
+    };
 
     let mut gpu = virtio_gpu::VirtioGpu::init(phys_offset);
     let mut outputs: Vec<(u32, u32)> = Vec::new();
@@ -369,6 +387,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut surfaces = display::Surfaces::new(&firmware, gpu, capacity);
 
     let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
+    if let Some(rate) = sound_rate {
+        desktop.enable_sound(rate);
+    }
     // El cerebro de JARVIS en el anfitrión (si `cargo xtask run` lo levantó).
     if let Some((port, token)) = fw_cfg::brain() {
         serial_println!("cerebro: en el anfitrión, puerto {port}");
@@ -413,6 +434,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     run(&mut desktop, &mut surfaces, base, decoder, thermal, mic)
 }
 
+/// Lo que dejaron los programas (salida, pedidos de archivos, consola y red) pasa al escritorio,
+/// y sus respuestas vuelven a los programas (K11).
+fn serve_processes(desktop: &mut Desktop<Disk>) {
+    for ev in process::take_events() {
+        desktop.proc_event(ev);
+    }
+    for (pid, reply) in desktop.take_proc_replies() {
+        process::reply(pid, reply);
+    }
+}
+
 /// Un frame que tarda más que esto se anota en el log.
 const SLOW_FRAME_MS: u64 = 300;
 
@@ -440,9 +472,16 @@ fn run(
 
     desktop.start(time::millis());
     loop {
-        // Dormir hasta el próximo cuadro (~60 por segundo): mientras tanto corren la red o la
-        // tarea ociosa (K9). Antes esto era un `hlt` que despertaba cada 4 ms.
-        task::sleep_until(next_frame);
+        // Dormir hasta el próximo cuadro (~60 por segundo): mientras tanto corren la red, los
+        // programas o la tarea ociosa (K9). Pero si un programa pide algo (un archivo, K11), se
+        // lo atiende enseguida: él está esperando esa respuesta.
+        loop {
+            let woke = task::wait(task::EV_PROC, Some(next_frame));
+            serve_processes(desktop);
+            if woke & task::EV_PROC == 0 || time::millis() >= next_frame {
+                break;
+            }
+        }
         let now = time::millis();
         next_frame = now + FRAME_MS;
 
@@ -453,9 +492,16 @@ fn run(
                 nettask::Answer::Stream(id, event) => desktop.stream_event(id, event),
             }
         }
+        serve_processes(desktop);
 
         // El micrófono (buffers de 20 ms, cuatro en la cola: alcanza con mirarlo por cuadro); el
         // nivel va al escritorio 10 veces por segundo (el medidor de Configuración → Micrófono).
+        // K12: el audio que falta para los parlantes (la tarea "audio" lo lleva a la placa).
+        desktop.set_audio_played(audio::played());
+        let room = audio::room();
+        if room > 0 {
+            audio::fill(desktop.audio_render(room));
+        }
         if let Some(m) = mic.as_mut() {
             m.poll();
             if now - last_mic >= 100 {
@@ -531,6 +577,19 @@ fn run(
                 );
             }
         }
+        // K11: programas de Linux que pidió la Terminal, y los que hay que terminar.
+        for req in requests.spawn {
+            let pid = req.pid;
+            if let Err(why) = process::spawn(req) {
+                serial_println!("PROCESO_ERROR {} {}", pid, why);
+                desktop.spawn_failed(pid, why);
+            }
+        }
+        for pid in requests.kill {
+            process::kill(pid);
+        }
+        serve_processes(desktop);
+        nettask::set_https_bridge(desktop.config().https_bridge);
         // Un solo aviso por cuadro a la tarea de la red (si hubo pedidos).
         nettask::kick();
         // Otro reparto de los monitores (Win+P, Configuración → Pantallas).
@@ -590,12 +649,13 @@ fn run(
             desktop.set_stats(stats.clone());
             if now - last_report >= REPORT_MS {
                 serial_println!(
-                    "rendimiento: {} fps, {} ms por frame, CPU {} %, heap {} MiB, {} cambios de contexto",
+                    "rendimiento: {} fps, {} ms por frame, CPU {} %, heap {} MiB, {} cambios de contexto, {} cortes de audio",
                     stats.fps,
                     stats.frame_ms,
                     stats.cpu_pct,
                     heap_used / (1024 * 1024),
-                    switches
+                    switches,
+                    audio::underruns()
                 );
                 last_report = now;
             }

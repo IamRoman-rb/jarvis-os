@@ -1,0 +1,3 @@
+# Musica de ejemplo (sintetica, generada por generar_multimedia.py): K12.
+tema.wav -> /Música/Tema de JARVIS.wav
+escala.wav -> /Música/Escala.wav

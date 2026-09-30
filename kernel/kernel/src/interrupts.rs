@@ -13,6 +13,9 @@
 //!
 //! Disco y red avisan por su línea PCI (INTx), que eligió el firmware y puede ser compartida:
 //! el manejador de una línea le pregunta a cada dispositivo anotado en ella si fue él.
+//! Una excepción que viene de un **programa** (anillo 3, K11) no es un error del kernel: un fallo
+//! de página puede ser memoria que se asigna al primer uso (process.rs), y cualquier otra
+//! termina ese programa con la señal que le correspondería en Linux (SIGSEGV, SIGILL, SIGFPE).
 //! Referencia: <https://wiki.osdev.org/Interrupts>, <https://wiki.osdev.org/8259_PIC> y
 //! <https://wiki.osdev.org/PCI#Interrupt_Line>.
 
@@ -23,7 +26,22 @@ use spin::{Mutex, Once};
 use x86_64::instructions::port::Port;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
-use crate::{gdt, keyboard, mouse, paging, serial_println, task};
+use crate::{gdt, keyboard, mouse, paging, process, serial_println, task};
+
+/// ¿La interrupción llegó mientras corría un programa?
+fn from_user(frame: &InterruptStackFrame) -> bool {
+    frame.code_segment.rpl() == x86_64::PrivilegeLevel::Ring3
+}
+
+/// Termina el programa que causó la excepción, con la señal de Linux que le toca.
+fn user_exception(frame: &InterruptStackFrame, signal: i32, what: &str) -> ! {
+    serial_println!(
+        "PROCESO_EXCEPCION {} en {:#x}",
+        what,
+        frame.instruction_pointer.as_u64()
+    );
+    process::kill_current(128 + signal, what)
+}
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -47,6 +65,12 @@ pub fn init() {
     let idt = IDT.call_once(|| {
         let mut idt = InterruptDescriptorTable::new();
         idt.breakpoint.set_handler_fn(breakpoint);
+        idt.divide_error.set_handler_fn(divide_error);
+        idt.invalid_opcode.set_handler_fn(invalid_opcode);
+        idt.x87_floating_point.set_handler_fn(x87_floating_point);
+        idt.simd_floating_point.set_handler_fn(simd_floating_point);
+        idt.stack_segment_fault.set_handler_fn(stack_segment_fault);
+        idt.alignment_check.set_handler_fn(alignment_check);
         idt.page_fault.set_handler_fn(page_fault);
         idt.general_protection_fault
             .set_handler_fn(general_protection);
@@ -84,12 +108,74 @@ extern "x86-interrupt" fn breakpoint(frame: InterruptStackFrame) {
 
 extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, code: PageFaultErrorCode) {
     let addr = x86_64::registers::control::Cr2::read();
+    if from_user(&frame) {
+        let a = addr.map_or(0, |a| a.as_u64());
+        let write = code.contains(PageFaultErrorCode::CAUSED_BY_WRITE);
+        let exec = code.contains(PageFaultErrorCode::INSTRUCTION_FETCH);
+        // Solo si la página no estaba: una página presente sin permiso es una violación.
+        if !code.contains(PageFaultErrorCode::PROTECTION_VIOLATION)
+            && process::user_fault(a, write, exec)
+        {
+            return;
+        }
+        serial_println!(
+            "PROCESO_SEGV en {:#x} (acceso a {:#x})",
+            frame.instruction_pointer.as_u64(),
+            a
+        );
+        process::kill_current(128 + 11, "Violacion de segmento");
+    }
     stack_overflow_check();
     panic!("fallo de página en {:?} ({:?})\n{:#?}", addr, code, frame);
 }
 
 extern "x86-interrupt" fn general_protection(frame: InterruptStackFrame, code: u64) {
+    if from_user(&frame) {
+        user_exception(&frame, 11, "Violacion de segmento (proteccion general)");
+    }
     panic!("fallo de protección general (código {code})\n{:#?}", frame);
+}
+
+extern "x86-interrupt" fn divide_error(frame: InterruptStackFrame) {
+    if from_user(&frame) {
+        user_exception(&frame, 8, "Excepcion de punto flotante (division por cero)");
+    }
+    panic!("división por cero\n{:#?}", frame);
+}
+
+extern "x86-interrupt" fn invalid_opcode(frame: InterruptStackFrame) {
+    if from_user(&frame) {
+        user_exception(&frame, 4, "Instruccion ilegal");
+    }
+    panic!("instrucción inválida\n{:#?}", frame);
+}
+
+extern "x86-interrupt" fn x87_floating_point(frame: InterruptStackFrame) {
+    if from_user(&frame) {
+        user_exception(&frame, 8, "Excepcion de punto flotante");
+    }
+    panic!("excepción del x87\n{:#?}", frame);
+}
+
+extern "x86-interrupt" fn simd_floating_point(frame: InterruptStackFrame) {
+    if from_user(&frame) {
+        user_exception(&frame, 8, "Excepcion de punto flotante (SSE)");
+    }
+    panic!("excepción de SSE\n{:#?}", frame);
+}
+
+extern "x86-interrupt" fn stack_segment_fault(frame: InterruptStackFrame, code: u64) {
+    if from_user(&frame) {
+        user_exception(&frame, 7, "Error de bus (segmento de pila)");
+    }
+    panic!("fallo del segmento de pila (código {code})\n{:#?}", frame);
+}
+
+extern "x86-interrupt" fn alignment_check(frame: InterruptStackFrame, _code: u64) {
+    if from_user(&frame) {
+        user_exception(&frame, 7, "Error de bus (alineacion)");
+    }
+    panic!("fallo de alineación\n{:#?}", frame);
 }
 
 extern "x86-interrupt" fn double_fault(frame: InterruptStackFrame, _code: u64) -> ! {
@@ -116,8 +202,12 @@ fn stack_overflow_check() {
 
 /// El timer despierta a la CPU (de la tarea ociosa) y le da el turno al planificador: el tiempo
 /// se mide con el TSC, no contando estas interrupciones.
-extern "x86-interrupt" fn timer(_frame: InterruptStackFrame) {
+extern "x86-interrupt" fn timer(frame: InterruptStackFrame) {
     end_of_interrupt(Irq::Timer);
+    // Un programa que calcula sin llamar al sistema igual se puede terminar con Ctrl+C.
+    if from_user(&frame) {
+        process::on_user_interrupt();
+    }
     // Después del "fin de interrupción": si se cambia de tarea, este manejador termina recién
     // cuando la tarea interrumpida vuelva a correr, y el PIC no puede quedar esperándolo.
     task::on_timer();

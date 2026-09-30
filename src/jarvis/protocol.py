@@ -2,11 +2,13 @@
 
 Un mensaje JSON por renglón, sobre una conexión TCP. Cada mensaje tiene `t` (el tipo):
 
-- kernel → cerebro: `hola{token, idioma, equipo}`, `pedido{id, texto, origen}`, `cancelar{id}`,
+- kernel → cerebro: `hola{token, idioma, equipo, parlantes}` (parlantes: la frecuencia de su
+  salida de audio, 0 si no tiene), `pedido{id, texto, origen}`, `cancelar{id}`,
   `resultado{llamada, ok, datos}`, `confirmacion{llamada, ok}`.
 - cerebro → kernel: `listo`, `texto{id, delta}`, `fin{id}`, `error{id, msg}`,
   `accion{llamada, tool, args}`, `confirmar{llamada, nivel, descripcion}`, `oido{texto}`,
-  `voz{nivel}`, `proyecto{...}`.
+  `voz{nivel}`, `audio{tasa, pcm}` / `audio{fin}` (la voz para los parlantes del kernel, PCM
+  mono de 16 bits en base64), `callar`, `proyecto{...}`.
 
 El kernel solo entiende JSON simple: objetos, textos, números enteros y booleanos.
 """

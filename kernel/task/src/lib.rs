@@ -84,6 +84,10 @@ pub struct Scheduler {
     /// Lectura del reloj en el último cambio (para repartir el tiempo de CPU).
     last_clock: u64,
     switches: u64,
+    /// La última tarea que corrió en cada prioridad (Idle, Normal, High): la ronda sigue desde
+    /// ahí. Si arrancara desde la tarea actual, una más importante que despierta seguido (el
+    /// audio, cada 5 ms) haría que siempre le toque a la misma de las de abajo.
+    rr: [TaskId; 3],
 }
 
 impl Scheduler {
@@ -106,6 +110,7 @@ impl Scheduler {
             slice_start: now_ms,
             last_clock: clock,
             switches: 0,
+            rr: [0; 3],
         }
     }
 
@@ -262,17 +267,25 @@ impl Scheduler {
         {
             t.state = State::Ready;
         }
-        let mut best: Option<(TaskId, Priority)> = None;
-        for k in 1..=MAX_TASKS {
-            let i = (from + k) % MAX_TASKS;
-            if let Some(t) = &self.tasks[i]
-                && t.state == State::Ready
-                && best.is_none_or(|(_, p)| t.priority > p)
-            {
-                best = Some((i, t.priority));
-            }
-        }
-        let Some((to, _)) = best else {
+        // La prioridad más alta que tiene alguien listo, y en ella, la siguiente de la ronda.
+        let Some(top) = self
+            .tasks
+            .iter()
+            .flatten()
+            .filter(|t| t.state == State::Ready)
+            .map(|t| t.priority)
+            .max()
+        else {
+            // Nadie puede correr (en el kernel no pasa: la tarea ociosa siempre está lista).
+            return None;
+        };
+        let last = self.rr[top as usize];
+        let best = (1..=MAX_TASKS).map(|k| (last + k) % MAX_TASKS).find(|&i| {
+            self.tasks[i]
+                .as_ref()
+                .is_some_and(|t| t.state == State::Ready && t.priority == top)
+        });
+        let Some(to) = best else {
             // Nadie puede correr (en el kernel no pasa: la tarea ociosa siempre está lista).
             return None;
         };
@@ -280,6 +293,7 @@ impl Scheduler {
             .as_mut()
             .expect("elegida entre las que existen");
         t.state = State::Running;
+        self.rr[top as usize] = to;
         self.slice_start = now_ms;
         if to == from {
             return None;

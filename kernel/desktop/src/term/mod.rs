@@ -2,9 +2,10 @@
 //!
 //! Entiende tuberías (`|`), redirecciones (`>`, `>>`, `<`, `2>`), `&&`, `||`, `;`, comillas,
 //! variables (`$HOME`, `$?`, `$1`…), sustituciones (`$(…)`), comodines (`*.txt`) y alias. Los
-//! comandos (`ls`, `cat`, `grep`, `cp`…) están escritos acá mismo, sobre el FAT32 propio: no hay
-//! programas separados porque el kernel todavía no tiene espacio de usuario (ver ADR 0005). Los
-//! "programas" que se instalan con `apt` son scripts de `jsh`.
+//! comandos (`ls`, `cat`, `grep`, `cp`…) están escritos acá mismo, sobre el FAT32 propio. Los
+//! "programas" que se instalan con `apt` son scripts de `jsh` o, desde K11, programas de Linux
+//! (ELF estáticos): esos corren en su propio proceso (ADR 0010) y la shell espera a que terminen
+//! ([`Job::Process`]), mostrando su salida a medida que llega.
 //!
 //! Los comandos que usan la red (`curl`, `wget`, `apt`, `ping`) no pueden esperar bloqueando (el
 //! escritorio es un solo hilo): piden la descarga por el `Outbox` y la shell queda **en espera**
@@ -82,6 +83,12 @@ pub(crate) enum Job {
     Sleep {
         until: u64,
     },
+    /// Un programa de Linux corriendo (K11). `buf`: su salida, si no va directo a la terminal
+    /// (una tubería o una redirección).
+    Process {
+        pid: u32,
+        buf: String,
+    },
 }
 
 impl Job {
@@ -91,7 +98,7 @@ impl Job {
             Job::Apt(a) => a.waiting_id(),
             Job::Snap(s) => s.waiting_id(),
             Job::Winget(w) => w.waiting_id(),
-            Job::Sleep { .. } => None,
+            Job::Sleep { .. } | Job::Process { .. } => None,
         }
     }
 }
@@ -814,7 +821,7 @@ impl Shell {
             Job::Apt(job) => job.on_response(id, result, ctx, &mut out),
             Job::Snap(job) => job.on_response(result, ctx, &mut out),
             Job::Winget(job) => job.on_response(result, ctx, &mut out),
-            Job::Sleep { .. } => Some((0, String::new())),
+            Job::Sleep { .. } | Job::Process { .. } => Some((0, String::new())),
         };
         match finished {
             None => self.pending = Some(pending), // apt sigue con otra descarga
@@ -858,6 +865,64 @@ impl Shell {
             self.deliver(&data, &p.target, ctx, out);
             self.run_list(p.list, p.index + 1, None, ctx, out);
         }
+    }
+
+    /// El programa de Linux que está corriendo en primer plano.
+    pub fn process_pid(&self) -> Option<u32> {
+        match &self.pending {
+            Some(Pending {
+                job: Job::Process { pid, .. },
+                ..
+            }) => Some(*pid),
+            _ => None,
+        }
+    }
+
+    /// Salida del programa `pid`. Si va a la terminal, se devuelve para mostrarla ya; si va a
+    /// una tubería o a un archivo, se guarda hasta que termine.
+    pub fn proc_output(&mut self, pid: u32, data: &[u8]) -> Option<String> {
+        let p = self.pending.as_mut()?;
+        let last = p.stage + 1 == p.list[p.index].commands.len();
+        let direct = last && matches!(p.target, OutTarget::Terminal);
+        let Job::Process { pid: running, buf } = &mut p.job else {
+            return None;
+        };
+        if *running != pid {
+            return None;
+        }
+        let text = String::from_utf8_lossy(data).into_owned();
+        if direct {
+            Some(text)
+        } else {
+            buf.push_str(&text);
+            Some(String::new())
+        }
+    }
+
+    /// Terminó el programa `pid`: la línea sigue (el resto de la tubería, `&&`…).
+    pub fn proc_exit<D: BlockDevice>(
+        &mut self,
+        pid: u32,
+        code: i32,
+        why: Option<&str>,
+        ctx: &mut Ctx<'_, D>,
+    ) -> Option<String> {
+        if self.process_pid() != Some(pid) {
+            return None;
+        }
+        let mut pending = self.pending.take()?;
+        let data = match &mut pending.job {
+            Job::Process { buf, .. } => core::mem::take(buf),
+            _ => String::new(),
+        };
+        let mut out = Out::new();
+        if let Some(w) = why
+            && code != 130
+        {
+            out.err(w);
+        }
+        self.resume(pending, code, data, ctx, &mut out);
+        Some(out.term)
     }
 
     /// Ctrl+C: se deja de esperar (la respuesta, si llega, se ignora).

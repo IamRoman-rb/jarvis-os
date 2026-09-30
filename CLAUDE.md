@@ -5,7 +5,8 @@ con el asistente JARVIS en el centro y un escritorio con ventanas al estilo Wind
 de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va a hablar por la
 red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
-idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta). Roadmap y arquitectura del kernel:
+idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta; espacio de usuario y programas
+de Linux, la 0010, propuesta). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -30,6 +31,17 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (client.rs, rustls unbuffered) y el proveedor de criptografía propio sobre
                    RustCrypto (provider/); no_std. Tests contra rustls+ring con certificados de
                    tests/datos/ (generar.sh). kernel/entropy.rs y kernel/tls.rs ponen azar y hora
+    - audio/       audio y video (K12): WAV, IMA ADPCM, remuestreo, mezclador, sintetizador y AVI;
+                   no_std y sin punto flotante (desktop/src/sound.rs lo usa; kernel/audio.rs y
+                   virtio_sound.rs lo llevan a la placa)
+    - image/       imágenes (K10): inflate y PNG propios, JPEG con zune-jpeg → RGBA; no_std. Tests
+                   cruzados contra las crates png e image
+    - linux/       la ABI de Linux (K11, ADR 0010): cargador de ELF, pila inicial, mapa de memoria
+                   (brk, mmap, páginas al primer uso) y llamadas al sistema; no_std, sobre un trait
+                   `System` (kernel/process.rs lo implementa; los tests, uno de mentira)
+    - usuario/     programas de Linux de prueba (otro workspace, para x86_64-unknown-linux-musl):
+                   hola-linux, eco, pruebas, red y js (JavaScript con el motor Boa).
+                   `cargo xtask usuario` → target/usuario/
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - sync/        sincronización de /Sincronizado: emparejado (HKDF), cifrado (ChaCha20-Poly1305),
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red
@@ -37,6 +49,7 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
     - relay/       el relé (std): reenvía marcos cifrados entre las máquinas de un grupo
     - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
                    (task.rs: tareas y cambio de contexto; nettask.rs: la tarea de la red;
+                   syscall.rs: syscall/sysret y el salto al anillo 3; process.rs: los procesos;
                    irqlock.rs: el lock de lo compartido entre tareas;
                    paging.rs: tablas de páginas propias con jarvis-mem, map_mmio y pilas con guarda;
                    virtio_gpu.rs: varios monitores; display.rs: las superficies)
@@ -59,6 +72,8 @@ Kernel (desde kernel/):
 - Brave:            cargo xtask brave --instalar | --probar URL (el puente sin QEMU → target/brave-prueba.png)
 - Sincronización:   cargo xtask relay | run2 | sincronizar (dos QEMU + relé; verifica los discos con fatfs)
 - ISO:              cargo xtask iso [--probar|--abrir] (El Torito; sin disco → modo en vivo, FAT32 en RAM)
+- Programas Linux:  cargo xtask usuario (compila kernel/usuario/ → target/usuario/; run y test lo hacen
+                    solos). En JARVIS-OS: apt install programas-linux js ; hola-linux ; js
 - Monitores:        cargo xtask pantallas (dos monitores, capturas por salida); JARVIS_MONITORES=N en run/test
 - Captura:          cargo xtask screenshot     (escritorio, apps y menús en target/: miralas si tocás la UI)
 - Vista previa web: JARVIS_URL=https://… cargo test -p jarvis-desktop --test vista_previa -- --ignored
@@ -68,6 +83,7 @@ Kernel (desde kernel/):
                     JARVIS_URL=config:N abre la Configuración)
 - Lint:             cargo fmt --all && cargo clippy --workspace --exclude jarvis-kernel --all-targets -- -D warnings
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
+                    (y en usuario/: cargo fmt && cargo clippy --release -- -D warnings)
 Cerebro (desde la raíz):
 - uv sync ; uv run pytest ; uv run ruff check . ; uv run mypy
 - jarvis serve [--simulado]: el cerebro para el kernel (ADR 0008). Lo levanta `cargo xtask run`
@@ -107,12 +123,17 @@ Cerebro (desde la raíz):
     GET. Además del HTTPS, sirve el repositorio de paquetes (solo lectura, sin salir de
     kernel/paquetes/), convierte imágenes y SVG a BMP (ADR 0005) y pasa solo dos cabeceras más
     (las de la API de snaps, ADR 0006). Cambiar eso (otros métodos, otra interfaz, otras
-    carpetas, otras cabeceras) requiere un ADR. El HTTPS y la conversión se van con TLS y
-    decodificadores en el kernel (roadmap K10, ADR 0009 propuesto). El puente de Brave (xtask/src/brave.rs, puerto
+    carpetas, otras cabeceras) requiere un ADR. Desde K10 el HTTPS lo hace el kernel (ADR 0009);
+    el del puente queda de respaldo (Configuración → Red → "HTTPS por el puente", o si el kernel
+    no tiene entropía u hora). Los PNG y JPEG los decodifica el kernel (jarvis-image): el puente
+    solo convierte SVG, GIF, WebP e ICO (y lo que llegue directo sin ser PNG ni JPEG). Desde K11
+    también sirve, en `/usuario/`, los programas de Linux compilados en target/usuario/ (ADR
+    0010; mismas reglas de nombres). El puente de Brave (xtask/src/brave.rs, puerto
     8119) y el relé de sincronización (puerto 8120) son servicios aparte con protocolo propio
     (ADR 0007): el de Brave escucha fuera de 127.0.0.1 solo con `--red` y un token; el relé
     nunca ve contenido sin cifrar. Las conexiones largas (`Outbox::connect`) pasan por el
-    firewall igual que los GET.
+    firewall igual que los GET (los sockets de los programas de Linux también, como app
+    `programas`).
 16. Escritorio: las apps no dibujan en la pantalla ni conocen su posición: dibujan en su zona
     (`content`) y piden cosas por el `Outbox`. Toda app nueva va en `desktop/src/apps/`, con tests
     en `desktop/tests/`, y el test "render incremental == redibujar todo" tiene que seguir pasando.
@@ -120,8 +141,12 @@ Cerebro (desde la raíz):
     Los comandos nuevos van en desktop/src/term/cmds.rs (y en `NAMES`, para `help` y Tab) con un
     test en desktop/tests/terminal.rs. Un paquete nuevo: carpeta en kernel/paquetes/ con su
     manifiesto y un renglón en indice.txt; que el test de apt lo instale.
-18. Programas de Windows/Linux: no se simula que corren. Se descargan e inspeccionan; ejecutarlos
-    espera al espacio de usuario (K11). Los textos al usuario usan solo caracteres de Latin-1 (la
+18. Programas de Windows/Linux: no se simula que corren. Los de Linux estáticos para x86-64 corren
+    de verdad en el anillo 3 (K11, ADR 0010); los dinámicos, los de Windows y los paquetes se
+    descargan e inspeccionan. Una llamada al sistema nueva va en linux/src/process.rs con su test
+    en linux/src/tests.rs; lo que no existe devuelve ENOSYS y se anota (PROCESO_LOG). Los
+    procesos no tocan el disco ni la pantalla: se lo piden al escritorio (desktop/src/procs.rs).
+    Los textos al usuario usan solo caracteres de Latin-1 (la
     fuente no tiene otros: salen como `?`); las páginas web usan su propia fuente (Unicode).
 19. Idiomas: todo texto nuevo de la interfaz pasa por `i18n::tr("…")` (o `trf` si tiene datos),
     escrito en castellano, con su traducción al inglés y al portugués en las tablas de

@@ -53,6 +53,16 @@ impl TimeProvider for KernelClock {
     }
 }
 
+/// Nanosegundos desde 1970 (UTC), o `None` si el RTC no dio una fecha válida al arrancar.
+pub fn unix_ns() -> Option<u64> {
+    let boot = BOOT_UNIX.load(Ordering::Relaxed);
+    if boot == 0 {
+        return None;
+    }
+    let ms = time::millis().saturating_sub(BOOT_MILLIS.load(Ordering::Relaxed));
+    Some(boot * 1_000_000_000 + ms * 1_000_000)
+}
+
 /// Lo que dejó la prueba del arranque (para el log).
 pub struct Report {
     pub roots: usize,
@@ -87,8 +97,7 @@ pub fn init() -> Report {
     }
 }
 
-/// La configuración de los clientes TLS, si `init` pudo armarla.
-#[allow(dead_code)] // la usa la red (siguiente etapa de K10)
+/// La configuración de los clientes TLS, si `init` pudo armarla (la usa la tarea de la red).
 pub fn config() -> Option<Arc<ClientConfig>> {
     CONFIG.get().cloned()
 }

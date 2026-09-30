@@ -35,8 +35,13 @@ fn main() -> ExitCode {
     let cmd = env::args().nth(1).unwrap_or_default();
     let result = match cmd.as_str() {
         "build" => build().map(|img| println!("imagen: {}", img.display())),
-        "run" => build().and_then(|img| run(&img, &disk_image(false)?)),
-        "test" => build().and_then(|img| test(&img, &fresh_disk("disco-test.img")?)),
+        "run" => build_user()
+            .and_then(|_| build())
+            .and_then(|img| run(&img, &disk_image(false)?)),
+        "test" => build_user()
+            .and_then(|_| build())
+            .and_then(|img| test(&img, &fresh_disk("disco-test.img")?)),
+        "usuario" => build_user().map(|d| println!("programas de Linux: {}", d.display())),
         "screenshot" => build().and_then(|img| screenshot(&img, &fresh_disk("disco-captura.img")?)),
         "vdi" => build().and_then(|img| vdi(&img)),
         "disk" => {
@@ -50,7 +55,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -227,6 +232,36 @@ fn build() -> Result<PathBuf> {
         .create_disk_image(&image)
         .map_err(|e| format!("no pude crear la imagen UEFI: {e}"))?;
     Ok(image)
+}
+
+/// Los programas de Linux de `kernel/usuario/` (K11): se compilan para musl (estáticos) y quedan
+/// en `target/usuario/`, de donde los sirve el puente (`http://paquetes.jarvis/usuario/`).
+const USER_PROGRAMS: [&str; 5] = ["hola-linux", "eco", "pruebas", "red", "js"];
+
+fn build_user() -> Result<PathBuf> {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let build_dir = target_dir().join("usuario-build");
+    let status = Command::new(cargo)
+        .current_dir(workspace_root().join("usuario"))
+        // El `cargo xtask` de afuera deja variables de su compilación que no son para esta.
+        .env_remove("RUSTFLAGS")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .arg("build")
+        .arg("--release")
+        .arg("--target-dir")
+        .arg(&build_dir)
+        .status()
+        .map_err(|e| format!("no pude ejecutar cargo: {e}"))?;
+    if !status.success() {
+        return Err("falló la compilación de los programas de usuario (kernel/usuario)".into());
+    }
+    let out = target_dir().join("usuario");
+    fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    for p in USER_PROGRAMS {
+        let from = build_dir.join("x86_64-unknown-linux-musl/release").join(p);
+        fs::copy(&from, out.join(p)).map_err(|e| format!("{}: {e}", from.display()))?;
+    }
+    Ok(out)
 }
 
 // --- QEMU -------------------------------------------------------------------------------------
@@ -739,8 +774,11 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("ENTROPIA_LISTA", BOOT_TIMEOUT)?;
     // K10: el cliente TLS arma las claves efímeras y el ClientHello dentro del kernel.
     s.wait_for("TLS_LISTO", BOOT_TIMEOUT)?;
-    // K9: el escritorio, la red y la ociosa son tareas aparte.
-    s.wait_for("MULTITAREA 3 tareas", BOOT_TIMEOUT)?;
+    // K9: el escritorio, la red y la ociosa son tareas aparte; K12 suma la del audio.
+    s.wait_for(
+        "MULTITAREA 4 tareas: escritorio, ociosa, red, audio",
+        BOOT_TIMEOUT,
+    )?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.saw_or_wait("RED_IP 10.0.2.15", STEP)?;
     // La tarea de la red se despierta con la interrupción de la placa, no dando vueltas.
@@ -810,6 +848,116 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey ret")?;
     s.wait_for("FIREWALL_BLOQUEO terminal example.com", STEP)?;
     s.wait_for("TERMINAL_FIN", STEP)?;
+    // K10: HTTPS con el TLS del kernel, contra sitios de verdad (hace falta internet, por eso
+    // es opcional). Uno válido tiene que llegar; uno con el certificado vencido, no.
+    if std::env::var_os("JARVIS_TEST_INTERNET").is_some() {
+        s.saw_or_wait("RED_HTTPS TLS del kernel", STEP)?;
+        s.type_text("wget https://example.org/")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("RED_RESPUESTA 200 https://example.org/", STEP)?;
+        s.wait_for("TERMINAL_FIN", STEP)?;
+        s.type_text("wget https://expired.badssl.com/")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for(
+            "RED_ERROR conexión segura: el certificado del sitio no es válido",
+            STEP,
+        )?;
+        s.wait_for("TERMINAL_FIN", STEP)?;
+    }
+    // K11: programas de Linux de verdad (ELF estáticos de musl), en el anillo 3. Se instalan con
+    // apt (el puente los sirve desde target/usuario/).
+    s.type_text("apt install programas-linux")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO programas-linux", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("hola-linux uno dos")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("Hola desde Linux! argumentos: [\"uno\", \"dos\"]", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // Archivos, carpetas, 32 MiB de memoria, punto flotante y pila que crece.
+    s.type_text("pruebas")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("PRUEBAS_OK", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // La entrada de una tubería llega como su entrada estándar.
+    s.type_text("echo hola mundo | eco")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("HOLA MUNDO", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // Un programa que lee un puntero nulo termina él; el sistema sigue.
+    s.type_text("pruebas segv")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("PROCESO_SEGV", STEP)?;
+    s.wait_for("TERMINAL_FIN 139", STEP)?;
+    // Uno que calcula sin parar se reparte la CPU con el escritorio y Ctrl+C lo termina.
+    s.type_text("pruebas bucle")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("calculando para siempre", STEP)?;
+    s.monitor("sendkey ctrl-c")?;
+    s.wait_for("TERMINAL_FIN 130", STEP)?;
+    // Sockets: un cliente HTTP con TcpStream contra el servidor de prueba, y el firewall.
+    s.type_text(&format!("red 10.0.2.2:{port}"))?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("RED_PROGRAMA HTTP/1.1 200", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("sudo ufw deny out to 10.0.2.2 app programas")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text(&format!("red 10.0.2.2:{port}"))?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("FIREWALL_BLOQUEO programas 10.0.2.2", STEP)?;
+    s.wait_for("RED_PROGRAMA_ERROR", STEP)?;
+    s.wait_for("TERMINAL_FIN 1", STEP)?;
+    // Un intérprete de JavaScript (Boa) como programa de Linux: código suelto, un archivo y la
+    // consola interactiva (lo tipeado es su entrada estándar).
+    s.type_text("apt install js")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO js", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("js -e \"Array.from('abc', c => c.toUpperCase()).join('-')\"")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("A-B-C", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("echo \"console.log('desde un archivo', 6 * 7)\" > prueba.js && js prueba.js")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("desde un archivo 42", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("js")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("JavaScript (motor Boa)", STEP)?;
+    s.type_text("let x = 20; (x + 22) * 1000 + 7")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("42007", STEP)?;
+    s.monitor("sendkey ctrl-d")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // K10: un PNG y un JPEG progresivo del repositorio, sin convertir: los decodifica el
+    // kernel (el visor, con jarvis-image).
+    for file in ["fondos/aurora.png", "pruebas/aurora-progresivo.jpg"] {
+        s.type_text(&format!("wget http://paquetes.jarvis/{file}"))?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+    }
+    // K12: canciones y un video por los parlantes de la placa virtio-sound.
+    s.saw_or_wait("SONIDO_LISTO", STEP)?;
+    s.type_text("apt install musica videos")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO videos", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text(
+        "open aurora-progresivo.jpg && open aurora.png && cd /M* && open Escala.wav && open /Videos/demo.avi",
+    )?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("VISOR_IMAGEN 640x400", STEP)?;
+    s.wait_for("VISOR_IMAGEN 1280x800", STEP)?;
+    s.wait_for("MUSICA_ARCHIVO /Música/Escala.wav (3200 ms)", STEP)?;
+    s.wait_for(
+        "VIDEO_ABIERTO /Videos/demo.avi 320x240, 120 cuadros, 7999 ms, con audio",
+        STEP,
+    )?;
+    s.wait_for("VIDEO_PRIMER_CUADRO", STEP)?;
+    // Terminan cuando la placa terminó de reproducir su audio.
+    s.wait_for("MUSICA_FIN", STEP)?;
+    s.wait_for("VIDEO_FIN /Videos/demo.avi", STEP)?;
     // Configuración (Win+I).
     s.monitor("sendkey meta_l-i")?;
     s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;

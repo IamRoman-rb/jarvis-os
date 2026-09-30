@@ -8,7 +8,11 @@
 //! ```text
 //! indice.txt:                  nombre|versión|descripción|dependencias|tamaño
 //! <nombre>/manifiesto.txt:     archivo-en-el-repo -> /ruta/en/el/disco   [bmp]
+//!                              usuario:programa -> /Programas/bin/programa
 //! ```
+//!
+//! `usuario:` es un programa de Linux compilado desde `kernel/usuario/` (K11): el puente lo sirve
+//! en `http://paquetes.jarvis/usuario/`.
 //!
 //! **Base de datos local** (en `/Sistema/paquetes/`): la copia del índice, la lista de paquetes
 //! instalados (`instalados.txt`) y, por cada uno, qué archivos puso (`<nombre>.lista`), para
@@ -276,7 +280,7 @@ impl AptJob {
                 self.step = Step::File;
                 let (src, _, bmp) = cur.files[0].clone();
                 let name = cur.pkg.name.clone();
-                self.fetch(ctx, &format!("{name}/{src}"), bmp);
+                self.fetch(ctx, &repo_path(&name, &src), bmp);
                 None
             }
             Step::File => {
@@ -294,7 +298,7 @@ impl AptJob {
                 if cur.next < cur.files.len() {
                     let (src, _, bmp) = cur.files[cur.next].clone();
                     let name = cur.pkg.name.clone();
-                    self.fetch(ctx, &format!("{name}/{src}"), bmp);
+                    self.fetch(ctx, &repo_path(&name, &src), bmp);
                     return None;
                 }
                 // Todo el paquete llegó: se instala.
@@ -329,6 +333,14 @@ impl AptJob {
         self.step = Step::Manifest;
         self.fetch(ctx, &path, false);
         None
+    }
+}
+
+/// Dónde está en el repositorio un archivo del paquete `pkg`.
+fn repo_path(pkg: &str, src: &str) -> String {
+    match src.strip_prefix("usuario:") {
+        Some(program) => format!("usuario/{program}"),
+        None => format!("{pkg}/{src}"),
     }
 }
 
