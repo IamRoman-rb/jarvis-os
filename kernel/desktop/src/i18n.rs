@@ -799,6 +799,7 @@ static EN: &[(&str, &str)] = &[
         "This disk will be written: click CONFIRM",
     ),
     ("Segundos en el reloj", "Seconds on the clock"),
+    ("Sensores", "Sensors"),
     ("Septiembre", "September"),
     (
         "Si no, 12 horas con a. m. / p. m.",
@@ -1716,6 +1717,7 @@ static PT: &[(&str, &str)] = &[
         "Este disco será gravado: clique em CONFIRMAR",
     ),
     ("Segundos en el reloj", "Segundos no relógio"),
+    ("Sensores", "Sensores"),
     ("Septiembre", "Setembro"),
     (
         "Si no, 12 horas con a. m. / p. m.",

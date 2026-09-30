@@ -664,6 +664,14 @@ fn test_install(image: &Path) -> Result<()> {
         .open_file("Documentos/Bienvenida.txt")
         .and_then(|mut f| f.read_to_string(&mut text))
         .map_err(|e| format!("falta /Documentos/Bienvenida.txt: {e}"))?;
+    let mut log = String::new();
+    fs.root_dir()
+        .open_file("Sistema/arranque.log")
+        .and_then(|mut f| f.read_to_string(&mut log))
+        .map_err(|e| format!("falta /Sistema/arranque.log: {e}"))?;
+    if !log.contains("DISCO_SISTEMA NVMe") {
+        return Err("el registro del arranque del NVMe no dice DISCO_SISTEMA".into());
+    }
     println!("ok: instalado en un NVMe vacío desde el pendrive, y arranca solo desde el NVMe");
     Ok(())
 }
@@ -1234,6 +1242,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     verify_file_exists(disk, "Programas/bin/hola")?;
     verify_file_exists(disk, "snap/bin/saludo")?;
     verify_file_exists(disk, "Sistema/firewall.log")?;
+    verify_boot_log(disk, "arrancando")?;
     println!(
         "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, snap, firewall, configuración, Brave ({}), suspender, cerrar sesión y disco verificados",
         if brave_ok {
@@ -1287,6 +1296,26 @@ fn verify_file_exists(disk: &Path, path: &str) -> Result<()> {
         .open_file(path)
         .map_err(|e| format!("no quedó /{path}: {e}"))?;
     println!("[disco] /{path} existe (verificado con fatfs)");
+    Ok(())
+}
+
+/// K13: el registro del arranque quedó en /Sistema/arranque.log y dice `needle`.
+fn verify_boot_log(disk: &Path, needle: &str) -> Result<()> {
+    let mut file = open_fatfs(disk)?;
+    let fs =
+        fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(|e| e.to_string())?;
+    let mut text = String::new();
+    fs.root_dir()
+        .open_file("Sistema/arranque.log")
+        .and_then(|mut f| f.read_to_string(&mut text))
+        .map_err(|e| format!("no quedó /Sistema/arranque.log: {e}"))?;
+    if !text.contains(needle) {
+        return Err(format!("/Sistema/arranque.log no dice \"{needle}\""));
+    }
+    println!(
+        "[disco] /Sistema/arranque.log: {} líneas (verificado con fatfs)",
+        text.lines().count()
+    );
     Ok(())
 }
 

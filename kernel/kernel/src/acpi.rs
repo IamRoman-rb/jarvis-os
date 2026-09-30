@@ -13,7 +13,7 @@ use core::ptr::NonNull;
 use core::str::FromStr;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use acpi::aml::namespace::AmlName;
+use acpi::aml::namespace::{AmlName, NamespaceLevelKind};
 use acpi::aml::object::Object;
 use acpi::aml::pci_routing::{PciRoutingTable, Pin};
 use acpi::aml::resource::{InterruptPolarity, InterruptTrigger};
@@ -434,7 +434,6 @@ impl Acpi {
         });
     }
 
-    #[expect(dead_code, reason = "lo usan las etapas siguientes de K13")]
     /// Evalúa un objeto y lo devuelve como entero (`_TMP`, `_STA`…).
     pub fn integer(&self, path: &str) -> Option<u64> {
         self.with_aml(|aml| {
@@ -447,6 +446,23 @@ impl Acpi {
                 _ => None,
             }
         })?
+    }
+
+    /// Las zonas térmicas del AML que tienen `_TMP` (por ejemplo `\_TZ.TZ00`).
+    pub fn thermal_zones(&self) -> Vec<alloc::string::String> {
+        self.with_aml(|aml| {
+            let mut zones = Vec::new();
+            let _ = aml.interpreter.namespace.lock().traverse(|name, level| {
+                if level.kind == NamespaceLevelKind::ThermalZone
+                    && level.values.keys().any(|seg| seg.as_str() == "_TMP")
+                {
+                    zones.push(alloc::format!("{name}"));
+                }
+                Ok(true)
+            });
+            zones
+        })
+        .unwrap_or_default()
     }
 
     /// Pasa la placa a modo ACPI (si no lo estaba): desde ahí los eventos de energía son del

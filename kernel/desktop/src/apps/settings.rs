@@ -2192,6 +2192,7 @@ fn tr_kind(kind: &str) -> &'static str {
         "Interrupciones" => tr("Interrupciones"),
         "Firmware" => tr("Firmware"),
         "Procesador" => tr("Procesador"),
+        "Sensores" => tr("Sensores"),
         _ => tr("Otro"),
     }
 }

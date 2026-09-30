@@ -16,6 +16,7 @@
 //! - [`nic`]: los anillos de descriptores de las placas de red Intel y Realtek.
 //! - [`usb`]: descriptores, TRB y contextos de xHCI, teclado y mouse HID, BOT y SCSI.
 //! - [`hda`]: los verbos de los codecs de audio y el camino del DAC al parlante.
+//! - [`sensors`]: la temperatura del procesador (AMD por SMN) y de las zonas térmicas de ACPI.
 //!
 //! Referencias: especificación ACPI 6.5 (cap. 5), Intel SDM vol. 3A cap. 11 (APIC) y la
 //! especificación PCI Local Bus 3.0 §6.8 (MSI).
@@ -31,6 +32,7 @@ pub mod gpt;
 pub mod hda;
 pub mod nic;
 pub mod nvme;
+pub mod sensors;
 pub mod usb;
 
 /// Lee un entero en little endian de `b` en `at`. Fuera de rango da 0: las tablas del firmware

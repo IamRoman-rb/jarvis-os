@@ -81,7 +81,18 @@ pub fn _print(args: fmt::Arguments<'_>) {
         if let Some(mut port) = SERIAL.try_lock() {
             let _ = port.write_fmt(args);
         }
+        // K13: también al registro del arranque (en una PC real no hay puerto serie).
+        let _ = BootLogWriter.write_fmt(args);
     });
+}
+
+struct BootLogWriter;
+
+impl Write for BootLogWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        crate::bootlog::record(s);
+        Ok(())
+    }
 }
 
 #[macro_export]

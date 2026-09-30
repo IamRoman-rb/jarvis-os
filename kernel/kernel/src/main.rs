@@ -27,6 +27,7 @@ mod ahci;
 mod allocator;
 mod apic;
 mod audio;
+mod bootlog;
 mod cpu;
 mod display;
 mod dma;
@@ -211,10 +212,41 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             " (sin W^X: no se pudo leer el ELF)"
         }
     );
+    // La pantalla del firmware, lo antes posible (K13): desde acá el registro del arranque se ve
+    // en pantalla (en una PC real no hay puerto serie) y un panic muestra sus últimas líneas.
+    let rsdp = boot_info.rsdp_addr.into_option();
+    let Some(fb) = boot_info.framebuffer.as_mut() else {
+        serial_println!("sin framebuffer: el firmware no dio pantalla gráfica");
+        halt();
+    };
+    let info = fb.info();
+    let format = match info.pixel_format {
+        BootPixelFormat::Rgb => PixelFormat::Rgb,
+        BootPixelFormat::U8 => PixelFormat::Gray,
+        _ => PixelFormat::Bgr, // lo más común en UEFI
+    };
+    serial_println!(
+        "pantalla: {}x{} ({:?}, {} bytes/píxel)",
+        info.width,
+        info.height,
+        info.pixel_format,
+        info.bytes_per_pixel
+    );
+    let screen = Canvas::new(
+        fb.buffer_mut(),
+        info.width,
+        info.height,
+        info.stride,
+        info.bytes_per_pixel,
+        format,
+    )
+    .expect("geometría de framebuffer inválida");
+    *SCREEN.lock() = Some(screen);
+    bootlog::start_console(draw_boot_console);
+
     // K13: las tablas ACPI del firmware. Si describen el APIC, las interrupciones pasan del PIC
     // al APIC (hace falta la paginación propia: sus registros se mapean con `map_mmio`), y el
     // AML (la DSDT) se carga para saber cómo apagar y a dónde va cada línea PCI.
-    let rsdp = boot_info.rsdp_addr.into_option();
     match rsdp.and_then(acpi::init) {
         Some(a) => {
             if time::needs_recalibration()
@@ -273,8 +305,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let cpu_name = cpu::brand();
     serial_println!("CPU: {}", cpu_name);
     hw::note("Procesador", cpu_name.clone());
-    let thermal = cpu::Thermal::detect();
-    match thermal.as_ref().and_then(cpu::Thermal::read) {
+    // K13: el sensor de Intel, el Tctl de los Ryzen o las zonas térmicas de ACPI.
+    let mut thermal = cpu::Thermal::detect();
+    if let Some(t) = &thermal {
+        hw::note("Sensores", t.describe());
+    }
+    match thermal.as_mut().and_then(cpu::Thermal::read) {
         Some(t) => serial_println!("TEMP {} C", t),
         None => serial_println!("TEMP sin sensor"),
     }
@@ -421,33 +457,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
     );
 
-    let Some(fb) = boot_info.framebuffer.as_mut() else {
-        serial_println!("sin framebuffer: el firmware no dio pantalla gráfica");
-        halt();
-    };
-    let info = fb.info();
-    let format = match info.pixel_format {
-        BootPixelFormat::Rgb => PixelFormat::Rgb,
-        BootPixelFormat::U8 => PixelFormat::Gray,
-        _ => PixelFormat::Bgr, // lo más común en UEFI
-    };
-    serial_println!(
-        "pantalla: {}x{} ({:?}, {} bytes/píxel)",
-        info.width,
-        info.height,
-        info.pixel_format,
-        info.bytes_per_pixel
-    );
-    let screen = Canvas::new(
-        fb.buffer_mut(),
-        info.width,
-        info.height,
-        info.stride,
-        info.bytes_per_pixel,
-        format,
-    )
-    .expect("geometría de framebuffer inválida");
-    *SCREEN.lock() = Some(screen);
     // Doble buffer en el heap: `bg` con la capa estática y `frame` donde se compone cada frame.
     // Con placa de video, reservados para el escritorio más grande posible (dos monitores).
     let firmware = display::Firmware {
@@ -460,6 +469,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let capacity = jarvis_desktop::display::max_pixels(&outputs);
     let mut surfaces = display::Surfaces::new(&firmware, gpu, capacity);
 
+    let mut disk = disk;
+    if let Some(fs) = disk.as_mut() {
+        save_boot_log(fs);
+    }
     let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
     if let Some(rate) = sound_rate {
         desktop.enable_sound(rate);
@@ -532,7 +545,7 @@ fn run(
     surfaces: &mut display::Surfaces,
     mut stats: SystemStats,
     mut mouse_decoder: MouseDecoder,
-    thermal: Option<cpu::Thermal>,
+    mut thermal: Option<cpu::Thermal>,
     mut mic: Option<virtio_sound::Mic>,
 ) -> ! {
     let mut keyboard = keyboard::Keyboard::new();
@@ -715,6 +728,7 @@ fn run(
 
         if first {
             // La CI busca esta línea para saber que el kernel arrancó y dibujó sin errores.
+            bootlog::stop_console();
             serial_println!("JARVIS_BOOT_OK");
             first = false;
         }
@@ -744,7 +758,7 @@ fn run(
             stats.net_rx = virtio_net::RX_BYTES.load(Ordering::Relaxed);
             stats.net_tx = virtio_net::TX_BYTES.load(Ordering::Relaxed);
             stats.net = nettask::info();
-            stats.temp_c = thermal.as_ref().and_then(cpu::Thermal::read);
+            stats.temp_c = thermal.as_mut().and_then(cpu::Thermal::read);
             stats.kernel_tasks = tasks;
             stats.context_switches = switches;
             stats.devices = hw::list();
@@ -790,6 +804,57 @@ fn power_off(p: Power) -> ! {
     }
 }
 
+/// La consola del arranque: las últimas líneas del registro, abajo a la izquierda, sobre el
+/// framebuffer del firmware (se llama con cada línea, hasta el primer cuadro del escritorio).
+fn draw_boot_console(tail: &str) {
+    let Some(mut guard) = SCREEN.try_lock() else {
+        return;
+    };
+    let Some(canvas) = guard.as_mut() else {
+        return;
+    };
+    draw_log_lines(canvas, tail, Color::hex(0x050b14), Color::hex(0x7fdcff));
+}
+
+/// Dibuja líneas de registro de abajo hacia arriba en la mitad inferior de la pantalla.
+fn draw_log_lines(canvas: &mut Canvas<'_>, tail: &str, bg: Color, fg: Color) {
+    const LINE: i32 = 18;
+    let (w, h) = (canvas.width() as i32, canvas.height() as i32);
+    let lines: Vec<&str> = tail.lines().collect();
+    let area = (lines.len() as i32 * LINE + 16).min(h / 2);
+    canvas.fill_rect(0, h - area, w, area, bg);
+    let st = text::Style::new(text::Weight::Regular, text::Size::Size16, fg);
+    let mut y = h - 8 - LINE;
+    for line in lines.iter().rev() {
+        if y < h - area {
+            break;
+        }
+        // Sin los códigos de escape de la consola del firmware.
+        let clean: alloc::string::String = line.chars().filter(|c| !c.is_control()).collect();
+        text::draw(canvas, 16, y, &clean, &st);
+        y -= LINE;
+    }
+}
+
+/// `/Sistema/arranque.log`: el registro del arranque hasta montar el disco (K13).
+fn save_boot_log<D: BlockDevice>(fs: &mut FileSystem<D>) {
+    let now = jarvis_desktop::apps::timestamp(rtc::read_utc());
+    bootlog::with_all(|text, dropped| {
+        let mut out = alloc::string::String::from(text);
+        if dropped > 0 {
+            out.push_str(&alloc::format!(
+                "[{dropped} bytes más no entraron]
+"
+            ));
+        }
+        let _ = fs.mkdir("/Sistema", now);
+        match fs.write_file("/Sistema/arranque.log", out.as_bytes(), now) {
+            Ok(()) => serial_println!("REGISTRO_ARRANQUE {} bytes", out.len()),
+            Err(e) => serial_println!("REGISTRO_ARRANQUE no se pudo guardar: {e}"),
+        }
+    });
+}
+
 /// Detiene la CPU hasta la próxima interrupción, para siempre (sin quemar ciclos).
 fn halt() -> ! {
     loop {
@@ -813,6 +878,10 @@ fn panic(info: &PanicInfo<'_>) -> ! {
         let _ = write!(msg, "{}", info.message());
         let body = text::Style::new(text::Weight::Regular, text::Size::Size16, Color::WHITE);
         text::draw(canvas, 40, 100, msg.as_str(), &body);
+        // Lo último que pasó antes del error (en una PC real es lo único que hay para mirar).
+        bootlog::with_tail(20, |tail| {
+            draw_log_lines(canvas, tail, Color::hex(0x2a0008), Color::hex(0xffb0c0));
+        });
     }
     halt();
 }
