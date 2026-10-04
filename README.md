@@ -21,9 +21,9 @@ HTTP, HTML, CSS, cajas, flex y grid).*
 
 | Parte | Qué hay | Dónde |
 |---|---|---|
-| Kernel | K5 ✅: motor de maquetación propio (Wikipedia y Google se ven como en Chrome; YouTube sin JavaScript), firewall con `ufw`, `snap`, `winget`, idiomas (castellano, inglés, portugués). Antes: terminal con `apt`, Configuración, ventanas, red propia, FAT32, HUD. Siguiente: K6 (puente con el cerebro) | [docs/kernel.md](docs/kernel.md) |
-| Cerebro | Núcleo por texto: agente con Claude, 4 tools, permisos de 3 niveles, auditoría | `src/jarvis/` ([PR #1](https://github.com/IamRoman-rb/jarvis-os/pull/1)) |
-| Puente kernel ↔ cerebro | Hito K6 | — |
+| Kernel | K0–K13 ✅ (14 de 15 hitos): HUD, FAT32, ventanas, red y navegador propios, terminal con `apt`, firewall, idiomas, Brave remoto, sincronización, paginación, multitarea, TLS, programas de Linux, audio y video, hardware real (ACPI, SATA/NVMe, USB, HDA, instalador). En curso: K14, Wi-Fi (etapa 1 de 4 ✅: 802.11 y WPA2 en `jarvis-wifi`; sigue el driver de la RTL8821CE) | [docs/kernel.md](docs/kernel.md) |
+| Cerebro | Agente con Claude (Agent SDK), tools con permisos de 3 niveles, auditoría, voz local ("JARVIS, …": Whisper + Piper) | `src/jarvis/` |
+| Puente kernel ↔ cerebro | K7 ✅ (ADR 0008): la consola y la voz de JARVIS-OS hablan con `jarvis serve` en el anfitrión | `src/jarvis/service/` |
 
 ## Probarlo
 

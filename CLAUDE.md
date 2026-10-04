@@ -6,7 +6,7 @@ de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va 
 red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
 idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta; espacio de usuario y programas
-de Linux, la 0010, propuesta; hardware real, la 0011). Roadmap y arquitectura del kernel:
+de Linux, la 0010, propuesta; hardware real, la 0011; Wi-Fi, la 0012, propuesta). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -49,6 +49,9 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
     - drivers/     hardware real (K13, ADR 0011): la mitad de los drivers que interpreta (tablas
                    ACPI, APIC/MSI, GPT, AHCI, NVMe, placas de red, USB/xHCI, HDA, sensores); no_std
                    y sin unsafe (los registros los tocan kernel/ahci.rs, xhci.rs, hda.rs…)
+    - wifi/        Wi-Fi (K14, ADR 0012): tramas 802.11, RSN, WPA2-PSK (claves, saludo de 4 vías)
+                   y CCMP; no_std. Tests cruzados contra un punto de acceso en Python
+                   (wifi/tests/datos/generar.py, con `cryptography`)
     - relay/       el relé (std): reenvía marcos cifrados entre las máquinas de un grupo
     - kernel/      el binario: solo hardware (interrupciones, drivers) → eventos/bloques/píxeles/tramas
                    (task.rs: tareas y cambio de contexto; nettask.rs: la tarea de la red;
@@ -91,7 +94,8 @@ Kernel (desde kernel/):
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
                     (y en usuario/: cargo fmt && cargo clippy --release -- -D warnings)
 Cerebro (desde la raíz):
-- uv sync ; uv run pytest ; uv run ruff check . ; uv run mypy
+- uv sync --extra voice ; uv run pytest ; uv run ruff check . ; uv run mypy
+  (un `uv sync` sin `--extra voice` desinstala la voz; `cargo xtask run` la reinstala sola)
 - jarvis serve [--simulado]: el cerebro para el kernel (ADR 0008). Lo levanta `cargo xtask run`
   con un token por sesión (variable JARVIS_CEREBRO_TOKEN; el kernel lo recibe por fw_cfg).
   Voz ("JARVIS, ..."): uv sync --extra voice ; uv run jarvis voz instalar (baja ~590 MB: preguntale antes a Roman) ;

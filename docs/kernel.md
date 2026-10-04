@@ -418,10 +418,32 @@ firmware UEFI (OVMF en QEMU)
 | `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
 | `linux` (`jarvis-linux`) | La ABI de Linux x86_64 (K11): cargador de ELF (estáticos y static-pie), pila inicial con el vector auxiliar, zonas de memoria (brk, mmap, mprotect, páginas al primer uso) y ~90 llamadas al sistema (archivos, directorios, consola, tiempo, azar, sockets TCP, señales mínimas). Sobre un trait `System`. | 20 tests: un proceso de mentira de punta a punta (cargar, archivos, directorios, memoria, punteros del kernel → EFAULT, sockets) y `cargo xtask test` (programas de verdad, compilados con musl) |
 | `drivers` (`jarvis-drivers`) | Hardware real (K13, ADR 0011), la mitad que interpreta: tablas fijas de ACPI, entradas del IOAPIC y mensajes MSI, GPT (leer, crear, disco vacío), comandos AHCI/ATA y NVMe, descriptores de e1000, RTL8139 y RTL8168, USB (descriptores, TRB y contextos de xHCI, HID, Bulk-Only + SCSI), verbos y grafo de HDA, sensores de temperatura. Sin `unsafe`. | Tests con tablas y descriptores armados byte por byte; la GPT **cruzada contra la crate `gpt`** en los dos sentidos. En QEMU, `cargo xtask test-hardware` (AHCI + e1000e + HDA, NVMe + RTL8139, todo por USB) y `cargo xtask test-instalar` |
+| `wifi` (`jarvis-wifi`) | Wi-Fi (K14, ADR 0012), lo que no toca la placa: tramas 802.11 (encabezado, datos ↔ Ethernet, beacons, sondeo, autenticación, asociación), elemento RSN, PMK y PTK, el saludo de 4 vías y el de grupo de la estación, CCMP con contadores contra repeticiones. | 12 tests: vectores del estándar (PBKDF2 del anexo J, AES Key Wrap del RFC 3394) y 6 **cruzados** contra un punto de acceso en Python con `cryptography` (`wifi/tests/datos/generar.py`): los mensajes 2 y 4 y las tramas cifradas coinciden byte a byte |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K14: Wi-Fi (en curso)
+
+- **Una placa Wi-Fi no es una placa de red con antena.** Una Ethernet manda las tramas que le
+  dan. Una SoftMAC como la RTL8821CE solo hace la radio: buscar redes, asociarse y cifrar lo
+  hace el sistema, con tramas 802.11 que tienen hasta cuatro direcciones (cuál es cuál depende de
+  las banderas ToDS/FromDS) y un encabezado LLC/SNAP para llevar el ethertype.
+- **La contraseña nunca viaja.** De ella sale la PMK (PBKDF2, 4096 vueltas: lento a propósito);
+  de la PMK, las MAC y dos números al azar sale la PTK. Cada lado demuestra que sabe la
+  contraseña firmando un mensaje con su parte de la PTK (la KCK). La clave de grupo viaja
+  cifrada con otra parte (la KEK, con AES Key Wrap).
+- **Lo que protege contra repeticiones se avanza recién con la firma bien.** El contador del
+  saludo y el PN de CCMP solo suben después de verificar el MIC: si no, una trama falsa con un
+  número enorme dejaría afuera a todas las verdaderas. Y el mensaje 1, que no va firmado, no
+  mueve el contador.
+- **El encabezado se autentica, pero no entero.** CCMP firma el encabezado MAC con los bits que
+  cambian en el camino en cero (reintento, ahorro de energía, el número de secuencia): si no,
+  una retransmisión no pasaría el MIC.
+- **Probar contra otra implementación encuentra lo que un test propio no.** Un test que cifra y
+  descifra con el mismo código pasa aunque los dos lados entiendan mal el mismo campo. Por eso
+  el punto de acceso de los tests está escrito en Python con otra biblioteca.
 
 ### K13: hardware real
 
@@ -915,11 +937,13 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K13 terminados (14 de 15 hitos); sigue K14 (Wi-Fi). Lo último: hardware
-real (K13): ACPI, APIC y MSI, discos SATA y NVMe con GPT, placas de red Intel y Realtek, USB
-(teclado, mouse, pendrives y hubs), sonido HDA, sensores de temperatura y el instalador, que
-copia JARVIS-OS de un pendrive a un disco vacío. Falta verificar en la PC los drivers que QEMU no
-emula (RTL8168 y el codec real de HDA).
+**Dónde estamos:** K0–K13 terminados (14 de 15 hitos); K14 (Wi-Fi, ADR 0012) en curso: la
+etapa 1 (802.11 y WPA2 sin hardware, la crate `jarvis-wifi`) está terminada y sigue la etapa 2,
+el driver de la RTL8821CE. Además: el volumen general (Configuración → Sonido y una barra en
+Win+A) y la voz de JARVIS en el anfitrión, que se había quedado sin sus bibliotecas (un `uv sync`
+sin `--extra voice` las desinstala; ahora `cargo xtask run` las pide) y con un umbral de voz por
+encima de lo que llega de un micrófono con poca ganancia. Falta verificar en la PC los drivers
+que QEMU no emula (RTL8168 y el codec real de HDA).
 
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
@@ -937,7 +961,7 @@ emula (RTL8168 y el codec real de HDA).
 | **K11** ✅ | Espacio de usuario (ADR 0010): ring 3, syscalls, cargador ELF ✅. Los primeros programas de Linux estáticos ✅; sockets (y el firewall en la pila de red) ✅; un intérprete de JavaScript (Boa, `apt install js`) ✅. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | **K12** ✅ | Audio y video: salida por virtio-sound con su propia tarea ✅; mezclador, WAV e IMA ADPCM propios ✅; la voz de JARVIS suena en JARVIS-OS y la envolvente de la esfera sale del audio que suena ✅; Música con archivos y el sintetizador ✅; videos AVI (MJPEG + audio) en el Visor ✅. HDA queda para K13 (hardware real) | Drivers de audio, códecs |
 | **K13** ✅ | Hardware real (ADR 0011): ACPI (tablas propias y AML), APIC y MSI ✅; discos SATA (AHCI) y NVMe con GPT ✅; placas de red e1000/e1000e, RTL8139 y RTL8168 ✅; USB (xHCI): teclado, mouse, pendrives y hubs ✅; sonido HDA ✅; sensores de temperatura (Intel, AMD, ACPI) y registro del arranque ✅; instalador desde el pendrive a un disco vacío ✅. La suspensión S3 queda para cuando haya un driver de video (ver "Lo que se aprendió") | Drivers reales |
-| K14 | **Wi-Fi**: un driver de placa real (firmware del fabricante), 802.11 y WPA2. La sincronización no cambia: ya funciona entre redes distintas | Redes inalámbricas, criptografía de enlace |
+| **K14** 🔧 | **Wi-Fi** (ADR 0012), en 4 etapas: 1) tramas 802.11, RSN, WPA2-PSK (PMK, PTK, saludos de 4 vías y de grupo) y CCMP en `jarvis-wifi`, cruzados contra Python ✅; 2) driver de la RTL8821CE con su firmware y escaneo; 3) conexión (autenticar, asociar, saludo, DHCP) y Wi-Fi en Configuración → Red; 4) 5 GHz, 802.11ac y reconexión. La sincronización no cambia: ya funciona entre redes distintas | Redes inalámbricas, criptografía de enlace |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),
 la especificación de virtio y la especificación "Microsoft FAT32 File System".
