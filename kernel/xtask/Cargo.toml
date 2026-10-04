@@ -16,6 +16,8 @@ jarvis-relay = { path = "../relay" }
 png = "0.18"
 # Puente HTTPS del anfitrión: el kernel todavía no tiene TLS (ver xtask/src/puente.rs).
 ureq = "3"
+# K14: verificar el firmware que se baja (rtw8821c_fw.bin).
+sha2 = "0.10"
 # El puente convierte las imágenes de la web a BMP (el kernel solo lee BMP; ver ADR 0005).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 # Y dibuja los SVG (logos e íconos de las páginas).

@@ -154,6 +154,9 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     config.kernel_stack_size = 4 * 1024 * 1024;
     // Mapear toda la memoria física: el heap la usa (ver allocator.rs) y el disco hace DMA.
     config.mappings.physical_memory = Some(Mapping::Dynamic);
+    // K14: el ramdisk (el firmware del Wi-Fi), lejos de la zona de los programas de usuario
+    // (abajo de 512 GiB, que la paginación propia deja libre).
+    config.mappings.ramdisk_memory = Mapping::FixedAddress(0x0000_6000_0000_0000);
     // Sin pedir resolución mínima: el bootloader deja el modo de video que eligió el firmware
     // (1280×800 en QEMU, la nativa del monitor en una PC real). Si se pide un mínimo, salta al
     // modo MÁS GRANDE que lo cumpla (en QEMU, 2560×1600).
@@ -187,6 +190,16 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         .expect("no hay RAM usable para el heap");
     let heap_phys = heap;
     let heap = heap.1;
+    // K14: el ramdisk que cargó el bootloader (el firmware de las placas), copiado al heap.
+    let ramdisk: Option<alloc::vec::Vec<u8>> = boot_info.ramdisk_addr.into_option().map(|a| {
+        // SAFETY: el bootloader mapeó `ramdisk_len` bytes del ramdisk en `a`, solo de lectura,
+        // y esa memoria no es usable (no la entrega ni el heap ni la paginación).
+        unsafe { core::slice::from_raw_parts(a as *const u8, boot_info.ramdisk_len as usize) }
+            .to_vec()
+    });
+    if let Some(rd) = &ramdisk {
+        serial_println!("ramdisk: {} KiB", rd.len() / 1024);
+    }
     let ram: u64 = boot_info
         .memory_regions
         .iter()
@@ -383,9 +396,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // K14: el firmware de la placa Wi-Fi (si hay disco y `cargo xtask` lo copió).
     let mut disk = disk;
+    // Del disco (si alguien lo copió ahí) o del ramdisk del arranque (lo pone `cargo xtask`).
     let wifi_fw = disk
         .as_mut()
-        .and_then(|fs| fs.read_file(wifi::FIRMWARE).ok());
+        .and_then(|fs| fs.read_file(wifi::FIRMWARE).ok())
+        .or_else(|| {
+            let rd = ramdisk.as_deref()?;
+            jarvis_drivers::ramdisk::find(rd, wifi::RAMDISK_NAME).map(<[u8]>::to_vec)
+        });
+    drop(ramdisk);
 
     // Red: virtio-net o una placa real (Intel, Realtek; K13) y el Wi-Fi (K14) + smoltcp, en su
     // propia tarea (K9). La dirección se pide por DHCP.

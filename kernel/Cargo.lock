@@ -2281,6 +2281,7 @@ dependencies = [
  "png 0.18.1",
  "resvg",
  "serde_json",
+ "sha2",
  "tungstenite",
  "ureq",
 ]

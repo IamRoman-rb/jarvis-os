@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 mod brave;
 mod cerebro;
+mod firmware;
 mod hardware;
 mod iso;
 mod puente;
@@ -231,8 +232,12 @@ fn build() -> Result<PathBuf> {
     }
     let kernel = target_dir().join("x86_64-unknown-none/release/jarvis-kernel");
     let image = target_dir().join("jarvis-os-uefi.img");
-    bootloader::UefiBoot::new(&kernel)
-        .create_disk_image(&image)
+    let mut boot = bootloader::UefiBoot::new(&kernel);
+    // K14: el firmware de la placa Wi-Fi, en el ramdisk (va en la partición de arranque).
+    if let Some(rd) = firmware::ramdisk() {
+        boot.set_ramdisk(&rd);
+    }
+    boot.create_disk_image(&image)
         .map_err(|e| format!("no pude crear la imagen UEFI: {e}"))?;
     Ok(image)
 }

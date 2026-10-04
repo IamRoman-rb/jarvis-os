@@ -16,6 +16,7 @@
 //! - [`nic`]: los anillos de descriptores de las placas de red Intel y Realtek.
 //! - [`usb`]: descriptores, TRB y contextos de xHCI, teclado y mouse HID, BOT y SCSI.
 //! - [`hda`]: los verbos de los codecs de audio y el camino del DAC al parlante.
+//! - [`ramdisk`]: los archivos que el bootloader carga con el kernel (el firmware del Wi-Fi).
 //! - [`rtw88`]: la placa Wi-Fi Realtek RTL8821CE (K14): encendido, efuse, firmware, tablas,
 //!   canales y descriptores.
 //! - [`sensors`]: la temperatura del procesador (AMD por SMN) y de las zonas térmicas de ACPI.
@@ -34,6 +35,7 @@ pub mod gpt;
 pub mod hda;
 pub mod nic;
 pub mod nvme;
+pub mod ramdisk;
 pub mod rtw88;
 pub mod sensors;
 pub mod usb;

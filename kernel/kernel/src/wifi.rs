@@ -19,8 +19,10 @@ use crate::nic::Frames;
 use crate::rtw88::PciBus;
 use crate::{entropy, rtw88, serial_println, time};
 
-/// Dónde está el firmware en el disco (lo pone `cargo xtask`).
+/// Dónde se busca el firmware: en el disco (si alguien lo copió) y en el ramdisk del arranque,
+/// donde lo pone `cargo xtask` (xtask/src/firmware.rs).
 pub const FIRMWARE: &str = "/Sistema/firmware/rtw8821c_fw.bin";
+pub const RAMDISK_NAME: &str = "rtw88/rtw8821c_fw.bin";
 
 pub struct Wifi {
     bus: PciBus,
@@ -40,7 +42,7 @@ impl Wifi {
         let (mut bus, dev) = rtw88::probe()?;
         let Some(fw) = firmware else {
             serial_println!(
-                "WIFI RTL8821CE: falta el firmware ({FIRMWARE}); sin Wi-Fi (lo copia cargo xtask)"
+                "WIFI RTL8821CE: falta el firmware (ni en el ramdisk ni en {FIRMWARE}); sin Wi-Fi"
             );
             return None;
         };
