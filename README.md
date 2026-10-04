@@ -21,7 +21,7 @@ HTTP, HTML, CSS, cajas, flex y grid).*
 
 | Parte | Qué hay | Dónde |
 |---|---|---|
-| Kernel | K0–K13 ✅ (14 de 15 hitos): HUD, FAT32, ventanas, red y navegador propios, terminal con `apt`, firewall, idiomas, Brave remoto, sincronización, paginación, multitarea, TLS, programas de Linux, audio y video, hardware real (ACPI, SATA/NVMe, USB, HDA, instalador). En curso: K14, Wi-Fi (etapa 1 de 4 ✅: 802.11 y WPA2 en `jarvis-wifi`; sigue el driver de la RTL8821CE) | [docs/kernel.md](docs/kernel.md) |
+| Kernel | K0–K14 ✅ (15 de 15 hitos): HUD, FAT32, ventanas, red y navegador propios, terminal con `apt`, firewall, idiomas, Brave remoto, sincronización, paginación, multitarea, TLS, programas de Linux, audio y video, hardware real (ACPI, SATA/NVMe, USB, HDA, instalador) y Wi-Fi (RTL8821CE, WPA2, 2,4 y 5 GHz, 802.11n/ac; falta probarlo en la PC) | [docs/kernel.md](docs/kernel.md) |
 | Cerebro | Agente con Claude (Agent SDK), tools con permisos de 3 niveles, auditoría, voz local ("JARVIS, …": Whisper + Piper) | `src/jarvis/` |
 | Puente kernel ↔ cerebro | K7 ✅ (ADR 0008): la consola y la voz de JARVIS-OS hablan con `jarvis serve` en el anfitrión | `src/jarvis/service/` |
 

@@ -387,6 +387,8 @@ firmware UEFI (OVMF en QEMU)
             ├─ nic.rs         K13: virtio-net o una placa real (e1000.rs, rtl8139.rs, rtl8169.rs)
             ├─ xhci.rs        K13: USB 3 (teclado, mouse, pendrives, hubs), con su tarea "usb"
             ├─ hda.rs         K13: la placa de sonido de las PC (Intel HDA y su codec)
+            ├─ rtw88.rs       K14: la placa Wi-Fi RTL8821CE (anillos de DMA de 32 bits, MSI)
+            ├─ wifi.rs        K14: la placa + la estación de jarvis-wifi, como una placa de red
             ├─ installer.rs   K13: copia el arranque a un disco vacío y crea la partición de datos
             ├─ bootlog.rs     K13: el registro del arranque (en pantalla y en /Sistema/arranque.log)
             ├─ hw.rs          K13: la lista de dispositivos para Configuración → Hardware
@@ -417,14 +419,14 @@ firmware UEFI (OVMF en QEMU)
 | `mem` (`jarvis-mem`) | Memoria: allocator de marcos físicos (mapa de bits), tablas de páginas de 4 niveles (mapear, traducir, desmapear, recorrer; páginas de 4 KiB, 2 MiB y 1 GiB) y segmentos del ELF del kernel para W^X. Sobre un trait `PhysMem`. | 8 tests sobre una RAM de mentira (copiar una jerarquía da las mismas traducciones) y `cargo xtask test` (el kernel arranca con sus tablas y verifica W^X) |
 | `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
 | `linux` (`jarvis-linux`) | La ABI de Linux x86_64 (K11): cargador de ELF (estáticos y static-pie), pila inicial con el vector auxiliar, zonas de memoria (brk, mmap, mprotect, páginas al primer uso) y ~90 llamadas al sistema (archivos, directorios, consola, tiempo, azar, sockets TCP, señales mínimas). Sobre un trait `System`. | 20 tests: un proceso de mentira de punta a punta (cargar, archivos, directorios, memoria, punteros del kernel → EFAULT, sockets) y `cargo xtask test` (programas de verdad, compilados con musl) |
-| `drivers` (`jarvis-drivers`) | Hardware real (K13, ADR 0011), la mitad que interpreta: tablas fijas de ACPI, entradas del IOAPIC y mensajes MSI, GPT (leer, crear, disco vacío), comandos AHCI/ATA y NVMe, descriptores de e1000, RTL8139 y RTL8168, USB (descriptores, TRB y contextos de xHCI, HID, Bulk-Only + SCSI), verbos y grafo de HDA, sensores de temperatura. Sin `unsafe`. | Tests con tablas y descriptores armados byte por byte; la GPT **cruzada contra la crate `gpt`** en los dos sentidos. En QEMU, `cargo xtask test-hardware` (AHCI + e1000e + HDA, NVMe + RTL8139, todo por USB) y `cargo xtask test-instalar` |
-| `wifi` (`jarvis-wifi`) | Wi-Fi (K14, ADR 0012), lo que no toca la placa: tramas 802.11 (encabezado, datos ↔ Ethernet, beacons, sondeo, autenticación, asociación), elemento RSN, PMK y PTK, el saludo de 4 vías y el de grupo de la estación, CCMP con contadores contra repeticiones. | 12 tests: vectores del estándar (PBKDF2 del anexo J, AES Key Wrap del RFC 3394) y 6 **cruzados** contra un punto de acceso en Python con `cryptography` (`wifi/tests/datos/generar.py`): los mensajes 2 y 4 y las tramas cifradas coinciden byte a byte |
+| `drivers` (`jarvis-drivers`) | Hardware real (K13, ADR 0011), la mitad que interpreta: tablas fijas de ACPI, entradas del IOAPIC y mensajes MSI, GPT (leer, crear, disco vacío), comandos AHCI/ATA y NVMe, descriptores de e1000, RTL8139 y RTL8168, USB (descriptores, TRB y contextos de xHCI, HID, Bulk-Only + SCSI), verbos y grafo de HDA, sensores de temperatura; la placa Wi-Fi RTL8821CE (K14, `rtw88`: encendido, efuse, carga del firmware, comandos H2C, tablas de Realtek con condiciones, canales, potencia, descriptores) y el ramdisk del arranque. Sin `unsafe`. | Tests con tablas y descriptores armados byte por byte; la GPT **cruzada contra la crate `gpt`** en los dos sentidos; la RTL8821CE contra una **placa simulada** (bits que se borran solos, el DMA interno, el efuse, la radio, el firmware que arranca). En QEMU, `cargo xtask test-hardware` (AHCI + e1000e + HDA, NVMe + RTL8139, todo por USB) y `cargo xtask test-instalar` |
+| `wifi` (`jarvis-wifi`) | Wi-Fi (K14, ADR 0012), lo que no toca la placa: tramas 802.11 (encabezado, datos ↔ Ethernet, beacons, sondeo, autenticación, asociación), elemento RSN, PMK y PTK, el saludo de 4 vías y el de grupo de la estación, CCMP con contadores contra repeticiones, y la estación entera (sin E/S): buscar redes, conectarse, datos, pérdida de beacons y reintentos. | 20 tests: vectores del estándar (PBKDF2 del anexo J, AES Key Wrap del RFC 3394), 6 **cruzados** contra un punto de acceso en Python con `cryptography` (`wifi/tests/datos/generar.py`: los mensajes 2 y 4 y las tramas cifradas coinciden byte a byte) y 8 de la estación contra puntos de acceso de mentira en un aire simulado |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
 
-### K14: Wi-Fi (en curso)
+### K14: Wi-Fi
 
 - **Una placa Wi-Fi no es una placa de red con antena.** Una Ethernet manda las tramas que le
   dan. Una SoftMAC como la RTL8821CE solo hace la radio: buscar redes, asociarse y cifrar lo
@@ -444,6 +446,28 @@ firmware UEFI (OVMF en QEMU)
 - **Probar contra otra implementación encuentra lo que un test propio no.** Un test que cifra y
   descifra con el mismo código pasa aunque los dos lados entiendan mal el mismo campo. Por eso
   el punto de acceso de los tests está escrito en Python con otra biblioteca.
+- **La placa corre un programa propio.** La RTL8821CE tiene un procesador adentro y no hace
+  nada sin su firmware. Se carga raro: cada pedazo de 4 KiB se manda por la *cola de beacons*
+  a una "página reservada" de la memoria de la placa, y un DMA interno lo copia a su memoria de
+  código o de datos verificando una suma. Después el sistema le habla por mensajes (H2C) en
+  cuatro buzones de registros o en paquetes.
+- **Las tablas de Realtek son un pequeño programa.** Miles de pares (registro, valor) con
+  `if`/`elif`/`else` según el tipo de placa: la misma tabla sirve para todas las variantes del
+  chip. Se generan del código de Linux (BSD-3-Clause) con un script, no a mano.
+- **Un driver sin el hardware se prueba contra un simulador.** QEMU no tiene placas Wi-Fi. La
+  mitad que interpreta corre contra una placa de mentira que hace lo que el driver espera del
+  silicio (bits que se borran solos, el DMA interno, el efuse) y la estación contra puntos de
+  acceso de mentira con su propio autenticador. Lo que eso no cubre (los valores analógicos, la
+  radio de verdad) se ve en la PC, en el registro del arranque.
+- **32 bits todavía importan.** La placa solo ve direcciones de 32 bits, y en una PC con 16 GiB
+  el heap (la región de RAM más grande) queda arriba de 4 GiB. El kernel aparta 4 MiB abajo de
+  4 GiB antes de armar la paginación (`dma::alloc32`).
+- **Un firmware que no se puede redistribuir modificado no va en el repositorio.** `cargo xtask`
+  lo baja de linux-firmware con un hash fijo, lo valida con el mismo parser del driver y lo pone
+  en el *ramdisk* que el bootloader carga con el kernel: así viaja en la partición de arranque y
+  llega solo a la ISO, al pendrive y al disco instalado.
+- **Con radar no se habla primero.** En los canales de 5 GHz que comparten banda con radares
+  (52–144), una estación no puede mandar un pedido de sondeo: solo escucha beacons.
 
 ### K13: hardware real
 
@@ -937,13 +961,14 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K13 terminados (14 de 15 hitos); K14 (Wi-Fi, ADR 0012) en curso: la
-etapa 1 (802.11 y WPA2 sin hardware, la crate `jarvis-wifi`) está terminada y sigue la etapa 2,
-el driver de la RTL8821CE. Además: el volumen general (Configuración → Sonido y una barra en
-Win+A) y la voz de JARVIS en el anfitrión, que se había quedado sin sus bibliotecas (un `uv sync`
-sin `--extra voice` las desinstala; ahora `cargo xtask run` las pide) y con un umbral de voz por
-encima de lo que llega de un micrófono con poca ganancia. Falta verificar en la PC los drivers
-que QEMU no emula (RTL8168 y el codec real de HDA).
+**Dónde estamos:** K0–K14 terminados (15 de 15 hitos). Lo último: el Wi-Fi (K14, ADR 0012).
+La RTL8821CE de la PC de Roman tiene driver (port de rtw88, con el firmware de Realtek en el
+ramdisk del arranque), una estación que busca redes en 2,4 y 5 GHz, se conecta con WPA2, usa
+802.11n/ac y se reconecta sola, y una sección Wi-Fi en Configuración → Red. También: el volumen
+general (Configuración → Sonido y Win+A) y la voz de JARVIS en el anfitrión arreglada.
+**Falta verificar en la PC** lo que QEMU no emula: la RTL8168, el codec real de HDA y ahora la
+RTL8821CE (QEMU no tiene ninguna placa Wi-Fi: la lógica se probó contra una placa simulada y
+puntos de acceso de mentira, y el registro del arranque dice qué pasó).
 
 | Hito | Qué se logra | Qué se aprende |
 |---|---|---|
@@ -961,7 +986,7 @@ que QEMU no emula (RTL8168 y el codec real de HDA).
 | **K11** ✅ | Espacio de usuario (ADR 0010): ring 3, syscalls, cargador ELF ✅. Los primeros programas de Linux estáticos ✅; sockets (y el firewall en la pila de red) ✅; un intérprete de JavaScript (Boa, `apt install js`) ✅. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | **K12** ✅ | Audio y video: salida por virtio-sound con su propia tarea ✅; mezclador, WAV e IMA ADPCM propios ✅; la voz de JARVIS suena en JARVIS-OS y la envolvente de la esfera sale del audio que suena ✅; Música con archivos y el sintetizador ✅; videos AVI (MJPEG + audio) en el Visor ✅. HDA queda para K13 (hardware real) | Drivers de audio, códecs |
 | **K13** ✅ | Hardware real (ADR 0011): ACPI (tablas propias y AML), APIC y MSI ✅; discos SATA (AHCI) y NVMe con GPT ✅; placas de red e1000/e1000e, RTL8139 y RTL8168 ✅; USB (xHCI): teclado, mouse, pendrives y hubs ✅; sonido HDA ✅; sensores de temperatura (Intel, AMD, ACPI) y registro del arranque ✅; instalador desde el pendrive a un disco vacío ✅. La suspensión S3 queda para cuando haya un driver de video (ver "Lo que se aprendió") | Drivers reales |
-| **K14** 🔧 | **Wi-Fi** (ADR 0012), en 4 etapas: 1) tramas 802.11, RSN, WPA2-PSK (PMK, PTK, saludos de 4 vías y de grupo) y CCMP en `jarvis-wifi`, cruzados contra Python ✅; 2) driver de la RTL8821CE con su firmware y escaneo; 3) conexión (autenticar, asociar, saludo, DHCP) y Wi-Fi en Configuración → Red; 4) 5 GHz, 802.11ac y reconexión. La sincronización no cambia: ya funciona entre redes distintas | Redes inalámbricas, criptografía de enlace |
+| **K14** ✅ | **Wi-Fi** (ADR 0012), en 4 etapas: 1) tramas 802.11, RSN, WPA2-PSK (PMK, PTK, saludos de 4 vías y de grupo) y CCMP en `jarvis-wifi`, cruzados contra Python ✅; 2) driver de la RTL8821CE (port de rtw88: encendido, efuse, firmware por la página reservada, tablas de Realtek, canales, potencia, antena sin Bluetooth) y su firmware en el ramdisk del arranque ✅; 3) la estación (buscar, autenticar, asociar, saludo, datos cifrados), cable y Wi-Fi juntos con DHCP al cambiar de conexión, y Wi-Fi en Configuración → Red ✅; 4) 5 GHz (con los canales de radar solo escuchando), 802.11n/ac con WMM y reconexión con espera ✅. Falta verificarlo en la PC. El ahorro de energía queda para después | Redes inalámbricas, criptografía de enlace, firmware de dispositivos |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),
 la especificación de virtio y la especificación "Microsoft FAT32 File System".
