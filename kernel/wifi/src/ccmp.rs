@@ -48,13 +48,14 @@ pub struct Key {
 }
 
 impl Key {
-    /// `rsc`: el último PN que ya usó el otro lado (el punto de acceso lo dice en el mensaje 3
-    /// para la clave de grupo; para la de la estación es 0).
+    /// `rsc`: el último PN que ya se usó con esta clave (el punto de acceso lo dice en el
+    /// mensaje 3 para la clave de grupo; para la de la estación es 0). Se recibe solo lo
+    /// posterior, y si se manda, se sigue desde ahí.
     pub fn new(key: &[u8; 16], id: u8, rsc: u64) -> Key {
         Key {
             cipher: Aes128Ccm::new(GenericArray::from_slice(key)),
             id,
-            tx_pn: 1,
+            tx_pn: rsc + 1,
             rx_pn: [rsc; 16],
         }
     }

@@ -35,8 +35,12 @@ pub const PROTECTED: u8 = 0x40;
 pub const IE_SSID: u8 = 0;
 pub const IE_RATES: u8 = 1;
 pub const IE_DS: u8 = 3;
+pub const IE_HT_CAPS: u8 = 45;
 pub const IE_RSN: u8 = 48;
 pub const IE_EXT_RATES: u8 = 50;
+pub const IE_VHT_CAPS: u8 = 191;
+pub const IE_VENDOR: u8 = 221;
+pub const ACTION: u8 = 13;
 
 /// Velocidades básicas de 2,4 GHz (802.11b/g, en unidades de 500 kb/s; el bit alto = básica).
 pub const RATES_2G: [u8; 8] = [0x82, 0x84, 0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24];
@@ -176,23 +180,33 @@ pub fn to_ethernet(frame: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Una trama Ethernet que sale → trama de datos para el punto de acceso `bssid` (ToDS, sin QoS
-/// ni cifrar: eso lo hace [`crate::ccmp`]). `None` si la trama Ethernet es demasiado corta.
+/// Una trama Ethernet que sale → trama de datos para el punto de acceso `bssid` (ToDS, sin
+/// cifrar: eso lo hace [`crate::ccmp`]). `None` si la trama Ethernet es demasiado corta.
 pub fn from_ethernet(eth: &[u8], bssid: Mac, seq: u16) -> Option<Vec<u8>> {
+    data_frame(eth, bssid, seq, false)
+}
+
+/// Como [`from_ethernet`], pero con QoS (subtipo 8, prioridad 0 = mejor esfuerzo): la que usa
+/// una estación 802.11n/ac con un punto de acceso con WMM.
+pub fn from_ethernet_qos(eth: &[u8], bssid: Mac, seq: u16) -> Option<Vec<u8>> {
+    data_frame(eth, bssid, seq, true)
+}
+
+fn data_frame(eth: &[u8], bssid: Mac, seq: u16, qos: bool) -> Option<Vec<u8>> {
     if eth.len() < 14 {
         return None;
     }
     let dst: Mac = eth[..6].try_into().ok()?;
     let src: Mac = eth[6..12].try_into().ok()?;
     let h = Header {
-        fc: [TYPE_DATA << 2, TO_DS],
+        fc: [(TYPE_DATA << 2) | if qos { 0x80 } else { 0 }, TO_DS],
         duration: 0,
         addr1: bssid,
         addr2: src,
         addr3: dst,
         seq: seq << 4,
         addr4: None,
-        qos: None,
+        qos: qos.then_some(0),
     };
     let mut out = Vec::with_capacity(24 + 8 + eth.len() - 12);
     h.write(&mut out);
@@ -247,6 +261,27 @@ pub struct Bss {
     pub rsn: Option<Vec<u8>>,
     /// Las velocidades que anuncia (para pedirle las mismas al asociarse).
     pub rates: Vec<u8>,
+    /// 802.11n (HT), 802.11ac (VHT) y calidad de servicio (WMM).
+    pub ht: bool,
+    pub vht: bool,
+    pub wmm: bool,
+}
+
+/// Las velocidades de 802.11b/g como bits (1, 2, 5,5 y 11 Mb/s en los bits 0–3; 6 a 54 en los
+/// 4–11): el formato que espera el firmware de la placa.
+pub fn rate_bits(rates: &[u8]) -> u16 {
+    const ORDER: [u8; 12] = [2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108];
+    rates.iter().fold(0, |acc, r| {
+        ORDER
+            .iter()
+            .position(|o| *o == r & 0x7f)
+            .map_or(acc, |i| acc | (1 << i))
+    })
+}
+
+/// El elemento WMM de Microsoft (OUI 00-50-F2, tipo 2).
+fn is_wmm(data: &[u8]) -> bool {
+    data.len() >= 4 && data[..4] == [0x00, 0x50, 0xf2, 0x02]
 }
 
 /// Lee un beacon o una respuesta al sondeo.
@@ -269,12 +304,18 @@ pub fn parse_beacon(frame: &[u8]) -> Option<Bss> {
         },
         rsn: None,
         rates: Vec::new(),
+        ht: false,
+        vht: false,
+        wmm: false,
     };
     for (id, data) in elements(&frame[36..]) {
         match id {
             IE_SSID => bss.ssid = data.to_vec(),
             IE_RATES | IE_EXT_RATES => bss.rates.extend_from_slice(data),
             IE_DS if !data.is_empty() => bss.channel = data[0],
+            IE_HT_CAPS => bss.ht = true,
+            IE_VHT_CAPS => bss.vht = true,
+            IE_VENDOR if is_wmm(data) => bss.wmm = true,
             IE_RSN => {
                 let mut ie = Vec::with_capacity(data.len() + 2);
                 element(&mut ie, IE_RSN, data);
@@ -343,6 +384,84 @@ pub fn assoc_request(src: Mac, bss: &Bss, rsn: Option<&[u8]>, seq: u16) -> Vec<u
     if let Some(ie) = rsn {
         out.extend_from_slice(ie);
     }
+    if bss.ht && bss.wmm {
+        // 802.11n: un flujo, 20 MHz, sin ahorro de energía por MIMO (SMPS deshabilitado), y
+        // recibe MCS 0–7.
+        let mut ht = [0u8; 26];
+        ht[0] = 0x0c;
+        ht[3] = 0xff;
+        element(&mut out, IE_HT_CAPS, &ht);
+        if bss.vht && bss.channel > 14 {
+            // 802.11ac: un flujo, MCS 0–9 al recibir y al mandar, el resto "no soportado".
+            let mut vht = [0u8; 12];
+            vht[4..6].copy_from_slice(&0xfffeu16.to_le_bytes());
+            vht[8..10].copy_from_slice(&0xfffeu16.to_le_bytes());
+            element(&mut out, IE_VHT_CAPS, &vht);
+        }
+    }
+    if bss.wmm {
+        // WMM: estación con QoS, sin U-APSD.
+        element(
+            &mut out,
+            IE_VENDOR,
+            &[0x00, 0x50, 0xf2, 0x02, 0x00, 0x01, 0x00],
+        );
+    }
+    out
+}
+
+/// La respuesta a la asociación, con lo que el punto de acceso acepta (sus velocidades y si
+/// confirmó HT/VHT).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AssocInfo {
+    pub status: u16,
+    pub aid: u16,
+    pub rates: Vec<u8>,
+    pub ht: bool,
+    pub vht: bool,
+}
+
+pub fn assoc_info(frame: &[u8], bssid: Mac) -> Option<AssocInfo> {
+    let (status, aid) = assoc_response(frame, bssid)?;
+    let mut info = AssocInfo {
+        status,
+        aid,
+        ..AssocInfo::default()
+    };
+    for (id, data) in elements(frame.get(30..).unwrap_or(&[])) {
+        match id {
+            IE_RATES | IE_EXT_RATES => info.rates.extend_from_slice(data),
+            IE_HT_CAPS => info.ht = true,
+            IE_VHT_CAPS => info.vht = true,
+            _ => {}
+        }
+    }
+    Some(info)
+}
+
+/// Un pedido de Block Ack (ADDBA): la respuesta "rechazado" (estado 37). La estación no junta
+/// tramas en ráfagas (A-MPDU): el punto de acceso sigue mandando de a una.
+pub fn addba_refusal(frame: &[u8], own: Mac, seq: u16) -> Option<Vec<u8>> {
+    let h = Header::parse(frame)?;
+    let body = frame.get(24..)?;
+    // Categoría 3 (Block Ack), acción 0 (pedido): token, parámetros (2), tiempo (2), inicio (2).
+    if h.kind() != TYPE_MGMT || h.subtype() != ACTION || body.len() < 9 || body[..2] != [3, 0] {
+        return None;
+    }
+    let mut out = Vec::new();
+    Header::mgmt(ACTION, h.addr2, own, h.addr3, seq).write(&mut out);
+    out.extend_from_slice(&[3, 1, body[2]]); // respuesta, mismo token
+    out.extend_from_slice(&37u16.to_le_bytes());
+    out.extend_from_slice(&body[3..5]); // los parámetros que pidió
+    out.extend_from_slice(&0u16.to_le_bytes());
+    Some(out)
+}
+
+/// Desautenticarse (al desconectarse por pedido).
+pub fn deauth(own: Mac, bssid: Mac, reason: u16, seq: u16) -> Vec<u8> {
+    let mut out = Vec::new();
+    Header::mgmt(DEAUTH, bssid, own, bssid, seq).write(&mut out);
+    out.extend_from_slice(&reason.to_le_bytes());
     out
 }
 

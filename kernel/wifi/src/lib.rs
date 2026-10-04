@@ -12,8 +12,10 @@
 //!   desenvuelto de la clave de grupo (AES Key Wrap).
 //! - [`eapol`]: el saludo de 4 vías (y el de grupo) del lado de la estación.
 //! - [`ccmp`]: el cifrado de las tramas de datos (AES-CCM).
+//! - [`station`]: la estación entera: buscar redes, conectarse, reintentar y pasar los datos.
 //!
-//! El driver de la placa (etapa 2) y la conexión con la pila de red (etapa 3) van aparte.
+//! El driver de la placa está en `jarvis-drivers` (rtw88) y la unión con la pila de red, en el
+//! kernel (kernel/src/wifi.rs).
 
 #![no_std]
 
@@ -24,6 +26,7 @@ pub mod crypto;
 pub mod eapol;
 pub mod frame;
 pub mod rsn;
+pub mod station;
 
 /// Una dirección MAC.
 pub type Mac = [u8; 6];
