@@ -767,7 +767,13 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// Una conexión larga cambió (el kernel la atiende): se le avisa a quien la abrió.
     /// Hay parlantes (K12): la placa de sonido del kernel, a `rate` Hz estéreo.
+    /// Volumen general que está usando el mezclador (0..=100).
+    pub fn volume(&self) -> u32 {
+        self.sound.volume()
+    }
+
     pub fn enable_sound(&mut self, rate: u32) {
+        self.sound.set_volume(self.config.volume);
         self.sound.enable(rate);
         self.brain.speakers = rate;
         self.logs.push(format!("SONIDO_LISTO {rate} Hz"));
@@ -1605,6 +1611,12 @@ impl<D: BlockDevice> Desktop<D> {
                 self.apply_config(cfg, now_ms);
                 self.overlay_dirty = true;
             }
+            QuickHit::Volume(v) => {
+                let mut cfg = self.config.clone();
+                cfg.volume = v.min(100);
+                self.apply_config(cfg, now_ms);
+                self.overlay_dirty = true;
+            }
             QuickHit::Button(b) => {
                 self.set_overlay(Overlay::None);
                 match b {
@@ -1709,6 +1721,7 @@ impl<D: BlockDevice> Desktop<D> {
             return;
         }
         let old = core::mem::replace(&mut self.config, cfg);
+        self.sound.set_volume(self.config.volume);
         if old.wallpaper != self.config.wallpaper {
             self.bg_dirty = true;
         }
@@ -1856,20 +1869,33 @@ impl<D: BlockDevice> Desktop<D> {
                 true
             }
             Overlay::Quick { sel } => {
-                let n = panels::QUICK.len() + 3;
+                // Los interruptores (2 filas de 3), el volumen (una fila sola) y 3 botones.
+                let vol = panels::QUICK_VOLUME;
+                let n = vol + 4;
+                let on_volume = *sel == vol;
                 match key {
                     Key::Escape => self.set_overlay(Overlay::None),
+                    // Sobre el volumen, las flechas de los costados lo cambian de a 10.
+                    Key::Right | Key::Left if on_volume => {
+                        let d = if key == Key::Right { 10 } else { -10 };
+                        let v = (i32::from(self.config.volume) + d).clamp(0, 100) as u8;
+                        self.quick_hit(QuickHit::Volume(v), now_ms, clock);
+                    }
                     Key::Right | Key::Tab => *sel = (*sel + 1) % n,
                     Key::Left => *sel = (*sel + n - 1) % n,
-                    Key::Down => *sel = (*sel + 3).min(n - 1),
+                    Key::Down if *sel >= vol => *sel = (*sel).max(vol + 1),
+                    Key::Down => *sel = (*sel + 3).min(vol),
+                    Key::Up if *sel > vol => *sel = vol,
+                    Key::Up if *sel == vol => *sel = vol - 2,
                     Key::Up => *sel = sel.saturating_sub(3),
+                    Key::Enter | Key::Char(' ') if on_volume => {}
                     Key::Enter | Key::Char(' ') => {
                         let i = *sel;
                         let hit = match panels::QUICK.get(i) {
                             Some((q, _)) => QuickHit::Toggle(*q),
                             None => QuickHit::Button(
                                 [QuickButton::Settings, QuickButton::Lock, QuickButton::Power]
-                                    [(i - panels::QUICK.len()).min(2)],
+                                    [(i - vol - 1).min(2)],
                             ),
                         };
                         self.quick_hit(hit, now_ms, clock);

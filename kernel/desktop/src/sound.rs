@@ -26,12 +26,33 @@ pub struct Sound {
     played: u64,
     /// La voz de JARVIS que está llegando del cerebro.
     voice: Option<u32>,
+    /// Volumen general (0..=100); se guarda aunque todavía no haya parlantes.
+    volume: Option<u32>,
 }
 
 impl Sound {
     /// Hay parlantes, a `rate` Hz estéreo (lo dice el kernel al arrancar).
     pub fn enable(&mut self, rate: u32) {
-        self.mixer = Some(Mixer::new(rate));
+        let mut m = Mixer::new(rate);
+        if let Some(v) = self.volume {
+            m.master = v;
+        }
+        self.mixer = Some(m);
+    }
+
+    /// Volumen general, 0 a 100 (Configuración → Sonido o el panel Win+A).
+    pub fn set_volume(&mut self, volume: u8) {
+        let v = u32::from(volume.min(100));
+        self.volume = Some(v);
+        if let Some(m) = self.mixer.as_mut() {
+            m.master = v;
+        }
+    }
+
+    pub fn volume(&self) -> u32 {
+        self.mixer
+            .as_ref()
+            .map_or(self.volume.unwrap_or(100), |m| m.master)
     }
 
     pub fn available(&self) -> bool {

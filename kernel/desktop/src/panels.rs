@@ -1,7 +1,8 @@
 //! Paneles y menús que se abren con atajos de Windows:
 //!
 //! - **Menú de lista** ([`Menu`]): Win+X (enlaces rápidos) y Alt+Espacio (menú de la ventana).
-//! - **Configuración rápida** (Win+A): interruptores de lo más usado y accesos directos.
+//! - **Configuración rápida** (Win+A): interruptores de lo más usado, el volumen y accesos
+//!   directos.
 //! - **Centro de notificaciones** (Win+N): calendario del mes y los últimos avisos.
 
 use alloc::format;
@@ -308,7 +309,28 @@ const QB: [(QuickButton, &str); 3] = [
 ];
 
 pub fn quick_rect(w: usize, _h: usize) -> Rect {
-    Rect::new(w as i32 - MARGIN - 420, 200, 420, 268)
+    Rect::new(w as i32 - MARGIN - 420, 200, 420, 314)
+}
+
+/// Lugar del volumen en la selección con el teclado: después de los interruptores.
+pub const QUICK_VOLUME: usize = QUICK.len();
+
+/// La fila del volumen (debajo de los interruptores).
+fn volume_row(r: Rect) -> Rect {
+    Rect::new(r.x + 16, r.y + 204, r.w - 32, 40)
+}
+
+/// La barra del volumen, adentro de su fila: se le hace clic donde se quiere el volumen.
+pub fn volume_bar(w: usize, h: usize) -> Rect {
+    let row = volume_row(quick_rect(w, h));
+    Rect::new(row.x + 100, row.y + 16, row.w - 100 - 60, 8)
+}
+
+/// El volumen (0..=100, de a 5) que corresponde a hacer clic en `x` sobre la barra.
+pub fn volume_at(w: usize, h: usize, x: i32) -> u8 {
+    let bar = volume_bar(w, h);
+    let v = (x - bar.x).clamp(0, bar.w) * 100 / bar.w.max(1);
+    ((v + 2) / 5 * 5).clamp(0, 100) as u8
 }
 
 fn tile(r: Rect, i: usize) -> Rect {
@@ -324,6 +346,7 @@ fn quick_button(r: Rect, i: usize) -> Rect {
 
 pub enum QuickHit {
     Toggle(Quick),
+    Volume(u8),
     Button(QuickButton),
 }
 
@@ -333,6 +356,10 @@ pub fn quick_hit(w: usize, h: usize, x: i32, y: i32) -> Option<QuickHit> {
         if tile(r, i).contains(x, y) {
             return Some(QuickHit::Toggle(*q));
         }
+    }
+    // La barra es finita: responde toda su fila desde un poco antes (el valor sale de la x).
+    if volume_row(r).contains(x, y) && x >= volume_bar(w, h).x - 8 {
+        return Some(QuickHit::Volume(volume_at(w, h, x)));
     }
     QB.iter()
         .enumerate()
@@ -380,13 +407,14 @@ pub fn draw_quick(c: &mut Canvas<'_>, w: usize, h: usize, cfg: &Config, sel: usi
             &light(if on { theme::text() } else { theme::text_dim() }),
         );
     }
+    draw_volume(c, w, h, cfg.volume, sel == QUICK_VOLUME);
     for (i, (b, name)) in QB.iter().enumerate() {
         let col = if *b == QuickButton::Power {
             theme::crimson()
         } else {
             theme::cyan()
         };
-        let sel_here = sel == QUICK.len() + i;
+        let sel_here = sel == QUICK_VOLUME + 1 + i;
         button(
             c,
             quick_button(r, i),
@@ -395,6 +423,48 @@ pub fn draw_quick(c: &mut Canvas<'_>, w: usize, h: usize, cfg: &Config, sel: usi
             if sel_here { 90 } else { 25 },
         );
     }
+}
+
+fn draw_volume(c: &mut Canvas<'_>, w: usize, h: usize, volume: u8, selected: bool) {
+    let row = volume_row(quick_rect(w, h));
+    let rim = if selected {
+        theme::cyan()
+    } else {
+        theme::panel_rim()
+    };
+    rounded_rect(c, row.x, row.y, row.w, row.h, 8, theme::panel(), 255);
+    rounded_outline(c, row.x, row.y, row.w, row.h, 8, rim);
+    text::draw(
+        c,
+        row.x + 12,
+        row.y + 13,
+        tr("VOLUMEN"),
+        &label(theme::text_dim()),
+    );
+    let bar = volume_bar(w, h);
+    rounded_rect(c, bar.x, bar.y, bar.w, bar.h, 4, theme::panel_rim(), 255);
+    let fill = bar.w * i32::from(volume.min(100)) / 100;
+    if fill > 0 {
+        rounded_rect(c, bar.x, bar.y, fill, bar.h, 4, theme::cyan(), 255);
+    }
+    // La perilla, donde termina el relleno.
+    rounded_rect(
+        c,
+        bar.x + fill - 7,
+        bar.y - 4,
+        14,
+        16,
+        5,
+        theme::text(),
+        255,
+    );
+    text::draw_right(
+        c,
+        row.x + row.w - 12,
+        row.y + 13,
+        &format!("{volume} %"),
+        &light(theme::text()),
+    );
 }
 
 // --- centro de notificaciones (Win+N) ---------------------------------------------------------

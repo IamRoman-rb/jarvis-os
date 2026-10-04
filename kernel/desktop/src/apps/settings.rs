@@ -194,6 +194,7 @@ pub enum Opt {
     HttpsBridge,
     Reader,
     Sounds,
+    Volume,
     TestSound,
     MouseSpeed,
     WheelLines,
@@ -1045,6 +1046,12 @@ impl Settings {
             ],
             Section::Sound => alloc::vec![
                 Row::new(
+                    Opt::Volume,
+                    tr("Volumen"),
+                    tr("Música, videos y la voz de JARVIS"),
+                    Choice(format!("{} %", c.volume))
+                ),
+                Row::new(
                     Opt::Sounds,
                     tr("Sonidos del sistema"),
                     tr("Un pitido corto con los avisos de error"),
@@ -1792,6 +1799,11 @@ impl Settings {
             Opt::HttpsBridge => c.https_bridge = !c.https_bridge,
             Opt::Reader => c.reader_mode = !c.reader_mode,
             Opt::Sounds => c.sounds = !c.sounds,
+            // De a 10 %; Enter sube (sin dar la vuelta: de 100 a 0 está bien, al revés asusta).
+            Opt::Volume => {
+                c.volume = (i32::from(c.volume) + 10 * if delta == 0 { 1 } else { delta })
+                    .clamp(0, 100) as u8
+            }
             Opt::TestSound => {
                 ctx.out.tone = Some(440);
                 self.tone_until = Some(ctx.now_ms + 400);

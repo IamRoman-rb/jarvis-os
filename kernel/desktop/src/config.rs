@@ -225,6 +225,8 @@ pub struct Config {
     // Sonido
     /// Pitidos del sistema (avisos). La música suena igual.
     pub sounds: bool,
+    /// Volumen general, 0 a 100 (música, videos y la voz de JARVIS).
+    pub volume: u8,
     // Mouse
     /// 1 (lento) a 5 (rápido). 3 = normal.
     pub mouse_speed: u8,
@@ -298,6 +300,7 @@ impl Default for Config {
             utc_offset: -3,
             clock_24h: true,
             sounds: true,
+            volume: 80,
             mouse_speed: 3,
             wheel_lines: 3,
             invert_wheel: false,
@@ -414,6 +417,7 @@ impl Config {
                 "zona_utc" => c.utc_offset = v.parse::<i8>().unwrap_or(-3).clamp(-12, 14),
                 "reloj_24h" => c.clock_24h = yes(v),
                 "sonidos" => c.sounds = yes(v),
+                "volumen" => c.volume = v.trim().parse::<u8>().unwrap_or(80).min(100),
                 "mouse_velocidad" => c.mouse_speed = v.parse::<u8>().unwrap_or(3).clamp(1, 5),
                 "rueda_renglones" => c.wheel_lines = v.parse::<u8>().unwrap_or(3).clamp(1, 5),
                 "rueda_invertida" => c.invert_wheel = yes(v),
@@ -498,6 +502,7 @@ impl Config {
             format!("zona_utc={}", self.utc_offset),
             format!("reloj_24h={}", yn(self.clock_24h)),
             format!("sonidos={}", yn(self.sounds)),
+            format!("volumen={}", self.volume),
             format!("mouse_velocidad={}", self.mouse_speed),
             format!("rueda_renglones={}", self.wheel_lines),
             format!("rueda_invertida={}", yn(self.invert_wheel)),

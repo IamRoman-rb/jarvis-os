@@ -147,6 +147,40 @@ fn win_x_win_a_win_n_y_alt_espacio() {
 }
 
 #[test]
+fn el_volumen_desde_win_a_y_la_configuracion() {
+    use jarvis_desktop::panels;
+
+    let mut t = Driver::new();
+    t.d.enable_sound(48_000);
+    assert_eq!(t.d.config().volume, 80);
+    assert_eq!(
+        t.d.volume(),
+        80,
+        "el mezclador arranca con el volumen guardado"
+    );
+    t.combo(Mods::WIN, Key::Char('a'));
+    // Con el teclado: dos filas abajo (de los interruptores al volumen) y ← lo baja de a 10.
+    t.keys(&[Key::Down, Key::Down, Key::Left, Key::Left]);
+    assert_eq!(t.d.config().volume, 60);
+    assert_eq!(t.d.volume(), 60);
+    // Con el mouse: un clic al principio de la barra lo silencia y al final lo pone al máximo.
+    let bar = panels::volume_bar(W, H);
+    t.click_at(bar.x - 4, bar.y + 4, 500);
+    assert_eq!(t.d.config().volume, 0);
+    t.click_at(bar.x + bar.w / 2, bar.y + 4, 500);
+    assert_eq!(t.d.config().volume, 50);
+    t.click_at(bar.x + bar.w + 20, bar.y + 4, 500);
+    assert_eq!(t.d.config().volume, 100);
+    assert_eq!(t.d.overlay_name(), "rapida", "el panel sigue abierto");
+    t.frame();
+    // Se guarda en el disco y se vuelve a leer.
+    let text = t.d.config().serialize();
+    assert!(text.contains("volumen=100"));
+    assert_eq!(jarvis_desktop::Config::parse(&text).volume, 100);
+    assert_eq!(jarvis_desktop::Config::parse("volumen=250").volume, 100);
+}
+
+#[test]
 fn escritorios_virtuales_con_win_ctrl() {
     let mut t = Driver::new();
     t.combo(Mods::WIN, Key::Char('e'));
