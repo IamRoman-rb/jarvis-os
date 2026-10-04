@@ -872,6 +872,7 @@ dependencies = [
  "jarvis-image",
  "jarvis-linux",
  "jarvis-sync",
+ "jarvis-wifi",
  "lz4_flex",
  "resvg",
 ]
@@ -927,6 +928,7 @@ dependencies = [
  "jarvis-net",
  "jarvis-task",
  "jarvis-tls",
+ "jarvis-wifi",
  "linked_list_allocator",
  "pc-keyboard",
  "pic8259",

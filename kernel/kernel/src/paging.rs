@@ -87,8 +87,13 @@ pub struct Report {
 }
 
 /// Arma las tablas propias y las activa. `heap` es la región física (inicio, tamaño) que ya usa
-/// el heap: esos marcos no se entregan.
-pub fn init(boot_info: &BootInfo, offset: u64, heap: (u64, u64)) -> Option<Report> {
+/// el heap y `dma32`, el banco de DMA de 32 bits (inicio, fin): esos marcos no se entregan.
+pub fn init(
+    boot_info: &BootInfo,
+    offset: u64,
+    heap: (u64, u64),
+    dma32: Option<(u64, u64)>,
+) -> Option<Report> {
     let regions = &boot_info.memory_regions;
     // El mapa de bits llega hasta la última RAM usable (el mapa del firmware también trae zonas
     // de dispositivos muy arriba, que no son marcos para entregar).
@@ -106,6 +111,9 @@ pub fn init(boot_info: &BootInfo, offset: u64, heap: (u64, u64)) -> Option<Repor
     }
     frames.reserve(0, 0x10_0000);
     frames.reserve(heap.0, heap.0 + heap.1);
+    if let Some((start, end)) = dma32 {
+        frames.reserve(start, end);
+    }
 
     let mut mem = OffsetMem(offset);
     let (old_frame, _) = Cr3::read();

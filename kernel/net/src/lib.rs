@@ -208,6 +208,18 @@ impl<D: Device> Net<D> {
         self.tls.is_some() && !self.https_bridge
     }
 
+    /// La conexión cambió (el Wi-Fi se conectó, se cayó o pasó a otra red): la dirección vieja
+    /// puede no servir. Se olvida y se vuelve a pedir por DHCP.
+    pub fn restart_dhcp(&mut self) {
+        let Some(h) = self.dhcp else { return };
+        self.sockets.get_mut::<dhcpv4::Socket>(h).reset();
+        self.iface.update_ip_addrs(|addrs| addrs.clear());
+        self.iface.routes_mut().remove_default_ipv4_route();
+        self.info.ip = None;
+        self.info.gateway = None;
+        self.info.dns = None;
+    }
+
     pub fn info(&self) -> &NetInfo {
         &self.info
     }

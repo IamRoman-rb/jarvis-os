@@ -295,6 +295,8 @@ pub struct Requests {
     pub kill: Vec<u32>,
     /// Instalar en el disco N de `SystemStats::disks` (K13).
     pub install: Option<usize>,
+    /// Pedidos al Wi-Fi (K14).
+    pub wifi: Vec<crate::system::WifiOp>,
 }
 
 type ClockKey = Option<(u16, u8, u8, u8, u8)>;
@@ -348,6 +350,8 @@ pub struct Desktop<D: BlockDevice> {
     logs: Vec<String>,
     out: Outbox,
     requests: Requests,
+    /// Ya se le dijo al Wi-Fi qué hacer al arrancar (conectarse a la red guardada o buscar).
+    wifi_started: bool,
     phrase: usize,
     screenshot: bool,
     format: Option<(PixelFormat, usize)>,
@@ -488,6 +492,7 @@ impl<D: BlockDevice> Desktop<D> {
             logs: Vec::new(),
             out: Outbox::default(),
             requests: Requests::default(),
+            wifi_started: false,
             phrase: 0,
             screenshot: false,
             format: None,
@@ -931,6 +936,19 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats = stats;
         self.stats.mic = mic;
         self.stats.displays = self.outputs.clone();
+        // K14: la primera vez que aparece la placa Wi-Fi, a la red guardada (o a buscar redes).
+        if !self.wifi_started && self.stats.net.wifi.is_some() {
+            self.wifi_started = true;
+            let op = if self.config.wifi_ssid.is_empty() {
+                crate::system::WifiOp::Scan
+            } else {
+                crate::system::WifiOp::Connect {
+                    ssid: self.config.wifi_ssid.clone(),
+                    pmk: self.config.wifi_pmk,
+                }
+            };
+            self.requests.wifi.push(op);
+        }
         self.stats.sync = Some(self.sync.status);
         self.stats.sync_peer = self.sync.peer.clone();
         self.stats.sync_counts = (self.sync.sent, self.sync.received);
@@ -2392,6 +2410,7 @@ impl<D: BlockDevice> Desktop<D> {
                 && out.spawn.is_empty()
                 && out.proc_input.is_empty()
                 && out.proc_kill.is_empty()
+                && out.wifi.is_empty()
             {
                 self.out = out;
                 return;
@@ -2469,6 +2488,7 @@ impl<D: BlockDevice> Desktop<D> {
             if let Some(p) = out.power {
                 self.power(p);
             }
+            self.requests.wifi.extend(out.wifi);
             if let Some(disk) = out.install {
                 self.logs.push(format!("INSTALAR_PEDIDO {disk}"));
                 self.requests.install = Some(disk);

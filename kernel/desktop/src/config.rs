@@ -253,6 +253,11 @@ pub struct Config {
     pub brave_home: String,
     /// El navegador principal es Brave (si no, el navegador simple de JARVIS).
     pub brave_default: bool,
+    // Wi-Fi (K14, ADR 0012)
+    /// La red a la que se conecta al arrancar (vacío = ninguna).
+    pub wifi_ssid: String,
+    /// Su clave WPA2 derivada (PMK); `None` = red abierta. La contraseña no se guarda.
+    pub wifi_pmk: Option<[u8; 32]>,
     // Sincronización (ADR 0007)
     /// El código de emparejado (vacío = no sincroniza). El mismo en las dos máquinas.
     pub sync_code: String,
@@ -315,6 +320,8 @@ impl Default for Config {
             brave_token: String::new(),
             brave_home: "https://search.brave.com/".into(),
             brave_default: true,
+            wifi_ssid: String::new(),
+            wifi_pmk: None,
             sync_code: String::new(),
             sync_relay: "10.0.2.2:8120".into(),
             user: "roman".into(),
@@ -443,6 +450,13 @@ impl Config {
                     c.sync_code = v.into()
                 }
                 "sync_rele" if parse_server(v).is_some() => c.sync_relay = v.into(),
+                // El nombre de la red va en hexadecimal: puede tener cualquier carácter.
+                "wifi_red" => {
+                    if let Some(b) = unhex(v).filter(|b| b.len() <= 32) {
+                        c.wifi_ssid = String::from_utf8_lossy(&b).into_owned();
+                    }
+                }
+                "wifi_clave" => c.wifi_pmk = unhex(v).and_then(|b| b.try_into().ok()),
                 "usuario" if valid_name(v) => c.user = v.into(),
                 "equipo" if valid_name(v) => c.hostname = v.into(),
                 "pin" if v.chars().all(|ch| ch.is_ascii_digit()) && v.len() <= 8 => {
@@ -516,6 +530,11 @@ impl Config {
             format!("imagenes={}", yn(self.load_images)),
             format!("https_puente={}", yn(self.https_bridge)),
             format!("modo_lectura={}", yn(self.reader_mode)),
+            format!("wifi_red={}", hex(self.wifi_ssid.as_bytes())),
+            format!(
+                "wifi_clave={}",
+                self.wifi_pmk.map_or(String::new(), |k| hex(&k))
+            ),
             format!("brave_servidor={}", self.brave_server),
             format!("brave_token={}", self.brave_token),
             format!("brave_inicio={}", self.brave_home),
@@ -619,6 +638,21 @@ pub fn valid_name(s: &str) -> bool {
         && s.len() <= 24
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    let s = s.trim();
+    if !s.len().is_multiple_of(2) || !s.is_ascii() {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
 }
 
 #[cfg(test)]

@@ -42,5 +42,6 @@ pub use desktop::{DEMO_PHRASES, Desktop, Dirty, GREETING, Requests};
 pub use input::{Event, Key, Mods, MouseDecoder, MousePacket};
 pub use system::{
     AppKind, DiskInfo, FetchKind, HttpResponse, InstallState, KernelTask, Launch, NetInfo,
-    NetRequest, Power, StreamEvent, StreamOp, StreamRequest, SystemStats, TaskState,
+    NetRequest, Power, StreamEvent, StreamOp, StreamRequest, SystemStats, TaskState, WifiFailure,
+    WifiInfo, WifiNetwork, WifiOp, WifiSecurity, WifiState,
 };

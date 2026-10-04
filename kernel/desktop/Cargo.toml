@@ -15,6 +15,8 @@ jarvis-image = { path = "../image" }
 # Mosaicos de Brave comprimidos (ADR 0007). Sin std: el kernel los descomprime.
 lz4_flex = { version = "0.11", default-features = false }
 jarvis-sync = { path = "../sync" }
+# La clave de WPA2 (PMK) sale de la contraseña acá, al escribirla (K14).
+jarvis-wifi = { path = "../wifi" }
 
 [dev-dependencies]
 fatfs = "0.3.6"

@@ -377,6 +377,13 @@ impl Rtw8821c {
         bus.write8(regs::BCN_CTRL, regs::EN_BCN_FUNCTION);
     }
 
+    /// Usa otra dirección MAC (la de la placa por cable, si la hay: así la pila de red sigue con
+    /// la misma dirección al pasar de una a otra).
+    pub fn set_mac<B: Bus + ?Sized>(&mut self, bus: &mut B, mac: [u8; 6]) {
+        self.mac = mac;
+        Self::write_addr(bus, regs::MACID, &mac);
+    }
+
     /// Buscando redes: aceptar los beacons de todas (`FIF_BCN_PRBRESP_PROMISC`).
     pub fn set_scanning<B: Bus + ?Sized>(&mut self, bus: &mut B, on: bool) {
         let rcr = if on {

@@ -102,6 +102,35 @@ fn vista_previa_de_una_pagina() {
     if let Ok(l) = std::env::var("JARVIS_IDIOMA") {
         jarvis_desktop::i18n::set(jarvis_desktop::i18n::Lang::from_code(&l));
     }
+    // JARVIS_WIFI=1: una placa Wi-Fi conectada y redes a la vista (para mirar Configuración → Red).
+    if std::env::var("JARVIS_WIFI").is_ok() {
+        use jarvis_desktop::{WifiInfo, WifiNetwork, WifiSecurity, WifiState};
+        let net = |ssid: &str, security, rssi, channel| WifiNetwork {
+            ssid: ssid.into(),
+            rssi,
+            channel,
+            security,
+        };
+        let mut stats = jarvis_desktop::SystemStats::default();
+        stats.net.present = true;
+        stats.net.ip = Some([192, 168, 0, 23]);
+        stats.net.wifi = Some(WifiInfo {
+            chip: "Realtek RTL8821CE (Wi-Fi)".into(),
+            state: WifiState::Connected,
+            ssid: Some("Casa-5G".into()),
+            rssi: -51,
+            channel: 36,
+            failure: None,
+            networks: vec![
+                net("Casa-5G", WifiSecurity::Wpa2, -51, 36),
+                net("Casa", WifiSecurity::Wpa2, -55, 6),
+                net("Fibertel WiFi 123", WifiSecurity::Wpa2, -71, 11),
+                net("Bar de la esquina", WifiSecurity::Open, -78, 1),
+                net("Vecino", WifiSecurity::Unsupported, -84, 149),
+            ],
+        });
+        t.d.set_stats(stats);
+    }
     // JARVIS_URL=config:N abre la Configuración en la sección N; `archivos`, los Archivos.
     let what = match url.as_str() {
         u if u.starts_with("config:") => Launch::Settings(u[7..].parse().unwrap_or(0)),

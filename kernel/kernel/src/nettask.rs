@@ -12,13 +12,16 @@
 //! HTTPS (K10): si `tls::init` pudo armar la configuración, el TLS lo hace esta tarea (el
 //! handshake corre acá, no en el escritorio). El interruptor de Configuración que manda HTTPS
 //! al puente del anfitrión llega por [`set_https_bridge`].
+//!
+//! Wi-Fi (K14): los pedidos (buscar, conectarse) llegan por la misma cola; el estado va en
+//! `NetInfo::wifi`. Cuando la conexión sube o baja, la dirección se vuelve a pedir por DHCP.
 
 use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use jarvis_desktop::{HttpResponse, NetInfo, NetRequest, StreamEvent, StreamOp};
+use jarvis_desktop::{HttpResponse, NetInfo, NetRequest, StreamEvent, StreamOp, WifiOp};
 use jarvis_net::Net;
 use jarvis_task::Priority;
 
@@ -35,6 +38,7 @@ pub enum Answer {
 enum Order {
     Fetch(NetRequest),
     Stream(StreamOp),
+    Wifi(WifiOp),
 }
 
 static ORDERS: IrqMutex<VecDeque<Order>> = IrqMutex::new(VecDeque::new());
@@ -56,8 +60,9 @@ const MAX_SLEEP_MS: u64 = 50;
 const MAX_BUSY_ROUNDS: u32 = 8;
 
 /// Arranca la tarea con la placa. `false` si no se pudo crear.
-pub fn start(net: Net<Nic>) -> bool {
-    INFO.with(|i| *i = Some(net.info().clone()));
+pub fn start(mut net: Net<Nic>) -> bool {
+    let info = full_info(&mut net);
+    INFO.with(|i| *i = Some(info));
     task::spawn("red", Priority::High, STACK, move || run(net)).is_some()
 }
 
@@ -79,6 +84,17 @@ pub fn stream(op: StreamOp) {
     ORDERS.with(|q| q.push_back(Order::Stream(op)));
 }
 
+pub fn wifi(op: WifiOp) {
+    ORDERS.with(|q| q.push_back(Order::Wifi(op)));
+}
+
+/// El estado de la red con el del Wi-Fi.
+fn full_info(net: &mut Net<Nic>) -> NetInfo {
+    let mut info = net.info().clone();
+    info.wifi = net.device_mut().wifi().map(|w| w.info());
+    info
+}
+
 /// Despierta a la tarea si hay pedidos (una vez por cuadro, no por pedido).
 pub fn kick() {
     if ORDERS.with(|q| !q.is_empty()) {
@@ -96,6 +112,7 @@ pub fn info() -> NetInfo {
 
 fn run(mut net: Net<Nic>) {
     let mut last_ip = None;
+    let mut last_info = full_info(&mut net);
     let mut busy = 0;
     net.set_tls(tls::config());
     serial_println!(
@@ -119,6 +136,11 @@ fn run(mut net: Net<Nic>) {
                     }
                 }
                 Order::Stream(op) => net.stream(op, now),
+                Order::Wifi(op) => {
+                    if let Some(w) = net.device_mut().wifi() {
+                        w.op(op);
+                    }
+                }
             }
         }
         for (id, result) in net.poll(now) {
@@ -130,10 +152,22 @@ fn run(mut net: Net<Nic>) {
         if !out.is_empty() {
             ANSWERS.with(|a| a.extend(out));
         }
+        // El Wi-Fi se conectó o se cayó: la dirección se vuelve a pedir.
+        if net
+            .device_mut()
+            .wifi()
+            .and_then(|w| w.take_link_change())
+            .is_some()
+        {
+            net.restart_dhcp();
+        }
+        let info = full_info(&mut net);
+        if info != last_info {
+            INFO.with(|i| *i = Some(info.clone()));
+            last_info = info;
+        }
         if net.info().ip != last_ip {
             last_ip = net.info().ip;
-            let info = net.info().clone();
-            INFO.with(|i| *i = Some(info));
             match last_ip {
                 Some(ip) => serial_println!("RED_IP {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]),
                 None => serial_println!("RED_SIN_IP"),

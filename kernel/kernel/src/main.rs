@@ -55,6 +55,7 @@ mod queue;
 mod rtc;
 mod rtl8139;
 mod rtl8169;
+mod rtw88;
 mod serial;
 mod speaker;
 mod storage;
@@ -67,6 +68,7 @@ mod virtio_gpu;
 mod virtio_modern;
 mod virtio_net;
 mod virtio_sound;
+mod wifi;
 mod xhci;
 
 use alloc::vec::Vec;
@@ -197,9 +199,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         heap / (1024 * 1024)
     );
     // K8: el kernel deja las tablas de páginas del bootloader y arma las suyas.
-    let pg = paging::init(boot_info, phys_offset, heap_phys)
+    // K14: un banco de DMA abajo de 4 GiB (la placa Wi-Fi solo ve direcciones de 32 bits).
+    let dma32 = dma::pick_low(
+        boot_info
+            .memory_regions
+            .iter()
+            .filter(|r| r.kind == MemoryRegionKind::Usable)
+            .map(|r| (r.start, r.end)),
+        heap_phys,
+    );
+    let pg = paging::init(boot_info, phys_offset, heap_phys, dma32)
         .expect("no se pudieron armar las tablas de páginas propias");
     dma::init(phys_offset);
+    dma::init_low(dma32);
+    if let Some((start, _)) = dma32 {
+        serial_println!("DMA de 32 bits: 4 MiB en {start:#x}");
+    }
     serial_println!(
         "PAGINACION_PROPIA {} tablas, RAM mapeada {} MiB, {} MiB de marcos libres, kernel {} segmentos{}",
         pg.tables,
@@ -366,8 +381,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         );
     }
 
-    // Red: virtio-net o una placa real (Intel, Realtek; K13) + smoltcp, en su propia tarea
-    // (K9). La dirección se pide por DHCP.
+    // K14: el firmware de la placa Wi-Fi (si hay disco y `cargo xtask` lo copió).
+    let mut disk = disk;
+    let wifi_fw = disk
+        .as_mut()
+        .and_then(|fs| fs.read_file(wifi::FIRMWARE).ok());
+
+    // Red: virtio-net o una placa real (Intel, Realtek; K13) y el Wi-Fi (K14) + smoltcp, en su
+    // propia tarea (K9). La dirección se pide por DHCP.
     let nic = match VirtioNet::init(phys_offset) {
         Some(dev) => {
             if let Some((pci_dev, line, isr)) = dev.irq()
@@ -378,12 +399,30 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             hw::note("Red", "virtio-net (QEMU)".into());
             Some(nic::Nic::Virtio(dev))
         }
-        None => nic::probe().map(|(dev, name)| {
-            serial_println!("RED_PLACA {name}");
-            hw::note("Red", name.into());
-            nic::Nic::Ring(dev)
-        }),
+        None => {
+            let wired = nic::probe();
+            let wifi = wifi::Wifi::probe(wifi_fw.as_deref(), wired.as_ref().map(|(d, _)| d.mac()));
+            if let Some(w) = &wifi {
+                hw::note("Wi-Fi", w.name.clone());
+            }
+            match (wired, wifi) {
+                (Some((dev, name)), wifi) => {
+                    serial_println!("RED_PLACA {name}");
+                    hw::note("Red", name.into());
+                    Some(match wifi {
+                        Some(w) => nic::Nic::Both(dev, alloc::boxed::Box::new(w), false),
+                        None => nic::Nic::Ring(dev),
+                    })
+                }
+                (None, Some(w)) => {
+                    serial_println!("RED_PLACA {}", w.name);
+                    Some(nic::Nic::Wifi(alloc::boxed::Box::new(w)))
+                }
+                (None, None) => None,
+            }
+        }
     };
+    drop(wifi_fw);
     let has_net = nic.is_some_and(|dev| {
         let mac = dev.mac();
         nettask::start(Net::new(dev, mac, time::rdtsc(), time::millis()))
@@ -469,7 +508,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let capacity = jarvis_desktop::display::max_pixels(&outputs);
     let mut surfaces = display::Surfaces::new(&firmware, gpu, capacity);
 
-    let mut disk = disk;
     if let Some(fs) = disk.as_mut() {
         save_boot_log(fs);
     }
@@ -683,6 +721,13 @@ fn run(
         }
         for pid in requests.kill {
             process::kill(pid);
+        }
+        // K14: buscar redes Wi-Fi, conectarse, desconectarse.
+        for op in requests.wifi {
+            serial_println!("WIFI_PEDIDO {op:?}");
+            if has_net {
+                nettask::wifi(op);
+            }
         }
         serve_processes(desktop);
         nettask::set_https_bridge(desktop.config().https_bridge);

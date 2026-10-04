@@ -217,6 +217,11 @@ pub enum Opt {
     FwShowLog,
     /// Instalar en el disco N de `SystemStats::disks` (K13).
     Install(usize),
+    /// Wi-Fi (K14): buscar, conectarse a la red N de la lista, la contraseña, desconectarse.
+    WifiScan,
+    WifiNet(usize),
+    WifiPassword,
+    WifiDisconnect,
     Info,
 }
 
@@ -284,6 +289,8 @@ pub struct Settings {
     /// Hasta cuándo suena el tono de prueba.
     tone_until: Option<u64>,
     net_test: Option<(u32, String)>,
+    /// La red WPA2 elegida a la que le falta la contraseña.
+    wifi_pending: Option<String>,
     screen: (usize, usize),
     /// (usado, total) del disco, del último dibujo.
     disk: Option<(u64, u64)>,
@@ -307,6 +314,7 @@ impl Settings {
             hover: (0, 0),
             tone_until: None,
             net_test: None,
+            wifi_pending: None,
             screen: (0, 0),
             disk: None,
         };
@@ -726,6 +734,7 @@ impl Settings {
             ],
             Section::Network => {
                 let n = &stats.net;
+                let mut rows: Vec<Row>;
                 let state = match (n.present, n.ip) {
                     (false, _) => tr("Sin placa de red").to_string(),
                     (true, None) => tr("Pidiendo dirección (DHCP)...").to_string(),
@@ -736,13 +745,8 @@ impl Settings {
                     Some((_, msg)) => msg.clone(),
                     None => tr("Pide http://info.cern.ch/ por la red propia").into(),
                 };
-                alloc::vec![
-                    Row::new(
-                        Opt::Info,
-                        tr("Estado"),
-                        "Placa virtio-net · TCP/IP smoltcp",
-                        Value(state)
-                    ),
+                rows = alloc::vec![
+                    Row::new(Opt::Info, tr("Estado"), "TCP/IP smoltcp", Value(state)),
                     Row::new(
                         Opt::Info,
                         tr("Dirección física (MAC)"),
@@ -783,7 +787,9 @@ impl Settings {
                         test,
                         Button(tr("PROBAR"))
                     ),
-                ]
+                ];
+                rows.extend(self.wifi_rows(stats));
+                rows
             }
             Section::Microphone => {
                 let (detail, value) = match &stats.mic {
@@ -1647,6 +1653,87 @@ impl Settings {
 
     // --- acciones -----------------------------------------------------------------------------
 
+    /// Las filas del Wi-Fi (K14): estado, la contraseña que falta, buscar y las redes vistas.
+    fn wifi_rows(&self, stats: &crate::system::SystemStats) -> Vec<Row> {
+        use crate::system::{WifiSecurity, WifiState};
+        use Control::*;
+        let Some(w) = &stats.net.wifi else {
+            return alloc::vec![Row::new(
+                Opt::Info,
+                tr("Wi-Fi"),
+                "",
+                Value(tr("Sin placa Wi-Fi").into())
+            )];
+        };
+        let name = w.ssid.clone().unwrap_or_default();
+        let state = match w.state {
+            WifiState::Idle => tr("Sin conectar").into(),
+            WifiState::Scanning => tr("Buscando redes...").into(),
+            WifiState::Connecting => trf("Conectando a «{}»...", &[&name]),
+            WifiState::Connected => trf("Conectado a «{}» · {} dBm", &[&name, &w.rssi.to_string()]),
+            WifiState::Waiting => trf(
+                "Reintentando «{}»: {}",
+                &[&name, &w.failure.map(wifi_failure).unwrap_or_default()],
+            ),
+        };
+        let mut rows = alloc::vec![Row::new(
+            Opt::Info,
+            tr("Wi-Fi"),
+            w.chip.clone(),
+            Value(state)
+        )];
+        if w.ssid.is_some() && w.state != WifiState::Idle {
+            rows.push(Row::new(
+                Opt::WifiDisconnect,
+                tr("Desconectarse"),
+                trf("Y no volver a conectarse a «{}» al arrancar", &[&name]),
+                Button(tr("DESCONECTAR")),
+            ));
+        }
+        if let Some(pending) = &self.wifi_pending {
+            rows.push(Row::new(
+                Opt::WifiPassword,
+                trf("Contraseña de «{}»", &[pending]),
+                tr("WPA2: se guarda la clave derivada, no la contraseña"),
+                Text {
+                    value: String::new(),
+                    secret: true,
+                },
+            ));
+        }
+        rows.push(Row::new(
+            Opt::WifiScan,
+            tr("Buscar redes"),
+            trf("{} redes a la vista", &[&w.networks.len().to_string()]),
+            Button(tr("BUSCAR")),
+        ));
+        for (i, n) in w.networks.iter().take(12).enumerate() {
+            let security = match n.security {
+                WifiSecurity::Open => tr("Abierta"),
+                WifiSecurity::Wpa2 => "WPA2",
+                WifiSecurity::Unsupported => tr("No soportada"),
+            };
+            let detail = format!(
+                "{security} · {}",
+                trf(
+                    "canal {} · {} dBm",
+                    &[&n.channel.to_string(), &n.rssi.to_string()]
+                )
+            );
+            let current =
+                w.ssid.as_deref() == Some(n.ssid.as_str()) && w.state == WifiState::Connected;
+            let control = if current {
+                Value(tr("Conectada").into())
+            } else if n.security == WifiSecurity::Unsupported {
+                Value("-".into())
+            } else {
+                Button(tr("CONECTAR"))
+            };
+            rows.push(Row::new(Opt::WifiNet(i), n.ssid.clone(), detail, control));
+        }
+        rows
+    }
+
     fn commit<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>) {
         ctx.out.config = Some(self.cfg.clone());
         ctx.log.push(format!("CONFIG {}", self.section.name()));
@@ -1684,6 +1771,50 @@ impl Settings {
                     self.editing = Some((opt, TextInput::new(&value, max)));
                 }
                 return;
+            }
+            Opt::WifiScan => {
+                ctx.out.wifi.push(crate::system::WifiOp::Scan);
+                return;
+            }
+            Opt::WifiNet(i) => {
+                use crate::system::WifiSecurity;
+                let Some(n) = ctx.stats.net.wifi.as_ref().and_then(|w| w.networks.get(i)) else {
+                    return;
+                };
+                match n.security {
+                    WifiSecurity::Open => {
+                        c.wifi_ssid = n.ssid.clone();
+                        c.wifi_pmk = None;
+                        ctx.out.wifi.push(crate::system::WifiOp::Connect {
+                            ssid: n.ssid.clone(),
+                            pmk: None,
+                        });
+                    }
+                    WifiSecurity::Wpa2 => {
+                        self.wifi_pending = Some(n.ssid.clone());
+                        self.editing = Some((Opt::WifiPassword, TextInput::new("", 63)));
+                        return;
+                    }
+                    WifiSecurity::Unsupported => {
+                        ctx.out.notify(
+                            tr("Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3)."),
+                            true,
+                        );
+                        return;
+                    }
+                }
+            }
+            Opt::WifiPassword => {
+                if delta == 0 {
+                    self.editing = Some((Opt::WifiPassword, TextInput::new("", 63)));
+                }
+                return;
+            }
+            Opt::WifiDisconnect => {
+                c.wifi_ssid = String::new();
+                c.wifi_pmk = None;
+                self.wifi_pending = None;
+                ctx.out.wifi.push(crate::system::WifiOp::Disconnect);
             }
             Opt::Restart => {
                 ctx.out.power = Some(Power::Reboot);
@@ -1920,6 +2051,33 @@ impl Settings {
         let Some((opt, input)) = self.editing.take() else {
             return;
         };
+        if opt == Opt::WifiPassword {
+            // La contraseña tal cual (los espacios cuentan). De ella y del nombre de la red sale la
+            // clave (PBKDF2, 4096 vueltas): es lo único que se guarda.
+            let Some(ssid) = self.wifi_pending.take() else {
+                return;
+            };
+            let pass = input.text;
+            if !(8..=63).contains(&pass.len()) {
+                ctx.out.notify(
+                    tr("La contraseña de una red WPA2 tiene de 8 a 63 caracteres."),
+                    true,
+                );
+                self.wifi_pending = Some(ssid);
+                self.dirty = true;
+                return;
+            }
+            let pmk = jarvis_wifi::crypto::pmk(&pass, ssid.as_bytes());
+            self.cfg.wifi_ssid = ssid.clone();
+            self.cfg.wifi_pmk = Some(pmk);
+            ctx.out.wifi.push(crate::system::WifiOp::Connect {
+                ssid,
+                pmk: Some(pmk),
+            });
+            self.commit(ctx);
+            self.dirty = true;
+            return;
+        }
         let v = input.text.trim().to_string();
         let ok = match opt {
             Opt::Hostname if valid_name(&v) => {
@@ -2206,5 +2364,19 @@ fn tr_kind(kind: &str) -> &'static str {
         "Procesador" => tr("Procesador"),
         "Sensores" => tr("Sensores"),
         _ => tr("Otro"),
+    }
+}
+
+/// Por qué falló el Wi-Fi, para mostrarlo.
+fn wifi_failure(f: crate::system::WifiFailure) -> String {
+    use crate::system::WifiFailure::*;
+    match f {
+        NotFound => tr("red no encontrada").into(),
+        Unsupported => tr("seguridad no soportada").into(),
+        NoResponse => tr("el punto de acceso no responde").into(),
+        Rejected(c) => trf("rechazada (código {})", &[&c.to_string()]),
+        WrongPassword => tr("contraseña incorrecta").into(),
+        Lost => tr("se perdió la señal").into(),
+        Kicked(_) => tr("desconectada por el punto de acceso").into(),
     }
 }

@@ -80,13 +80,14 @@ impl Rtl8139 {
     }
 
     fn start(dev: pci::Device, io: u16) -> Option<Rtl8139> {
-        let rx = dma::alloc(RTL8139_RX_ALLOC, 4096)?;
-        let tx = dma::alloc(TX_SLOTS * TX_BUF, 4096)?;
         // El 8139 solo tiene direcciones de 32 bits.
-        if (dma::phys(rx) | dma::phys(tx)) >> 32 != 0 {
-            serial_println!("RTL8139: los buffers quedaron arriba de 4 GiB");
+        let (Some(rx), Some(tx)) = (
+            dma::alloc32(RTL8139_RX_ALLOC, 4096),
+            dma::alloc32(TX_SLOTS * TX_BUF, 4096),
+        ) else {
+            serial_println!("RTL8139: no hay memoria de DMA de 32 bits");
             return None;
-        }
+        };
         let mut n = Rtl8139 {
             io,
             mac: [0; 6],

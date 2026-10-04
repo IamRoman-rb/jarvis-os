@@ -19,6 +19,94 @@ pub struct NetInfo {
     pub ip: Option<[u8; 4]>,
     pub gateway: Option<[u8; 4]>,
     pub dns: Option<[u8; 4]>,
+    /// La placa Wi-Fi, si hay (K14).
+    pub wifi: Option<WifiInfo>,
+}
+
+/// Estado del Wi-Fi (K14): lo arma la tarea de la red con la estación de `jarvis-wifi`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WifiInfo {
+    /// La placa ("Realtek RTL8821CE (Wi-Fi)").
+    pub chip: String,
+    pub state: WifiState,
+    /// La red elegida (conectada o intentando).
+    pub ssid: Option<String>,
+    /// Señal de la red conectada, en dBm.
+    pub rssi: i8,
+    pub channel: u8,
+    /// Por qué falló el último intento.
+    pub failure: Option<WifiFailure>,
+    /// Las redes vistas, de mejor a peor señal.
+    pub networks: Vec<WifiNetwork>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WifiState {
+    #[default]
+    Idle,
+    Scanning,
+    Connecting,
+    Connected,
+    /// Esperando para reintentar.
+    Waiting,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WifiFailure {
+    NotFound,
+    Unsupported,
+    NoResponse,
+    Rejected(u16),
+    WrongPassword,
+    Lost,
+    Kicked(u16),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WifiSecurity {
+    Open,
+    /// WPA2 personal: la que soporta JARVIS-OS.
+    Wpa2,
+    /// WEP, WPA/TKIP, WPA3 solo, empresarial: se lista pero no se conecta.
+    Unsupported,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WifiNetwork {
+    pub ssid: String,
+    pub rssi: i8,
+    pub channel: u8,
+    pub security: WifiSecurity,
+}
+
+/// Lo que se le pide al Wi-Fi.
+#[derive(Clone, PartialEq, Eq)]
+pub enum WifiOp {
+    Scan,
+    /// Conectarse. `pmk`: la clave de WPA2 (sale de la contraseña y el nombre de la red);
+    /// `None` para una red abierta.
+    Connect {
+        ssid: String,
+        pmk: Option<[u8; 32]>,
+    },
+    Disconnect,
+}
+
+impl core::fmt::Debug for WifiOp {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            WifiOp::Scan => f.write_str("Scan"),
+            // La clave no va a ningún log.
+            WifiOp::Connect { ssid, pmk } => {
+                write!(
+                    f,
+                    "Connect({ssid:?}, {})",
+                    if pmk.is_some() { "WPA2" } else { "abierta" }
+                )
+            }
+            WifiOp::Disconnect => f.write_str("Disconnect"),
+        }
+    }
 }
 
 /// En qué anda una tarea del kernel (K9).
@@ -367,6 +455,8 @@ pub struct Outbox {
     pub proc_kill: Vec<u32>,
     /// Instalar JARVIS-OS en el disco número N de `SystemStats::disks` (K13; ya confirmado).
     pub install: Option<usize>,
+    /// Pedidos al Wi-Fi (K14).
+    pub wifi: Vec<WifiOp>,
     /// Número del último proceso (no se repiten).
     pub(crate) next_pid: u32,
     /// Número del último pedido de red (los números no se repiten).

@@ -3,7 +3,11 @@
 //! La pila TCP/IP (smoltcp, en `jarvis-net`) habla con la placa por el trait `phy::Device`.
 //! virtio-net lo implementa directo (escribe las tramas en sus buffers sin copiar). Las placas
 //! reales (Intel e1000, Realtek) implementan algo más simple, `Frames`: recibir una trama y
-//! mandar una. `Nic` une los dos casos para que la tarea de la red no sepa cuál hay.
+//! mandar una. `Nic` une los casos para que la tarea de la red no sepa cuál hay.
+//!
+//! K14: el Wi-Fi (wifi.rs) también es `Frames`. Si hay cable y Wi-Fi, se manda por el Wi-Fi
+//! cuando está conectado y si no por el cable, y se recibe de los dos. Las dos usan la misma
+//! dirección MAC (la del cable), así la pila de red no cambia de identidad.
 
 use alloc::boxed::Box;
 use alloc::vec;
@@ -13,6 +17,7 @@ use smoltcp::phy::{self, Device, DeviceCapabilities, Medium};
 use smoltcp::time::Instant;
 
 use crate::virtio_net::{self, VirtioNet};
+use crate::wifi::Wifi;
 use crate::{e1000, rtl8139, rtl8169, serial_println};
 
 /// Lo que tiene que saber hacer un driver de placa de red.
@@ -28,6 +33,9 @@ pub trait Frames: Send {
 pub enum Nic {
     Virtio(VirtioNet),
     Ring(Box<dyn Frames>),
+    Wifi(Box<Wifi>),
+    /// Cable y Wi-Fi. `bool`: a quién le toca recibir primero (para que uno no tape al otro).
+    Both(Box<dyn Frames>, Box<Wifi>, bool),
 }
 
 /// MTU de Ethernet.
@@ -37,7 +45,16 @@ impl Nic {
     pub fn mac(&self) -> [u8; 6] {
         match self {
             Nic::Virtio(v) => v.mac(),
-            Nic::Ring(r) => r.mac(),
+            Nic::Ring(r) | Nic::Both(r, _, _) => r.mac(),
+            Nic::Wifi(w) => w.mac(),
+        }
+    }
+
+    /// El Wi-Fi, si hay.
+    pub fn wifi(&mut self) -> Option<&mut Wifi> {
+        match self {
+            Nic::Wifi(w) | Nic::Both(_, w, _) => Some(w),
+            _ => None,
         }
     }
 }
@@ -98,6 +115,24 @@ impl Device for Nic {
                 let frame = r.recv()?;
                 Some((RxToken(frame), TxToken::Ring(&mut **r)))
             }
+            Nic::Wifi(w) => {
+                let frame = w.recv()?;
+                Some((RxToken(frame), TxToken::Ring(&mut **w)))
+            }
+            Nic::Both(wired, wifi, turn) => {
+                *turn = !*turn;
+                let frame = if *turn {
+                    wired.recv().or_else(|| wifi.recv())
+                } else {
+                    wifi.recv().or_else(|| wired.recv())
+                }?;
+                let out: &mut dyn Frames = if wifi.connected() {
+                    &mut **wifi
+                } else {
+                    &mut **wired
+                };
+                Some((RxToken(frame), TxToken::Ring(out)))
+            }
         }
     }
 
@@ -105,13 +140,22 @@ impl Device for Nic {
         match self {
             Nic::Virtio(v) => v.transmit(now).map(TxToken::Virtio),
             Nic::Ring(r) => r.can_send().then_some(TxToken::Ring(&mut **r)),
+            Nic::Wifi(w) => w.can_send().then_some(TxToken::Ring(&mut **w)),
+            Nic::Both(wired, wifi, _) => {
+                let out: &mut dyn Frames = if wifi.connected() {
+                    &mut **wifi
+                } else {
+                    &mut **wired
+                };
+                out.can_send().then_some(TxToken::Ring(out))
+            }
         }
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
         match self {
             Nic::Virtio(v) => v.capabilities(),
-            Nic::Ring(_) => {
+            Nic::Ring(_) | Nic::Wifi(_) | Nic::Both(..) => {
                 let mut caps = DeviceCapabilities::default();
                 caps.max_transmission_unit = MTU;
                 caps.max_burst_size = None;
