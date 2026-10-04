@@ -121,40 +121,60 @@ class Segmenter:
     """Corta el audio continuo en frases: empieza con voz y termina con un silencio. El umbral
     se adapta al ruido del ambiente."""
 
-    def __init__(self, silence_ms: int = 700, max_ms: int = 8_000) -> None:
+    #: Cuántos pedazos recuerda para estimar el ruido (~6 s de 80 ms). Se cuentan todos, también
+    #: los de voz: así un ruido constante (música, una aspiradora) termina subiendo el umbral.
+    NOISE_FRAMES = 75
+
+    def __init__(self, silence_ms: int = 700, max_ms: int = 8_000, min_ms: int = 160) -> None:
         self.silence_ms = silence_ms
         self.max_ms = max_ms
-        self.noise = 200.0
+        #: Menos voz que esto es un golpe o una tecla: no vale la pena transcribirlo.
+        self.min_ms = min_ms
+        self.loud_ms = 0
+        self.noise = 40.0
+        self.ambient: list[float] = []
         self.current: bytearray | None = None
         self.pre = bytearray()
         self.quiet_ms = 0
         self.total_ms = 0
 
     def threshold(self) -> float:
-        # Micrófonos con poca ganancia dan ~5 de ruido y ~150-600 hablando a distancia normal.
-        return max(120.0, self.noise * 4)
+        # Micrófonos con poca ganancia dan ~50 de ruido (ventilador, sala) y ~150-600 hablando a
+        # distancia normal: con 4 veces un ruido promedio (que cada golpe o tecla infla) el umbral
+        # quedaba arriba de la voz y JARVIS no oía nada.
+        return max(120.0, self.noise * 3)
+
+    def _track_noise(self, energy: float) -> None:
+        """El ruido es el percentil 25 de lo reciente: ni los golpes sueltos ni las palabras (que
+        casi nunca ocupan las tres cuartas partes de 6 s) lo suben."""
+        self.ambient.append(energy)
+        del self.ambient[: -self.NOISE_FRAMES]
+        self.noise = sorted(self.ambient)[len(self.ambient) // 4]
 
     def feed(self, pcm: bytes) -> bytes | None:
         """Agrega un pedazo; devuelve una frase completa cuando termina."""
         ms = len(pcm) // 2 * 1000 // RATE
         energy = rms(pcm)
         loud = energy >= self.threshold()
+        self._track_noise(energy)
         if self.current is None:
             if not loud:
-                self.noise = self.noise * 0.95 + energy * 0.05
                 self.pre = (self.pre + pcm)[-RATE // 2 * 2 :]  # medio segundo antes
                 return None
             self.current = bytearray(self.pre)
             self.quiet_ms = 0
             self.total_ms = 0
+            self.loud_ms = 0
         self.current += pcm
         self.total_ms += ms
+        if loud:
+            self.loud_ms += ms
         self.quiet_ms = 0 if loud else self.quiet_ms + ms
         if self.quiet_ms >= self.silence_ms or self.total_ms >= self.max_ms:
             phrase = bytes(self.current)
             self.current = None
             self.pre = bytearray()
-            return phrase
+            return phrase if self.loud_ms >= self.min_ms else None
         return None
 
 

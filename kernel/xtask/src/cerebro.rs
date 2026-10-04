@@ -91,8 +91,13 @@ pub fn start(port: u16, simulated: bool) -> Option<Brain> {
     let port = free_port(port);
     let token = token();
     let mut cmd = Command::new("uv");
-    cmd.current_dir(&repo)
-        .args(["run", "--quiet", "jarvis", "serve", "--puerto"])
+    cmd.current_dir(&repo).args(["run", "--quiet"]);
+    if !simulated {
+        // La voz es un extra: un `uv sync` suelto lo desinstala y JARVIS quedaba sordo y mudo sin
+        // avisar. Pedirlo acá lo reinstala si falta (el simulado no usa la voz).
+        cmd.args(["--extra", "voice"]);
+    }
+    cmd.args(["jarvis", "serve", "--puerto"])
         .arg(port.to_string())
         .env("JARVIS_CEREBRO_TOKEN", &token)
         // Si xtask muere sin cerrarlo (Ctrl+C, cerrar la terminal), el cerebro se cierra solo.

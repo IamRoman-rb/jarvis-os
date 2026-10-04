@@ -125,7 +125,7 @@ async def start_voice() -> "VoiceHub | None":
     try:
         voice = await asyncio.to_thread(Voice, Config.load().voz)
     except VoiceUnavailableError as e:
-        logging.getLogger("jarvis.voz").info("sin voz: %s", e)
+        logging.getLogger("jarvis.voz").warning("sin voz: %s", e)
         return None
     except Exception:
         logging.getLogger("jarvis.voz").exception("no pude iniciar la voz")

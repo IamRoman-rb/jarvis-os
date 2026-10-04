@@ -53,11 +53,39 @@ def test_el_segmentador_corta_en_el_silencio() -> None:
     s = Segmenter(silence_ms=400)
     for _ in range(20):
         assert s.feed(tone(100, 80)) is None  # ruido de fondo
-    assert s.feed(tone(9000, 80)) is None
+    for _ in range(3):
+        assert s.feed(tone(9000, 80)) is None
     out = None
     for _ in range(6):
         out = out or s.feed(tone(100, 80))
     assert out is not None and len(out) > 0
+
+
+def test_el_segmentador_oye_un_microfono_con_poca_ganancia() -> None:
+    """Ruido de ~50 (ventilador) con golpes sueltos de ~250, y una voz de ~300: antes el umbral
+    (4 veces el ruido promedio) quedaba en ~600 y la voz no se oía nunca."""
+    from jarvis.voice.audio import Segmenter
+
+    s = Segmenter(silence_ms=400)
+    for i in range(60):
+        assert s.feed(tone(350 if i % 10 == 0 else 70, 80)) is None  # ruido y golpes sueltos
+    assert s.threshold() < 400
+    for _ in range(8):
+        assert s.feed(tone(420, 80)) is None  # voz baja, rms ~300
+    out = None
+    for _ in range(6):
+        out = out or s.feed(tone(70, 80))
+    assert out is not None
+
+
+def test_un_golpe_suelto_no_es_una_frase() -> None:
+    from jarvis.voice.audio import Segmenter
+
+    s = Segmenter(silence_ms=400)
+    for _ in range(20):
+        s.feed(tone(100, 80))
+    outs = [s.feed(tone(9000, 80))] + [s.feed(tone(100, 80)) for _ in range(8)]
+    assert all(o is None for o in outs)
 
 
 def test_el_efecto_de_ia_no_cambia_el_largo_ni_satura() -> None:
