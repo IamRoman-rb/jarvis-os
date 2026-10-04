@@ -16,6 +16,8 @@
 //! - [`nic`]: los anillos de descriptores de las placas de red Intel y Realtek.
 //! - [`usb`]: descriptores, TRB y contextos de xHCI, teclado y mouse HID, BOT y SCSI.
 //! - [`hda`]: los verbos de los codecs de audio y el camino del DAC al parlante.
+//! - [`rtw88`]: la placa Wi-Fi Realtek RTL8821CE (K14): encendido, efuse, firmware, tablas,
+//!   canales y descriptores.
 //! - [`sensors`]: la temperatura del procesador (AMD por SMN) y de las zonas térmicas de ACPI.
 //!
 //! Referencias: especificación ACPI 6.5 (cap. 5), Intel SDM vol. 3A cap. 11 (APIC) y la
@@ -32,6 +34,7 @@ pub mod gpt;
 pub mod hda;
 pub mod nic;
 pub mod nvme;
+pub mod rtw88;
 pub mod sensors;
 pub mod usb;
 
