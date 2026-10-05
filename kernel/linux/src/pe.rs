@@ -6,6 +6,10 @@
 //! datos: imports, relocalizaciones y TLS, entre otros. Las direcciones son **RVA**: relativas al
 //! comienzo de la imagen cargada.
 //!
+//! Las DLL tienen el mismo formato, más la tabla de **exports**: qué funciones ofrecen, por
+//! nombre o por número (ordinal). Algunas no están en la DLL sino que la "reenvían" a otra
+//! (`KERNEL32.HeapAlloc` es en realidad `NTDLL.RtlAllocateHeap`).
+//!
 //! Lo que hace el cargador con esto está en `process::win`. Referencia: "PE Format" de Microsoft
 //! (learn.microsoft.com/windows/win32/debug/pe-format).
 
@@ -22,6 +26,7 @@ const PE32_PLUS: u16 = 0x20b;
 const PE32: u16 = 0x10b;
 const FILE_DLL: u16 = 0x2000;
 
+const DIR_EXPORT: usize = 0;
 const DIR_IMPORT: usize = 1;
 const DIR_BASERELOC: usize = 5;
 const DIR_TLS: usize = 9;
@@ -57,6 +62,23 @@ pub struct Import {
     pub entries: Vec<(u32, Symbol)>,
 }
 
+/// Dónde está una función que ofrece una DLL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// En la DLL misma, en esta RVA.
+    Rva(u32),
+    /// En otra DLL: `"NTDLL.RtlAllocateHeap"` (o `"NTDLL.#12"`, por ordinal).
+    Forward(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Export {
+    /// Sin nombre: solo se la puede pedir por ordinal.
+    pub name: Option<String>,
+    pub ordinal: u16,
+    pub target: Target,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Tls {
     /// Direcciones absolutas (con la `ImageBase` preferida): el molde de los datos, su final, la
@@ -83,6 +105,10 @@ pub struct Image {
     /// la imagen no va en su dirección preferida.
     pub relocs: Vec<u32>,
     pub tls: Option<Tls>,
+    /// Es una biblioteca (DLL), no un programa.
+    pub dll: bool,
+    /// Lo que ofrece (vacío en casi todos los programas).
+    pub exports: Vec<Export>,
 }
 
 impl Image {
@@ -111,8 +137,18 @@ pub fn is_pe(file: &[u8]) -> bool {
             .is_some_and(|s| s == b"PE\0\0")
 }
 
-/// Lee el encabezado, las secciones, los imports, las relocalizaciones y el TLS.
+/// Un programa: el encabezado, las secciones, los imports, las relocalizaciones y el TLS. Una DLL
+/// se rechaza (no se puede "ejecutar").
 pub fn parse(file: &[u8]) -> Result<Image, LoadError> {
+    parse_image(file, false)
+}
+
+/// Una DLL, con su tabla de exports.
+pub fn parse_dll(file: &[u8]) -> Result<Image, LoadError> {
+    parse_image(file, true)
+}
+
+fn parse_image(file: &[u8], want_dll: bool) -> Result<Image, LoadError> {
     let broken = LoadError::Broken;
     if !is_pe(file) {
         return Err(LoadError::NotElf);
@@ -137,9 +173,15 @@ pub fn parse(file: &[u8]) -> Result<Image, LoadError> {
         }
         _ => return Err(LoadError::WrongKind("es para otra arquitectura")),
     }
-    if characteristics & FILE_DLL != 0 {
+    let dll = characteristics & FILE_DLL != 0;
+    if dll && !want_dll {
         return Err(LoadError::WrongKind(
             "es una biblioteca de Windows (DLL), no un programa",
+        ));
+    }
+    if want_dll && !dll {
+        return Err(LoadError::WrongKind(
+            "no es una biblioteca de Windows (DLL)",
         ));
     }
     let entry_rva = u32_at(file, opt + 16).ok_or(broken("encabezado opcional"))?;
@@ -220,7 +262,10 @@ pub fn parse(file: &[u8]) -> Result<Image, LoadError> {
         imports: Vec::new(),
         relocs: Vec::new(),
         tls: None,
+        dll,
+        exports: Vec::new(),
     };
+    img.exports = exports(file, &img, dir(DIR_EXPORT))?;
     img.imports = imports(file, &img, dir(DIR_IMPORT).0)?;
     img.relocs = relocs(file, &img, dir(DIR_BASERELOC))?;
     let (tls_rva, _) = dir(DIR_TLS);
@@ -248,6 +293,80 @@ impl Image {
                 .then(|| (s.raw_offset + (rva - s.rva)) as usize)
         })
     }
+}
+
+impl Image {
+    /// La función `name` que ofrece la DLL.
+    pub fn export(&self, name: &str) -> Option<&Export> {
+        self.exports
+            .iter()
+            .find(|e| e.name.as_deref() == Some(name))
+    }
+
+    pub fn export_ordinal(&self, ordinal: u16) -> Option<&Export> {
+        self.exports.iter().find(|e| e.ordinal == ordinal)
+    }
+}
+
+fn exports(file: &[u8], img: &Image, (rva, size): (u32, u32)) -> Result<Vec<Export>, LoadError> {
+    let broken = LoadError::Broken("tabla de exports");
+    let mut out = Vec::new();
+    if rva == 0 {
+        return Ok(out);
+    }
+    let d = img.offset(rva).ok_or(broken.clone())?;
+    let base = u32_at(file, d + 16).ok_or(broken.clone())?;
+    let nfuncs = u32_at(file, d + 20).ok_or(broken.clone())? as usize;
+    let nnames = u32_at(file, d + 24).ok_or(broken.clone())? as usize;
+    if nfuncs > 65536 || nnames > nfuncs {
+        return Err(broken);
+    }
+    let funcs = img
+        .offset(u32_at(file, d + 28).ok_or(broken.clone())?)
+        .ok_or(broken.clone())?;
+    // Los nombres: cada uno apunta (por su índice en la tabla de ordinales) a una función.
+    let mut names: Vec<Option<String>> = alloc::vec![None; nfuncs];
+    if nnames > 0 {
+        let name_ptrs = img
+            .offset(u32_at(file, d + 32).ok_or(broken.clone())?)
+            .ok_or(broken.clone())?;
+        let ords = img
+            .offset(u32_at(file, d + 36).ok_or(broken.clone())?)
+            .ok_or(broken.clone())?;
+        for i in 0..nnames {
+            let name_rva = u32_at(file, name_ptrs + i * 4).ok_or(broken.clone())?;
+            let idx = u16_at(file, ords + i * 2).ok_or(broken.clone())? as usize;
+            let name = img
+                .offset(name_rva)
+                .and_then(|o| cstr(file, o))
+                .ok_or(broken.clone())?;
+            if let Some(slot) = names.get_mut(idx) {
+                *slot = Some(name);
+            }
+        }
+    }
+    for (i, name) in names.into_iter().enumerate() {
+        let f = u32_at(file, funcs + i * 4).ok_or(broken.clone())?;
+        if f == 0 {
+            continue; // un hueco en la numeración
+        }
+        // Si la "dirección" cae adentro de la tabla de exports, es el nombre de otra DLL.
+        let target = if f >= rva && f < rva + size {
+            Target::Forward(
+                img.offset(f)
+                    .and_then(|o| cstr(file, o))
+                    .ok_or(broken.clone())?,
+            )
+        } else {
+            Target::Rva(f)
+        };
+        out.push(Export {
+            name,
+            ordinal: (base as usize + i) as u16,
+            target,
+        });
+    }
+    Ok(out)
 }
 
 fn cstr(file: &[u8], o: usize) -> Option<String> {
@@ -423,6 +542,63 @@ pub mod tests {
             img.imports[1].entries,
             vec![(0x20e0, Symbol::Name("puts".into()))]
         );
+    }
+
+    /// La misma imagen como DLL, con dos exports: `Hola` (en 0x1000) y el ordinal 2, sin
+    /// nombre, que reenvía a `NTDLL.RtlFoo`.
+    pub fn tiny_dll() -> Vec<u8> {
+        let mut f = tiny();
+        f.resize(0x800, 0);
+        let w16 = |f: &mut Vec<u8>, o: usize, v: u16| f[o..o + 2].copy_from_slice(&v.to_le_bytes());
+        let w32 = |f: &mut Vec<u8>, o: usize, v: u32| f[o..o + 4].copy_from_slice(&v.to_le_bytes());
+        f[0x84 + 19] |= (FILE_DLL >> 8) as u8;
+        let opt = 0x84 + 20;
+        // .idata ahora mide 0x400 (RVA 0x2000..0x2400): ahí también va la tabla de exports.
+        let t = opt + 240 + 40;
+        w32(&mut f, t + 8, 0x400);
+        w32(&mut f, t + 16, 0x400);
+        w32(&mut f, opt + 112 + DIR_EXPORT * 8, 0x2200);
+        w32(&mut f, opt + 112 + DIR_EXPORT * 8 + 4, 0xa0);
+        let d = 0x600; // RVA 0x2200
+        w32(&mut f, d + 12, 0x2280); // nombre de la DLL
+        w32(&mut f, d + 16, 1); // primer ordinal
+        w32(&mut f, d + 20, 2); // funciones
+        w32(&mut f, d + 24, 1); // nombres
+        w32(&mut f, d + 28, 0x2240);
+        w32(&mut f, d + 32, 0x2250);
+        w32(&mut f, d + 36, 0x2260);
+        w32(&mut f, 0x640, 0x1000);
+        w32(&mut f, 0x644, 0x2290); // adentro de la tabla: reenvío
+        w32(&mut f, 0x650, 0x2270);
+        w16(&mut f, 0x660, 0);
+        f[0x670..0x674].copy_from_slice(b"Hola");
+        f[0x680..0x68a].copy_from_slice(b"jarvis.dll");
+        f[0x690..0x69c].copy_from_slice(b"NTDLL.RtlFoo");
+        f
+    }
+
+    #[test]
+    fn lee_los_exports_de_una_dll() {
+        let f = tiny_dll();
+        assert!(matches!(parse(&f), Err(LoadError::WrongKind(m)) if m.contains("DLL")));
+        let img = parse_dll(&f).unwrap();
+        assert!(img.dll);
+        assert_eq!(
+            img.export("Hola"),
+            Some(&Export {
+                name: Some("Hola".into()),
+                ordinal: 1,
+                target: Target::Rva(0x1000),
+            })
+        );
+        assert_eq!(
+            img.export_ordinal(2).map(|e| &e.target),
+            Some(&Target::Forward("NTDLL.RtlFoo".into()))
+        );
+        assert!(img.export("Chau").is_none());
+        // Un programa no es una DLL.
+        assert!(matches!(parse_dll(&tiny()), Err(LoadError::WrongKind(_))));
+        assert!(parse(&tiny()).unwrap().exports.is_empty());
     }
 
     #[test]
