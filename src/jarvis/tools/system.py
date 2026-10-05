@@ -83,6 +83,20 @@ SPECS: list[tuple[str, str, dict[str, type]]] = [
     ),
     ("leer_terminal", "Lo último que muestra la terminal de JARVIS-OS.", {}),
     (
+        "modificar_sistema",
+        "Modifica el propio JARVIS-OS (su interfaz, apps, drivers, el kernel o tu cerebro): un "
+        "agente de código trabaja en el repositorio del sistema y se ve en la ventana Proyecto; "
+        "cada edición y comando los aprueba Roman. pedido = qué cambiar, con todo el detalle "
+        "que dio Roman. Cuando termine y Roman quiera verlo, usá aplicar_cambios_sistema.",
+        {"pedido": str},
+    ),
+    (
+        "aplicar_cambios_sistema",
+        "Aplica lo que cambió modificar_sistema: verifica que compile y, si compila, JARVIS-OS "
+        "se reinicia con la versión nueva (si no, devuelve el error y no reinicia).",
+        {},
+    ),
+    (
         "consultar_agente",
         "Le pregunta algo a otro agente de IA que Roman vinculó (claude, gemini, chatgpt o "
         "deepseek) y devuelve su respuesta: para una segunda opinión o algo que otro sepa mejor.",
@@ -107,6 +121,10 @@ def describe(tool: str, args: dict[str, Any]) -> str:
             return f"Copiar {a.get('origen', '?')} a {a.get('destino', '?')}."
         case "mover":
             return f"Mover {a.get('origen', '?')} a {a.get('destino', '?')}."
+        case "modificar_sistema":
+            return f"Modificar JARVIS-OS: {a.get('pedido', '?')}"
+        case "aplicar_cambios_sistema":
+            return "Compilar los cambios y reiniciar JARVIS-OS con la versión nueva."
         case "abrir_proyecto":
             what = a.get("pedido") or "seguir con lo que estaban trabajando"
             return f"Abrir el proyecto {a.get('nombre', '?')} y {what}."

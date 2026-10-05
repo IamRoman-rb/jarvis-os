@@ -102,6 +102,11 @@ pub fn start(port: u16, simulated: bool) -> Option<Brain> {
         .env("JARVIS_CEREBRO_TOKEN", &token)
         // Si xtask muere sin cerrarlo (Ctrl+C, cerrar la terminal), el cerebro se cierra solo.
         .env("JARVIS_PADRE", std::process::id().to_string())
+        // Para que JARVIS se modifique a sí mismo: el repo, la marca para que `run` recompile y
+        // reinicie, y dónde contarle cómo salió (ver `crate::run` y src/jarvis/update.py).
+        .env("JARVIS_REPO", &repo)
+        .env("JARVIS_REINICIO", crate::restart_marker())
+        .env("JARVIS_ACTUALIZACION", crate::update_result())
         .stdin(Stdio::null());
     if simulated {
         // Proyectos de mentira: el simulado no toca los de verdad.

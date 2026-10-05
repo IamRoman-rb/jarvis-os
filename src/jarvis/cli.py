@@ -36,11 +36,12 @@ def serve(
     El token de la sesión llega por la variable JARVIS_CEREBRO_TOKEN (no por la línea de
     comandos, que la ven los demás procesos).
     """
+    from jarvis import update
     from jarvis.agent.brain import Brain, ClaudeBrain, ScriptedBrain
     from jarvis.agent.council import CouncilBrain, ask_claude
     from jarvis.agent.providers import AgentHub
     from jarvis.config import Config
-    from jarvis.projects import ClaudeProject, ProjectRunner, ScriptedProject
+    from jarvis.projects import ClaudeProject, OsProject, ProjectRunner, ScriptedProject
     from jarvis.service.server import Host, Session
     from jarvis.service.server import serve as run_server
 
@@ -61,13 +62,26 @@ def serve(
         # Claude, Gemini, ChatGPT y DeepSeek juntos: el principal y el consejo los elige Roman.
         return CouncilBrain(claude, host.agents, session, lambda: session.mode, voice=voice)
 
+    def make_os_project(request: str) -> ProjectRunner:
+        # Solo se usa si `updater` encontró el repo (ver `Host` abajo).
+        repo = updater.repo if updater else Path()
+        if simulado:
+            return ScriptedProject(repo, request, False)
+        return OsProject(repo, request, config)
+
     def make_project(path: Path, request: str, keep_going: bool) -> ProjectRunner:
         if simulado:
             return ScriptedProject(path, request, keep_going)
         return ClaudeProject(path, request, keep_going, config)
 
     root = Path(proyectos) if proyectos else config.proyectos
-    host = Host(projects=root, make_project=make_project)
+    updater = update.from_env()
+    host = Host(
+        projects=root,
+        make_project=make_project,
+        make_os_project=make_os_project if updater else None,
+        updater=updater,
+    )
     if not simulado:
         from jarvis import account
 

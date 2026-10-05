@@ -361,6 +361,8 @@ pub struct Desktop<D: BlockDevice> {
     /// conectarse, ya no tiene sentido).
     greeted: bool,
     greeting_until: u64,
+    /// Cuándo apagar para que arranque la versión nueva del sistema (la pidió JARVIS).
+    restart_at: Option<u64>,
     phrase: usize,
     screenshot: bool,
     format: Option<(PixelFormat, usize)>,
@@ -504,6 +506,7 @@ impl<D: BlockDevice> Desktop<D> {
             wifi_started: false,
             greeted: false,
             greeting_until: 0,
+            restart_at: None,
             phrase: 0,
             screenshot: false,
             format: None,
@@ -929,6 +932,12 @@ impl<D: BlockDevice> Desktop<D> {
     pub fn set_stats(&mut self, stats: SystemStats) {
         if self.last_now > self.greeting_until {
             self.brain.greeting = None;
+        }
+        if self.restart_at.is_some_and(|t| self.last_now >= t) {
+            self.restart_at = None;
+            // Apagar (no reiniciar): `cargo xtask run` ve la marca, arma la imagen nueva y
+            // vuelve a arrancar QEMU.
+            self.power(Power::Shutdown);
         }
         self.brain.tick(self.last_now, &mut self.out);
         self.logs.append(&mut self.brain.logs);
@@ -2158,6 +2167,15 @@ impl<D: BlockDevice> Desktop<D> {
                     self.say(&first, now_ms);
                 }
                 BrainEvent::Error(_) | BrainEvent::Confirm { .. } => {}
+                BrainEvent::Restart => {
+                    // Unos segundos, así se lee (y se oye) la respuesta de JARVIS.
+                    self.restart_at = Some(now_ms + 4000);
+                    self.notify(
+                        tr("JARVIS-OS se reinicia con los cambios en unos segundos."),
+                        false,
+                        now_ms,
+                    );
+                }
                 BrainEvent::Account => {
                     for s in &mut self.slots {
                         if let crate::apps::App::Settings(st) = &mut s.app

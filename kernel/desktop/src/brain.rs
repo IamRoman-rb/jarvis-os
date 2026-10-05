@@ -68,6 +68,9 @@ pub enum BrainEvent {
         ev: String,
         text: String,
     },
+    /// El cerebro compiló los cambios que JARVIS le hizo al sistema: hay que apagar para que
+    /// `cargo xtask run` arranque la versión nueva.
+    Restart,
     /// Cambió la cuenta de Claude del anfitrión, un agente vinculado o el estado de un inicio
     /// de sesión (Configuración → Asistente se redibuja).
     Account,
@@ -563,6 +566,10 @@ impl BrainService {
                 events.push(BrainEvent::Audio { rate, pcm, end });
             }
             "callar" => events.push(BrainEvent::Hush),
+            "reiniciar" => {
+                self.logs.push("CEREBRO_REINICIAR".into());
+                events.push(BrainEvent::Restart);
+            }
             "proyecto" => {
                 let s = |k: &str| msg.get(k).and_then(Json::str).unwrap_or("").to_string();
                 let (name, ev, text) = (s("nombre"), s("ev"), s("texto"));

@@ -128,6 +128,9 @@ class ClaudeProject:
             extra += "\n\n# CLAUDE.md del proyecto\n" + claude_md.read_text(encoding="utf-8")
         return {"type": "preset", "preset": "claude_code", "append": extra}
 
+    def decide(self, name: str, args: dict[str, Any]) -> int | None:
+        return decide(self.path, name, args)
+
     async def run(self, emit: Emit, confirm: Confirm) -> None:
         from claude_agent_sdk import (
             AssistantMessage,
@@ -141,7 +144,7 @@ class ClaudeProject:
         )
 
         async def can_use_tool(tool: str, args: dict[str, Any], _ctx: Any) -> Any:
-            level = decide(self.path, tool, args)
+            level = self.decide(tool, args)
             desc = describe_tool(tool, args)
             if level is None:
                 audit("rechazada", f"proyecto:{tool}", args, motivo="fuera del proyecto")
@@ -203,3 +206,89 @@ class ScriptedProject:
 
     async def stop(self) -> None:
         pass
+
+
+# --- Modificar JARVIS-OS desde adentro ------------------------------------------------------
+
+#: Comandos que solo leen: sin confirmar (el grafo de graphify y el estado de git).
+OS_READ_COMMANDS = (
+    "graphify query ",
+    "graphify path ",
+    "graphify explain ",
+    "git status",
+    "git diff",
+    "git log",
+    "git show",
+)
+#: Comandos que verifican (compilan, prueban, revisan): nivel 2, se aprueban con el teclado.
+OS_CHECK_COMMANDS = (
+    "cargo test",
+    "cargo check",
+    "cargo clippy",
+    "cargo build",
+    "cargo fmt",
+    "uv run pytest",
+    "uv run ruff",
+    "uv run mypy",
+)
+#: Si el comando tiene alguno, puede encadenar otro: vuelve a nivel 3.
+SHELL_META = (";", "&", "|", ">", "<", "`", "$(", "\n")
+
+
+def os_command_level(command: str) -> int:
+    """El nivel de un comando del agente que modifica JARVIS-OS (los demás proyectos: 3)."""
+    cmd = command.strip()
+    if any(m in cmd for m in SHELL_META):
+        return 3
+    # `cd kernel && cargo test` no pasa (tiene &): el agente usa rutas o --manifest-path.
+    if cmd.startswith(OS_READ_COMMANDS):
+        # `git diff --output=archivo` escribe: ya no es solo leer.
+        return 3 if "--output" in cmd or " -o" in cmd else 1
+    if cmd.startswith(OS_CHECK_COMMANDS):
+        return 2
+    return 3
+
+
+OS_PROMPT = """\
+Estás modificando JARVIS-OS, el sistema operativo de Roman, MIENTRAS él lo usa: el kernel en
+Rust (kernel/: escritorio, drivers, red, gráficos...) y el cerebro en Python (src/jarvis/). Lo
+pidió hablándole a JARVIS, así que tu avance se ve en la ventana Proyecto.
+
+Cómo trabajar:
+- Antes de leer código, ubicá lo que hay que tocar con el grafo del proyecto:
+  `graphify query "<pregunta>"`, `graphify explain "<símbolo>"` o `graphify path "A" "B"`
+  (graphify-out/graph.json). Después leé solo los archivos que te señala.
+- Seguí el CLAUDE.md (abajo) y los ADR de docs/adr/. Cambios de arquitectura: explicalos antes.
+- Verificá lo que cambiaste: `cargo test -p <crate> --manifest-path kernel/Cargo.toml`,
+  `cargo clippy --manifest-path kernel/Cargo.toml --workspace --exclude jarvis-kernel
+  --all-targets -- -D warnings`, `cargo fmt --manifest-path kernel/Cargo.toml --all`, y para
+  Python `uv run pytest`, `uv run ruff check .` y `uv run mypy`. Un comando por vez, sin `&&`
+  ni `;` (así Roman los aprueba rápido).
+- Drivers nuevos: la lógica va en kernel/drivers (no_std, sin unsafe, con tests en el host) y
+  los registros en kernel/kernel/src, como los que ya están (ver ADR 0011).
+- No hagas commit ni push salvo que Roman lo pida. No toques target/: la imagen la está usando
+  QEMU. Los cambios se aplican cuando JARVIS llama a aplicar_cambios_sistema (recompila y
+  reinicia JARVIS-OS); no lo hagas vos.
+- Al terminar, resumí en pocas frases qué cambiaste y cómo lo probaste.
+"""
+
+
+class OsProject(ClaudeProject):
+    """El agente de código sobre el propio repositorio de JARVIS-OS (`modificar_sistema`).
+    Como un proyecto, pero con instrucciones del sistema operativo y los comandos que solo
+    leen o verifican con menos fricción (ver `os_command_level`)."""
+
+    def __init__(self, repo: Path, request: str, config: Config) -> None:
+        super().__init__(repo, request, keep_going=False, config=config)
+        self.name = "JARVIS-OS"
+
+    def _system_prompt(self) -> Any:
+        prompt = super()._system_prompt()
+        prompt["append"] = OS_PROMPT + "\n" + prompt["append"]
+        return prompt
+
+    def decide(self, name: str, args: dict[str, Any]) -> int | None:
+        level = decide(self.path, name, args)
+        if level == 3 and name == "Bash":
+            return os_command_level(str(args.get("command", "")))
+        return level

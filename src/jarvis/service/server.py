@@ -24,6 +24,7 @@ from jarvis.agent.providers import PROVIDERS, AgentError, AgentHub
 from jarvis.projects import ProjectError, ProjectRunner, list_projects, resolve_project
 from jarvis.protocol import MAX_LINE, Message, ProtocolError, decode, encode
 from jarvis.service.voicehub import VoiceHub
+from jarvis.update import UpdateError, Updater
 
 log = logging.getLogger("jarvis.serve")
 
@@ -34,7 +35,13 @@ CONFIRM_TIMEOUT = 120.0
 
 
 #: Tools que se atienden acá, en el anfitrión (no en el kernel).
-HOST_TOOLS = {"listar_proyectos", "abrir_proyecto", "consultar_agente"}
+HOST_TOOLS = {
+    "listar_proyectos",
+    "abrir_proyecto",
+    "consultar_agente",
+    "modificar_sistema",
+    "aplicar_cambios_sistema",
+}
 
 MakeProject = Callable[[Path, str, bool], ProjectRunner]
 #: El clima de hoy, como una frase (para el saludo de la mañana).
@@ -68,6 +75,9 @@ class Host:
     agents: AgentHub | None = None
     #: El clima para el saludo de la mañana. None = sin clima (tests, sin red).
     weather: WeatherCall | None = None
+    #: Modificar JARVIS-OS desde adentro: el agente sobre su repo y cómo aplicar los cambios.
+    make_os_project: Callable[[str], ProjectRunner] | None = None
+    updater: Updater | None = None
 
 
 class Session:
@@ -128,6 +138,10 @@ class Session:
     async def _host_call(self, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
         if tool == "consultar_agente":
             return await self._consult(str(args.get("agente", "")), str(args.get("pregunta", "")))
+        if tool == "modificar_sistema":
+            return self._start_os_project(str(args.get("pedido", "")))
+        if tool == "aplicar_cambios_sistema":
+            return await self._apply_update()
         if self.host is None:
             return False, "Este JARVIS no tiene carpeta de proyectos."
         root = self.host.projects
@@ -148,6 +162,37 @@ class Session:
         self.project = runner
         self.project_task = asyncio.create_task(self._run_project(runner))
         return True, f"Abrí {path.name}: el avance se ve en la ventana Proyecto de JARVIS-OS."
+
+    def _start_os_project(self, request: str) -> tuple[bool, str]:
+        make = self.host.make_os_project if self.host else None
+        if make is None:
+            return False, "No encuentro el código de JARVIS-OS en esta PC."
+        if not request.strip():
+            return False, "Falta qué cambiar."
+        if self.project_task is not None and not self.project_task.done():
+            return False, f"Ya estoy trabajando en {self.project.name if self.project else '?'}."
+        runner = make(request)
+        self.project = runner
+        self.project_task = asyncio.create_task(self._run_project(runner))
+        return True, (
+            "Empecé a modificar JARVIS-OS: el avance se ve en la ventana Proyecto y cada cambio "
+            "lo aprueba Roman. Cuando termine, aplicar_cambios_sistema lo pone en marcha."
+        )
+
+    async def _apply_update(self) -> tuple[bool, str]:
+        updater = self.host.updater if self.host else None
+        if updater is None:
+            return False, "No encuentro el código de JARVIS-OS en esta PC."
+        if self.project_task is not None and not self.project_task.done():
+            return False, "El agente todavía está trabajando: esperá a que termine."
+        try:
+            await updater.check()
+            updater.request_restart()
+        except UpdateError as e:
+            return False, str(e)
+        # El kernel se apaga en unos segundos (así llega esta respuesta) y xtask lo rearma.
+        await self.send({"t": "reiniciar", "motivo": "actualizar"})
+        return True, "Compila. JARVIS-OS se reinicia en unos segundos con la versión nueva."
 
     async def _consult(self, agent: str, question: str) -> tuple[bool, str]:
         from jarvis.agent.council import ADVISOR_PROMPT
@@ -294,6 +339,10 @@ class Session:
             moment = part_of_day(datetime.now().hour)
         name = name.strip()[:24]
         text = GREETINGS[moment] + (f", {name}." if name else ".")
+        updater = self.host.updater if self.host else None
+        news = updater.take_result() if updater is not None else None
+        if news:
+            text += " " + news
         weather = self.host.weather if self.host else None
         if moment == "manana" and weather is not None:
             from jarvis.weather import WeatherError

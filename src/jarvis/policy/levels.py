@@ -33,6 +33,10 @@ LEVELS: dict[str, int] = {
     "mover": 2,
     "cerrar_ventana": 2,
     "abrir_proyecto": 2,
+    # Arranca el agente sobre el repo de JARVIS-OS; cada edición y comando suyo se confirma.
+    "modificar_sistema": 2,
+    # Reinicia el sistema con código nuevo.
+    "aplicar_cambios_sistema": 3,
     "a_papelera": 3,
     "ejecutar_comando": 3,
 }

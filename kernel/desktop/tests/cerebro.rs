@@ -501,3 +501,24 @@ fn a_la_manana_dice_buenos_dias() {
             .any(|l| l == "JARVIS_HABLA: Buenos días, Roman.")
     );
 }
+
+#[test]
+fn jarvis_aplica_sus_cambios_y_el_sistema_se_apaga_para_arrancar_la_version_nueva() {
+    let mut b = connected();
+    b.reply(r#"{"t":"reiniciar","motivo":"actualizar"}"#);
+    assert!(b.t.logs().iter().any(|l| l == "CEREBRO_REINICIAR"));
+    // Unos segundos, para que se lea la respuesta de JARVIS; después se apaga.
+    b.second();
+    let off = |b: &mut Brain| {
+        b.t.logs()
+            .iter()
+            .any(|l| l == "ESCRITORIO_ENERGIA Shutdown")
+    };
+    assert!(!off(&mut b));
+    b.t.now += 4000;
+    b.second();
+    assert!(
+        off(&mut b),
+        "apaga (no reinicia): xtask arranca la imagen nueva"
+    );
+}

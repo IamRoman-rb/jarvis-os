@@ -34,6 +34,8 @@ registra (default deny). Detalle del modelo en [investigacion.md §6.4 y §12.2]
 | `mover` | 2 | Reversible. |
 | `cerrar_ventana` | 2 | Se puede perder lo que no se guardó (la app pregunta si hay cambios). |
 | `abrir_proyecto` | 2 | Arranca un agente de código en el anfitrión; cada edición y comando suyo se confirma aparte. |
+| `modificar_sistema` | 2 | Arranca un agente de código sobre el repositorio de JARVIS-OS (como `abrir_proyecto`); cada edición suya es nivel 2 y cada comando nivel 3, salvo los de la tabla de abajo. |
+| `aplicar_cambios_sistema` | 3 | Compila y, si compila, reinicia JARVIS-OS con la versión nueva. |
 | `a_papelera` | 3 | Borrado (aunque va a la Papelera, nunca definitivo). |
 | `ejecutar_comando` | 3 | Un comando puede instalar, borrar o usar la red; se muestra entero. |
 
@@ -52,3 +54,14 @@ confirmaciones):
 | Edit, MultiEdit, Write, NotebookEdit (solo dentro del proyecto) | 2 |
 | Bash y todo lo demás (red, subagentes) | 3, con el comando entero |
 | Rutas fuera del proyecto, `.ssh`, `.gnupg`, credenciales, `/etc` | prohibido |
+
+### El agente que modifica JARVIS-OS (`modificar_sistema`)
+
+Igual que el de proyectos, con dos excepciones para comandos sueltos (sin `;`, `&`, `|`, `>`,
+`<`, `` ` `` ni `$(`; con alguno, vuelven a nivel 3):
+
+| Comando | Nivel |
+|---|---|
+| `graphify query/path/explain`, `git status/diff/log/show` (sin `--output` ni `-o`) | 1 |
+| `cargo test/check/clippy/build/fmt`, `uv run pytest/ruff/mypy` | 2 |
+| Cualquier otro | 3 |

@@ -697,18 +697,51 @@ fn boot_iso(iso: &Path) -> Result<()> {
     Ok(())
 }
 
+/// La marca que deja el cerebro cuando JARVIS aplicó cambios al sistema (`aplicar_cambios_sistema`):
+/// al apagarse QEMU, `run` vuelve a compilar y a arrancar.
+fn restart_marker() -> PathBuf {
+    target_dir().join("jarvis-reiniciar")
+}
+
+/// Cómo salió la última recompilación ("ok" o "error: ..."): el cerebro lo cuenta al saludar.
+fn update_result() -> PathBuf {
+    target_dir().join("jarvis-actualizacion.txt")
+}
+
 fn run(image: &Path, disk: &Path) -> Result<()> {
     puente::start();
     brave::start(brave_profile());
-    // El cerebro con Claude (se cierra al terminar).
-    let _brain = cerebro::start(cerebro::PORT, false);
-    let status = qemu(image, disk, false)?
-        .status()
-        .map_err(|e| format!("no pude abrir QEMU ({}): {e}", qemu_binary().display()))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("QEMU terminó con {status}"))
+    let mut image = image.to_path_buf();
+    loop {
+        let _ = fs::remove_file(restart_marker());
+        // El cerebro con Claude (se cierra al terminar). Se levanta de nuevo en cada vuelta: así
+        // también se aplican los cambios que JARVIS le hizo a su propio código.
+        let brain = cerebro::start(cerebro::PORT, false);
+        let status = qemu(&image, disk, false)?
+            .status()
+            .map_err(|e| format!("no pude abrir QEMU ({}): {e}", qemu_binary().display()))?;
+        drop(brain);
+        if !restart_marker().exists() {
+            return if status.success() {
+                Ok(())
+            } else {
+                Err(format!("QEMU terminó con {status}"))
+            };
+        }
+        // JARVIS se modificó a sí mismo: imagen nueva y a arrancar de nuevo. Si no compila, se
+        // vuelve a arrancar la anterior y JARVIS lo cuenta al saludar.
+        println!("JARVIS aplicó cambios al sistema: recompilando y reiniciando...");
+        let outcome = match build_user().and_then(|_| build()) {
+            Ok(new) => {
+                image = new;
+                "ok".to_string()
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                format!("error: {e}")
+            }
+        };
+        let _ = fs::write(update_result(), outcome);
     }
 }
 

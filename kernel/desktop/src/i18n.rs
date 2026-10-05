@@ -549,6 +549,10 @@ static EN: &[(&str, &str)] = &[
         "JARVIS-OS no ofrece servicios: se rechaza lo que no pidió",
         "JARVIS-OS offers no services: anything it didn't ask for is rejected",
     ),
+    (
+        "JARVIS-OS se reinicia con los cambios en unos segundos.",
+        "JARVIS-OS will restart with the changes in a few seconds.",
+    ),
     ("Julio", "July"),
     ("Junio", "June"),
     (
@@ -1529,6 +1533,10 @@ static PT: &[(&str, &str)] = &[
     (
         "JARVIS-OS no ofrece servicios: se rechaza lo que no pidió",
         "JARVIS-OS não oferece serviços: rejeita o que não pediu",
+    ),
+    (
+        "JARVIS-OS se reinicia con los cambios en unos segundos.",
+        "O JARVIS-OS vai reiniciar com as mudanças em alguns segundos.",
     ),
     ("Julio", "Julho"),
     ("Junio", "Junho"),
