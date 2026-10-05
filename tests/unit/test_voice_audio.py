@@ -98,6 +98,24 @@ def test_el_efecto_de_ia_no_cambia_el_largo_ni_satura() -> None:
     assert max(abs(x) for x in array.array("h", out)) <= 32767
 
 
+def test_la_voz_cine_tiene_sala_no_satura_y_es_la_de_fabrica() -> None:
+    from jarvis.config import Config
+    from jarvis.voice.audio import cinema_effect
+    from jarvis.voice.engine import DEFAULT_VOICE, VOICES
+
+    # Un golpe corto y después silencio: los reflejos de la sala aparecen en el silencio.
+    pcm = tone(30000, 20) + bytes(RATE * 2 // 10)
+    out = array.array("h", cinema_effect(pcm, RATE))
+    assert len(out) * 2 == len(pcm)
+    assert max(abs(x) for x in out) <= 32767
+    tail = out[RATE * 40 // 1000 : RATE * 80 // 1000]
+    assert max(abs(x) for x in tail) > 500, "se oye la sala después del golpe"
+    # Más lenta (más grave) que "jarvis", con el mismo modelo: no hay que bajar nada nuevo.
+    assert VOICES["cine"][0] == VOICES["jarvis"][0]
+    assert VOICES["cine"][3] < VOICES["jarvis"][3]
+    assert DEFAULT_VOICE == "cine" and Config().voz == "cine"
+
+
 def test_send_paced_manda_al_ritmo_del_audio_y_se_puede_cortar() -> None:
     from jarvis.voice.audio import send_paced
 

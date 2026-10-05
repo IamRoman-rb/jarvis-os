@@ -38,8 +38,9 @@ class Config:
     modelo: str | None = None
     proyectos: Path = field(default_factory=_default_projects)
     puerto: int = DEFAULT_PORT
-    #: La voz de JARVIS: "jarvis" (grave, con toque de IA) o "daniela".
-    voz: str = "jarvis"
+    #: La voz de JARVIS: "cine" (asistente de película: grave, calma, metálica), "jarvis" (grave,
+    #: con toque de IA) o "daniela".
+    voz: str = "cine"
     #: El modelo de Gemini, ChatGPT o DeepSeek (vacío = el de `agent/providers.py`).
     agentes: dict[str, str] = field(default_factory=dict)
     #: (latitud, longitud, lugar) para el clima; None = la ubicación aproximada de la IP.
@@ -66,7 +67,7 @@ class Config:
             modelo=modelo if isinstance(modelo, str) and modelo else None,
             proyectos=Path(proyectos) if isinstance(proyectos, str) else _default_projects(),
             puerto=puerto if isinstance(puerto, int) and 0 < puerto < 65536 else DEFAULT_PORT,
-            voz=str(data.get("voz", "jarvis")),
+            voz=str(data.get("voz", "cine")),
             clima=_clima(data.get("clima")),
             agentes={
                 str(k): v

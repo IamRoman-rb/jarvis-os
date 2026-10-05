@@ -25,6 +25,7 @@ from jarvis.voice.audio import (
     FRAME,
     RATE,
     Segmenter,
+    cinema_effect,
     for_speech,
     is_noise,
     jarvis_effect,
@@ -39,14 +40,17 @@ log = logging.getLogger("jarvis.voz")
 ECHO_MS = 400
 WHISPER_MODEL = "small"
 PIPER_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
-#: Voces: nombre → (modelo de Piper, carpeta en el repositorio, efecto "IA", velocidad).
-#: "jarvis" es una voz masculina, grave y pausada con un leve brillo metálico: evoca a un
-#: asistente de película sin imitar la voz de ningún actor.
-VOICES: dict[str, tuple[str, str, bool, float]] = {
-    "jarvis": ("es_ES-davefx-medium", "es/es_ES/davefx/medium", True, 0.92),
-    "daniela": ("es_AR-daniela-high", "es/es_AR/daniela/high", False, 1.0),
+#: Voces: nombre → (modelo de Piper, carpeta en el repositorio, efecto, velocidad).
+#: "cine" y "jarvis" son la misma voz masculina de Piper, procesada para evocar a un asistente
+#: de película sin imitar la voz de ningún actor (clonar la voz de una persona real sin su
+#: consentimiento no se hace): "cine", más grave y calma, con brillo metálico y sala; "jarvis",
+#: solo con el brillo.
+VOICES: dict[str, tuple[str, str, str, float]] = {
+    "cine": ("es_ES-davefx-medium", "es/es_ES/davefx/medium", "cine", 0.86),
+    "jarvis": ("es_ES-davefx-medium", "es/es_ES/davefx/medium", "jarvis", 0.92),
+    "daniela": ("es_AR-daniela-high", "es/es_AR/daniela/high", "", 1.0),
 }
-DEFAULT_VOICE = "jarvis"
+DEFAULT_VOICE = "cine"
 
 
 def voice_url(name: str) -> str:
@@ -173,7 +177,8 @@ class Voice:
         """El audio de `text`, con el efecto y la velocidad de la voz elegida."""
         rate, chunks = self._synthesize(text)
         if self._effect:
-            chunks = [jarvis_effect(c, rate) for c in chunks]
+            effect = cinema_effect if self._effect == "cine" else jarvis_effect
+            chunks = [effect(c, rate) for c in chunks]
         # Más lenta = más grave y pausada.
         return int(rate * self._speed), chunks
 

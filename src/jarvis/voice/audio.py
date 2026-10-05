@@ -190,6 +190,33 @@ def jarvis_effect(pcm: bytes, rate: int) -> bytes:
     return out.tobytes()
 
 
+def cinema_effect(pcm: bytes, rate: int) -> bytes:
+    """La voz "cine": un asistente de película, propio (no imita a ningún actor). Al brillo
+    metálico de `jarvis_effect` le suma calidez (un filtro que baja los agudos ásperos) y una
+    sala chica (dos reflejos suaves, a 37 y 61 ms), y la deja en un volumen parejo. La
+    velocidad más lenta (ver `engine.VOICES`) la hace más grave y calma."""
+    a = array.array("h")
+    a.frombytes(jarvis_effect(pcm, rate)[: len(pcm) // 2 * 2])
+    n = len(a)
+    warm = [0.0] * n
+    prev = 0.0
+    for i in range(n):  # pasa-bajos de un polo: más cálida
+        prev += (a[i] - prev) * 0.55
+        warm[i] = prev
+    d1, d2 = rate * 37 // 1000, rate * 61 // 1000
+    out = array.array("h", bytes(n * 2))
+    for i in range(n):
+        v = warm[i] * 0.8
+        if i >= d1:
+            v += warm[i - d1] * 0.18
+        if i >= d2:
+            v += warm[i - d2] * 0.1
+        # Limitador suave: no satura en los picos.
+        v = 32767 * math.tanh(v / 32767)
+        out[i] = int(v)
+    return out.tobytes()
+
+
 #: Lo que Whisper "oye" en el ruido o el silencio (lo aprendió de subtítulos de videos).
 HALLUCINATIONS = (
     "suscribete",
