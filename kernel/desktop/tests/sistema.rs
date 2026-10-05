@@ -159,10 +159,15 @@ fn el_volumen_desde_win_a_y_la_configuracion() {
         "el mezclador arranca con el volumen guardado"
     );
     t.combo(Mods::WIN, Key::Char('a'));
-    // Con el teclado: dos filas abajo (de los interruptores al volumen) y ← lo baja de a 10.
+    // Con el teclado: dos filas abajo (de los interruptores al volumen) y ← lo baja de a 1,
+    // como en Windows (con Ctrl, de a 10).
     t.keys(&[Key::Down, Key::Down, Key::Left, Key::Left]);
-    assert_eq!(t.d.config().volume, 60);
-    assert_eq!(t.d.volume(), 60);
+    assert_eq!(t.d.config().volume, 78);
+    assert_eq!(t.d.volume(), 78);
+    t.mods(Mods::CTRL);
+    t.key(Key::Left);
+    t.mods(Mods::NONE);
+    assert_eq!(t.d.config().volume, 68);
     // Con el mouse: un clic al principio de la barra lo silencia y al final lo pone al máximo.
     let bar = panels::volume_bar(W, H);
     t.click_at(bar.x - 4, bar.y + 4, 500);
@@ -172,6 +177,25 @@ fn el_volumen_desde_win_a_y_la_configuracion() {
     t.click_at(bar.x + bar.w + 20, bar.y + 4, 500);
     assert_eq!(t.d.config().volume, 100);
     assert_eq!(t.d.overlay_name(), "rapida", "el panel sigue abierto");
+    // Arrastrar la perilla: suena en vivo y se guarda una sola vez, al soltar.
+    t.logs();
+    t.move_to(bar.x + bar.w, bar.y + 2, false);
+    t.move_to(bar.x + bar.w, bar.y + 2, true);
+    t.move_to(bar.x + bar.w / 4, bar.y + 2, true);
+    assert_eq!(
+        t.d.volume(),
+        25,
+        "suena con el volumen nuevo mientras se arrastra"
+    );
+    assert!(!t.logs().iter().any(|l| l == "CONFIG_GUARDADA"));
+    t.move_to(bar.x + bar.w / 5, bar.y + 2, true);
+    t.move_to(bar.x + bar.w / 5, bar.y + 2, false);
+    assert_eq!(t.d.config().volume, 20);
+    assert_eq!(
+        t.logs().iter().filter(|l| *l == "CONFIG_GUARDADA").count(),
+        1
+    );
+    t.click_at(bar.x + bar.w + 20, bar.y + 4, 500);
     t.frame();
     // Se guarda en el disco y se vuelve a leer.
     let text = t.d.config().serialize();
@@ -425,4 +449,46 @@ fn los_botones_de_la_ventana_cambian_de_lado_desde_su_menu() {
     t.combo(Mods::ALT, Key::Char(' '));
     t.keys(&[Key::Down, Key::Down, Key::Down, Key::Down, Key::Enter]);
     assert!(!t.d.config().buttons_left);
+}
+
+#[test]
+fn la_barra_de_volumen_de_configuracion_es_como_la_de_windows() {
+    use jarvis_desktop::apps::settings::{SOUND, Settings};
+
+    let mut t = Driver::new();
+    t.d.enable_sound(48_000);
+    t.d.open(Launch::Settings(SOUND), t.now, CLOCK);
+    let Some(App::Settings(s)) = t.d.app(AppKind::Settings) else {
+        panic!("Configuración no se abrió");
+    };
+    assert_eq!(s.section.name(), "Sonido");
+    // La primera fila es el volumen: ← → de a 1, Ctrl+→ de a 10 y Enter no lo cambia.
+    t.key(Key::Right);
+    assert_eq!(t.d.config().volume, 81);
+    t.mods(Mods::CTRL);
+    t.key(Key::Right);
+    t.mods(Mods::NONE);
+    assert_eq!(t.d.config().volume, 91);
+    t.key(Key::Enter);
+    assert_eq!(t.d.config().volume, 91);
+    // Con el mouse: un clic en el riel lleva la perilla ahí y se puede arrastrar.
+    let id = t.id(AppKind::Settings);
+    let win = t.d.window_manager().get(id).unwrap();
+    let (wx, wy, content) = (win.rect.x, win.rect.y, win.content());
+    let track = Settings::slider_rect(content, 0);
+    let (x0, y) = (wx + track.x, wy + track.y + 2);
+    t.logs();
+    t.move_to(x0 + track.w / 2, y, false);
+    t.move_to(x0 + track.w / 2, y, true);
+    assert_eq!(t.d.volume(), 50);
+    t.move_to(x0 + track.w / 10, y, true);
+    assert_eq!(t.d.volume(), 10, "suena en vivo mientras se arrastra");
+    assert!(!t.logs().iter().any(|l| l == "CONFIG_GUARDADA"));
+    // Afuera del riel se queda en el extremo, y al soltar se guarda.
+    t.move_to(x0 - 200, y, true);
+    t.move_to(x0 - 200, y, false);
+    assert_eq!(t.d.config().volume, 0);
+    assert_eq!(t.d.volume(), 0);
+    assert!(t.logs().iter().any(|l| l == "CONFIG_GUARDADA"));
+    assert!(t.d.config().serialize().contains("volumen=0"));
 }

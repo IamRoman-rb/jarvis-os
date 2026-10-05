@@ -1,6 +1,6 @@
 //! Piezas de interfaz que comparten las apps: tarjetas, botones, barras y gráficos.
 
-use jarvis_gfx::shapes::{line, rounded_outline, rounded_rect};
+use jarvis_gfx::shapes::{circle, line, rounded_outline, rounded_rect};
 use jarvis_gfx::text::{self, Size, Style, Weight};
 use jarvis_gfx::{Canvas, Color, Rect, theme};
 
@@ -80,6 +80,79 @@ pub fn bar(c: &mut Canvas<'_>, r: Rect, pct: u32, color: Color) {
     let pct = pct.min(100) as i32;
     let filled = (r.w * pct / 100).max(if pct > 0 { 2 } else { 0 });
     rounded_rect(c, r.x, r.y, filled, r.h, rad, color, 255);
+}
+
+/// El parlante de los controles de volumen, como el de Windows: con una cruz en 0 y una, dos
+/// o tres ondas según el nivel. Ocupa un cuadrado de 20 × 20 desde (`x`, `y`).
+pub fn speaker(c: &mut Canvas<'_>, x: i32, y: i32, volume: u8, color: Color) {
+    // El cuerpo y el cono (un trapecio que se abre hacia la derecha).
+    c.fill_rect(x + 2, y + 7, 4, 6, color);
+    for i in 0..5 {
+        line(c, x + 6 + i, y + 7 - i, x + 6 + i, y + 12 + i, color);
+    }
+    if volume == 0 {
+        line(c, x + 13, y + 7, x + 18, y + 12, color);
+        line(c, x + 13, y + 12, x + 18, y + 7, color);
+        line(c, x + 14, y + 7, x + 19, y + 12, color);
+        line(c, x + 14, y + 12, x + 19, y + 7, color);
+        return;
+    }
+    let waves = match volume {
+        1..=33 => 1,
+        34..=66 => 2,
+        _ => 3,
+    };
+    // Arcos de -50° a 50° (seno y coseno × 1000, de a 10°).
+    const SIN: [i32; 11] = [-766, -643, -500, -342, -174, 0, 174, 342, 500, 643, 766];
+    const COS: [i32; 11] = [643, 766, 866, 940, 985, 1000, 985, 940, 866, 766, 643];
+    let (cx, cy) = (x + 9, y + 10);
+    for wave in 1..=waves {
+        let r = 3 + wave * 3;
+        for i in 0..10 {
+            let (x0, y0) = (cx + r * COS[i] / 1000, cy + r * SIN[i] / 1000);
+            let (x1, y1) = (cx + r * COS[i + 1] / 1000, cy + r * SIN[i + 1] / 1000);
+            line(c, x0, y0, x1, y1, color);
+        }
+    }
+}
+
+/// El riel de una barra deslizante dentro de `r` (la fila del control): deja lugar al
+/// parlante a la izquierda y al porcentaje a la derecha.
+pub fn slider_track(r: Rect) -> Rect {
+    Rect::new(r.x + 34, r.y + r.h / 2 - 2, (r.w - 34 - 56).max(20), 4)
+}
+
+/// El valor (0..=100) que corresponde a la `x` sobre el riel (afuera, el extremo más cerca).
+pub fn slider_value(track: Rect, x: i32) -> u8 {
+    let w = track.w.max(1);
+    let v = ((x - track.x).clamp(0, w) * 100 + w / 2) / w;
+    v.clamp(0, 100) as u8
+}
+
+/// Una barra deslizante de volumen como la de Windows 11, dentro de `r`: el parlante, el riel
+/// fino con la parte llena en el color de acento, la perilla redonda con un punto (más grande
+/// si tiene el foco) y el porcentaje.
+pub fn volume_slider(c: &mut Canvas<'_>, r: Rect, volume: u8, focused: bool) {
+    let volume = volume.min(100);
+    let ink = if focused {
+        theme::text()
+    } else {
+        theme::text_dim()
+    };
+    speaker(c, r.x + 4, r.y + (r.h - 20) / 2, volume, ink);
+    let t = slider_track(r);
+    rounded_rect(c, t.x, t.y, t.w, t.h, 2, theme::panel_rim(), 255);
+    let fill = t.w * i32::from(volume) / 100;
+    if fill > 0 {
+        rounded_rect(c, t.x, t.y, fill, t.h, 2, theme::cyan(), 255);
+    }
+    let (kx, ky) = (t.x + fill, t.y + t.h / 2);
+    circle(c, kx, ky, 10, theme::panel_rim(), true);
+    circle(c, kx, ky, 9, field_bg(), true);
+    circle(c, kx, ky, if focused { 6 } else { 5 }, theme::cyan(), true);
+    let st = s16(theme::text());
+    let label = alloc::format!("{volume}");
+    text::draw_right(c, r.x + r.w - 4, r.y + (r.h - 16) / 2, &label, &st);
 }
 
 /// Gráfico de área de una serie. `max`: el valor que llega arriba (0 = el máximo de la serie).

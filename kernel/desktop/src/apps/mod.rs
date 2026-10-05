@@ -326,7 +326,7 @@ impl App {
         match self {
             App::Brave(b) => b.pointer(p, content, ctx),
             App::Editor(e) => e.pointer(p, content),
-            App::Settings(s) => s.pointer(p),
+            App::Settings(s) => s.pointer(p, content, ctx),
             _ => {}
         }
     }

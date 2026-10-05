@@ -30,7 +30,8 @@ use crate::input::{Key, Mods};
 use crate::system::{Launch, Power};
 use crate::text_input::TextInput;
 use crate::widgets::{
-    bar, big, button, draw_fit, duration, field_bg, ip, label, light, s16, selected_bg, window_bg,
+    bar, big, button, draw_fit, duration, field_bg, ip, label, light, s16, selected_bg,
+    slider_track, slider_value, volume_slider, window_bg,
 };
 
 const SIDEBAR_W: i32 = 236;
@@ -84,6 +85,9 @@ pub const SECTIONS: [Section; 20] = [
     Section::Hardware,
     Section::Assistant,
 ];
+
+/// El número de la sección Sonido (para `Launch::Settings`).
+pub const SOUND: usize = 10;
 
 /// El número de la sección Hardware (para `Launch::Settings` y el comando `instalar`).
 pub const HARDWARE: usize = 18;
@@ -245,6 +249,8 @@ enum Control {
     Value(String),
     /// Barra de uso (porcentaje) con texto.
     Usage(u32, String),
+    /// Barra deslizante de 0 a 100, como la del volumen de Windows (clic, arrastrar o ← →).
+    Slider(u8),
 }
 
 struct Row {
@@ -297,6 +303,8 @@ pub struct Settings {
     /// Hasta cuándo suena el tono de prueba.
     tone_until: Option<u64>,
     net_test: Option<(u32, String)>,
+    /// La barra deslizante que se está arrastrando (el volumen se guarda al soltar).
+    sliding: Option<Opt>,
     /// La red WPA2 elegida a la que le falta la contraseña.
     wifi_pending: Option<String>,
     screen: (usize, usize),
@@ -323,6 +331,7 @@ impl Settings {
             tone_until: None,
             net_test: None,
             wifi_pending: None,
+            sliding: None,
             screen: (0, 0),
             disk: None,
         };
@@ -1065,7 +1074,7 @@ impl Settings {
                     Opt::Volume,
                     tr("Volumen"),
                     tr("Música, videos y la voz de JARVIS"),
-                    Choice(format!("{} %", c.volume))
+                    Slider(c.volume)
                 ),
                 Row::new(
                     Opt::Sounds,
@@ -1336,8 +1345,45 @@ impl Settings {
         }
     }
 
-    pub fn pointer(&mut self, p: super::Pointer) {
+    pub fn pointer<D: BlockDevice>(
+        &mut self,
+        p: super::Pointer,
+        content: Rect,
+        ctx: &mut Ctx<'_, D>,
+    ) {
         self.hover = (p.x, p.y);
+        let Some(opt) = self.sliding else {
+            return;
+        };
+        match p.kind {
+            super::PointerKind::Move => {
+                let visible = ((content.h - HEADER_H) / ROW_H).max(1) as usize;
+                let first = self.selected.saturating_sub(visible - 1);
+                let cr = Self::control_rect(Self::row_rect(content, self.selected - first));
+                let v = slider_value(slider_track(cr), p.x);
+                if opt == Opt::Volume && v != self.cfg.volume {
+                    // Mientras se arrastra suena con el volumen nuevo, pero recién se guarda al
+                    // soltar (si no, se escribiría el disco en cada movimiento).
+                    self.cfg.volume = v;
+                    ctx.out.volume = Some(v);
+                    self.dirty = true;
+                }
+            }
+            super::PointerKind::Up => {
+                self.sliding = None;
+                self.commit(ctx);
+                self.dirty = true;
+            }
+        }
+    }
+
+    /// Lleva una barra deslizante a `value` (clic o arrastre).
+    fn slide<D: BlockDevice>(&mut self, opt: Opt, value: u8, ctx: &mut Ctx<'_, D>) {
+        self.dirty = true;
+        if opt == Opt::Volume && value != self.cfg.volume {
+            self.cfg.volume = value;
+            ctx.out.volume = Some(value);
+        }
     }
 
     fn panel(r: Rect) -> Rect {
@@ -1352,6 +1398,12 @@ impl Settings {
             p.w - 40,
             ROW_H - 6,
         )
+    }
+
+    /// El riel de la barra deslizante de la fila visible `row` (relativo a la ventana, como
+    /// `content`): para los tests.
+    pub fn slider_rect(content: Rect, row: usize) -> Rect {
+        slider_track(Self::control_rect(Self::row_rect(content, row)))
     }
 
     fn control_rect(row: Rect) -> Rect {
@@ -1645,6 +1697,7 @@ impl Settings {
                     cr.w,
                 );
             }
+            Control::Slider(v) => volume_slider(c, cr, *v, sel),
             Control::Usage(pct, t) => {
                 text::draw_right(c, cr.x + cr.w, cr.y, t, &light(theme::text_dim()));
                 bar(
@@ -2025,11 +2078,9 @@ impl Settings {
             Opt::HttpsBridge => c.https_bridge = !c.https_bridge,
             Opt::Reader => c.reader_mode = !c.reader_mode,
             Opt::Sounds => c.sounds = !c.sounds,
-            // De a 10 %; Enter sube (sin dar la vuelta: de 100 a 0 está bien, al revés asusta).
-            Opt::Volume => {
-                c.volume = (i32::from(c.volume) + 10 * if delta == 0 { 1 } else { delta })
-                    .clamp(0, 100) as u8
-            }
+            // Como en Windows: las flechas de a 1 (con Ctrl, de a 10); Enter no lo cambia.
+            Opt::Volume if delta == 0 => return,
+            Opt::Volume => c.volume = (i32::from(c.volume) + delta).clamp(0, 100) as u8,
             Opt::TestSound => {
                 ctx.out.tone = Some(440);
                 self.tone_until = Some(ctx.now_ms + 400);
@@ -2291,7 +2342,10 @@ impl Settings {
                     };
                     let opt = row.opt;
                     let is_choice = matches!(row.control, Control::Choice(_));
-                    if delta == 0 || is_choice {
+                    if matches!(row.control, Control::Slider(_)) {
+                        let step = if mods.ctrl { 10 } else { 1 };
+                        self.activate(opt, delta * step, ctx);
+                    } else if delta == 0 || is_choice {
                         self.activate(opt, delta, ctx);
                     }
                 }
@@ -2327,6 +2381,14 @@ impl Settings {
                 return;
             }
             let cr = Self::control_rect(rr);
+            if let Control::Slider(_) = row.control {
+                // Un clic en cualquier parte del riel lleva la perilla ahí, y se puede arrastrar.
+                if x >= slider_track(cr).x - 12 && x <= cr.x + cr.w {
+                    self.sliding = Some(row.opt);
+                    self.slide(row.opt, slider_value(slider_track(cr), x), ctx);
+                }
+                return;
+            }
             let delta = match row.control {
                 // En las listas, la mitad izquierda va para atrás.
                 Control::Choice(_) if cr.contains(x, y) && x < cr.x + cr.w / 2 => -1,

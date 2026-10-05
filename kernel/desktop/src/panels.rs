@@ -320,17 +320,14 @@ fn volume_row(r: Rect) -> Rect {
     Rect::new(r.x + 16, r.y + 204, r.w - 32, 40)
 }
 
-/// La barra del volumen, adentro de su fila: se le hace clic donde se quiere el volumen.
+/// La barra del volumen, adentro de su fila: se le hace clic (o se arrastra) donde se quiere.
 pub fn volume_bar(w: usize, h: usize) -> Rect {
-    let row = volume_row(quick_rect(w, h));
-    Rect::new(row.x + 100, row.y + 16, row.w - 100 - 60, 8)
+    crate::widgets::slider_track(volume_row(quick_rect(w, h)).inset(6))
 }
 
-/// El volumen (0..=100, de a 5) que corresponde a hacer clic en `x` sobre la barra.
+/// El volumen (0..=100) que corresponde a la `x` sobre la barra, como en Windows: de a 1.
 pub fn volume_at(w: usize, h: usize, x: i32) -> u8 {
-    let bar = volume_bar(w, h);
-    let v = (x - bar.x).clamp(0, bar.w) * 100 / bar.w.max(1);
-    ((v + 2) / 5 * 5).clamp(0, 100) as u8
+    crate::widgets::slider_value(volume_bar(w, h), x)
 }
 
 fn tile(r: Rect, i: usize) -> Rect {
@@ -434,37 +431,8 @@ fn draw_volume(c: &mut Canvas<'_>, w: usize, h: usize, volume: u8, selected: boo
     };
     rounded_rect(c, row.x, row.y, row.w, row.h, 8, theme::panel(), 255);
     rounded_outline(c, row.x, row.y, row.w, row.h, 8, rim);
-    text::draw(
-        c,
-        row.x + 12,
-        row.y + 13,
-        tr("VOLUMEN"),
-        &label(theme::text_dim()),
-    );
-    let bar = volume_bar(w, h);
-    rounded_rect(c, bar.x, bar.y, bar.w, bar.h, 4, theme::panel_rim(), 255);
-    let fill = bar.w * i32::from(volume.min(100)) / 100;
-    if fill > 0 {
-        rounded_rect(c, bar.x, bar.y, fill, bar.h, 4, theme::cyan(), 255);
-    }
-    // La perilla, donde termina el relleno.
-    rounded_rect(
-        c,
-        bar.x + fill - 7,
-        bar.y - 4,
-        14,
-        16,
-        5,
-        theme::text(),
-        255,
-    );
-    text::draw_right(
-        c,
-        row.x + row.w - 12,
-        row.y + 13,
-        &format!("{volume} %"),
-        &light(theme::text()),
-    );
+    // El mismo control que Configuración → Sonido (como el panel rápido de Windows 11).
+    crate::widgets::volume_slider(c, row.inset(6), volume, selected);
 }
 
 // --- centro de notificaciones (Win+N) ---------------------------------------------------------

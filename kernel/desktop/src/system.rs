@@ -430,6 +430,9 @@ pub struct Outbox {
     pub net: Vec<NetRequest>,
     /// Frecuencia del parlante en Hz (0 = silencio). `None` = no cambia.
     pub tone: Option<u32>,
+    /// El volumen mientras se arrastra su barra: suena ya, sin guardarlo (se guarda al soltar,
+    /// con `config`).
+    pub volume: Option<u8>,
     pub power: Option<Power>,
     /// Guardar una captura de pantalla al terminar el próximo frame.
     pub screenshot: bool,

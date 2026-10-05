@@ -262,6 +262,11 @@ type TopKey = (
 );
 
 enum Drag {
+    /// La barra del volumen de Win+A: suena en vivo y se guarda al soltar (`start`: el que
+    /// estaba guardado).
+    Volume {
+        start: u8,
+    },
     Move {
         id: WinId,
         dx: i32,
@@ -1899,9 +1904,11 @@ impl<D: BlockDevice> Desktop<D> {
                 let on_volume = *sel == vol;
                 match key {
                     Key::Escape => self.set_overlay(Overlay::None),
-                    // Sobre el volumen, las flechas de los costados lo cambian de a 10.
+                    // Sobre el volumen, las flechas de los costados lo cambian de a 1 (con Ctrl, de
+                    // a 10), como en Windows.
                     Key::Right | Key::Left if on_volume => {
-                        let d = if key == Key::Right { 10 } else { -10 };
+                        let step = if self.mods.ctrl { 10 } else { 1 };
+                        let d = if key == Key::Right { step } else { -step };
                         let v = (i32::from(self.config.volume) + d).clamp(0, 100) as u8;
                         self.quick_hit(QuickHit::Volume(v), now_ms, clock);
                     }
@@ -2411,6 +2418,7 @@ impl<D: BlockDevice> Desktop<D> {
                 && out.streams.is_empty()
                 && out.brain.is_empty()
                 && out.tone.is_none()
+                && out.volume.is_none()
                 && out.power.is_none()
                 && out.install.is_none()
                 && out.config.is_none()
@@ -2495,6 +2503,9 @@ impl<D: BlockDevice> Desktop<D> {
             if out.tone.is_some() {
                 self.requests.tone = out.tone;
             }
+            if let Some(v) = out.volume {
+                self.sound.set_volume(v);
+            }
             if let Some(p) = out.power {
                 self.power(p);
             }
@@ -2570,6 +2581,15 @@ impl<D: BlockDevice> Desktop<D> {
                     }
                 }
                 Drag::Move { id, dx, dy } => self.wm.move_to(id, x - dx, y - dy),
+                Drag::Volume { .. } => {
+                    let v = panels::volume_at(self.width, self.height, x);
+                    if v != self.config.volume {
+                        // Sin guardar todavía: se guarda una vez, al soltar.
+                        self.config.volume = v;
+                        self.sound.set_volume(v);
+                        self.overlay_dirty = true;
+                    }
+                }
                 Drag::Resize {
                     id,
                     right,
@@ -2714,6 +2734,12 @@ impl<D: BlockDevice> Desktop<D> {
     /// Se soltó el mouse después de arrastrar: el contorno pasa a ser la ventana, y contra un
     /// borde la ventana se acopla (arriba se maximiza), como en Windows.
     fn end_drag(&mut self, drag: Drag, x: i32, y: i32) {
+        if let Drag::Volume { start } = drag {
+            let cfg = self.config.clone();
+            self.config.volume = start;
+            self.apply_config(cfg, 0);
+            return;
+        }
         let Drag::Move { id, dx, dy } = drag else {
             return;
         };
@@ -2852,7 +2878,14 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Quick { .. } => {
                 let (w, h) = (self.width, self.height);
                 if let Some(hit) = panels::quick_hit(w, h, x, y) {
+                    let volume = matches!(hit, QuickHit::Volume(_));
                     self.quick_hit(hit, now_ms, clock);
+                    if volume {
+                        // El clic ya lo guardó; y se puede seguir arrastrando la perilla.
+                        self.drag = Some(Drag::Volume {
+                            start: self.config.volume,
+                        });
+                    }
                 } else if !panels::quick_rect(w, h).contains(x, y) {
                     self.set_overlay(Overlay::None);
                 }
