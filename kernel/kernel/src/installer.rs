@@ -16,13 +16,27 @@ use alloc::vec::Vec;
 
 use jarvis_desktop::DiskInfo;
 use jarvis_drivers::gpt::{self, EFI_SYSTEM, Guid, JARVIS_DATA, NewPartition, PartitionDevice};
-use jarvis_fs::{FileSystem, SECTOR_SIZE};
+use jarvis_drivers::iso;
+use jarvis_fs::{FileSystem, SECTOR_SIZE, Timestamp};
 
 use crate::{entropy, serial_println, storage};
 
-/// Dónde está el arranque de JARVIS: (disco, primer sector y sectores de su ESP).
+/// Dónde está el arranque de JARVIS: (disco, primer sector y sectores de su ESP). En un pendrive
+/// es la partición EFI de la GPT; en un CD (la ISO), la imagen EFI de El Torito.
 fn find_boot(disks: &mut [storage::Found]) -> Option<(usize, u64, u64)> {
     for (i, d) in disks.iter_mut().enumerate() {
+        if d.read_only {
+            let disk = &mut *d.disk;
+            let Some(img) = iso::find_efi_image(|block, buf| disk.read(u64::from(block) * 4, buf))
+            else {
+                continue;
+            };
+            let mut sector = vec![0u8; SECTOR_SIZE];
+            if disk.read(img.first, &mut sector).is_ok() && gpt::is_jarvis_boot(&sector) {
+                return Some((i, img.first, img.sectors));
+            }
+            continue;
+        }
         let Some(parts) = gpt::read(&mut *d.disk) else {
             continue;
         };
@@ -50,7 +64,7 @@ pub fn disks() -> Vec<DiskInfo> {
             .map(|(i, d)| DiskInfo {
                 name: d.name.clone(),
                 mib: d.disk.sector_count() / 2048,
-                blank: gpt::is_blank(&mut *d.disk).unwrap_or(false),
+                blank: !d.read_only && gpt::is_blank(&mut *d.disk).unwrap_or(false),
                 boot_medium: boot == Some(i),
             })
             .collect()
@@ -71,14 +85,16 @@ const CHUNK: u64 = 128;
 /// Lo mínimo para la partición de datos (64 MiB).
 const MIN_DATA: u64 = 64 * 2048;
 
-/// Instala en el disco número `target` de la lista de `disks()`.
-pub fn install(target: usize) -> Result<String, String> {
+/// Instala en el disco número `target` de la lista de `disks()`. `config`: el `config.ini` del
+/// asistente de instalación (usuario y contraseña hasheada), que queda en el disco nuevo.
+pub fn install(target: usize, config: Option<&str>) -> Result<String, String> {
     storage::with_spare(|disks| {
         let (boot, esp_first, esp_sectors) =
             find_boot(disks).ok_or("no se encontró el medio de arranque de JARVIS-OS")?;
-        if target == boot || target >= disks.len() {
+        if target == boot || target >= disks.len() || disks[target].read_only {
             return Err(String::from("ese disco no se puede usar"));
         }
+        let from_cd = disks[boot].read_only;
         let name = disks[target].name.clone();
         // La verificación que importa: justo antes de escribir.
         if gpt::is_blank(&mut *disks[target].disk) != Ok(true) {
@@ -147,9 +163,19 @@ pub fn install(target: usize) -> Result<String, String> {
             &mut fs,
             "JARVIS-OS instalado. Tus archivos quedan en este disco.\n",
         );
+        if let Some(text) = config {
+            fs.write_file("/Sistema/config.ini", text.as_bytes(), Timestamp::EPOCH)
+                .map_err(|e| format!("no se pudo guardar la configuración: {e}"))?;
+        }
         serial_println!("INSTALAR_LISTO {name}");
-        Ok(format!(
-            "Listo. Apagá, sacá el pendrive y arrancá desde {name} (menú de arranque del firmware)."
-        ))
+        Ok(if from_cd && crate::ide::eject_all() {
+            format!("Saqué la ISO de la lectora: al reiniciar arranca desde {name}.")
+        } else if from_cd {
+            format!("Sacá la ISO de la lectora y reiniciá: arranca desde {name}.")
+        } else {
+            format!(
+                "Listo. Apagá, sacá el pendrive y arrancá desde {name} (menú de arranque del firmware)."
+            )
+        })
     })
 }

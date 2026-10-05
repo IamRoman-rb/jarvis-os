@@ -218,6 +218,8 @@ pub enum Opt {
     MorePackages,
     Remove(usize),
     EmptyTrash,
+    /// El PIN guardado, que hay que escribir antes de cambiarlo.
+    PinCurrent,
     Pin,
     LockAfter,
     LockNow,
@@ -320,6 +322,8 @@ pub struct Settings {
     sliding: Option<Opt>,
     /// La red WPA2 elegida a la que le falta la contraseña.
     wifi_pending: Option<String>,
+    /// Lo escrito en "PIN actual" (no se guarda en el disco: solo habilita cambiar el PIN).
+    pin_current: String,
     screen: (usize, usize),
     /// (usado, total) del disco, del último dibujo.
     disk: Option<(u64, u64)>,
@@ -344,6 +348,7 @@ impl Settings {
             tone_until: None,
             net_test: None,
             wifi_pending: None,
+            pin_current: String::new(),
             sliding: None,
             screen: (0, 0),
             disk: None,
@@ -374,6 +379,7 @@ impl Settings {
         self.editing = None;
         self.confirm_trash = false;
         self.confirm_install = None;
+        self.pin_current.clear();
         self.dirty = true;
         let Some(fs) = ctx.fs.as_deref_mut() else {
             return;
@@ -1235,35 +1241,51 @@ impl Settings {
                 } else {
                     trf("{} min", &[&c.lock_minutes.to_string()])
                 };
-                alloc::vec![
+                let mut rows = Vec::new();
+                // Sin PIN guardado no hay nada que comprobar.
+                if c.pin.is_some() {
+                    rows.push(Row::new(
+                        Opt::PinCurrent,
+                        tr("PIN actual"),
+                        tr("Para cambiar el PIN, escribí primero el actual"),
+                        Text {
+                            value: self.pin_current.clone(),
+                            secret: true,
+                        },
+                    ));
+                }
+                rows.extend([
                     Row::new(
                         Opt::Pin,
                         tr("PIN de desbloqueo"),
                         tr("Solo números (hasta 8). Vacío = sin PIN"),
+                        // Solo se guarda el hash: con PIN se muestran cuatro puntos, sea cual sea
+                        // el largo.
                         Text {
-                            value: c.pin.clone(),
-                            secret: true
-                        }
+                            value: if c.pin.is_some() { "****" } else { "" }.into(),
+                            secret: true,
+                        },
                     ),
                     Row::new(
                         Opt::LockAfter,
                         tr("Bloquear sin actividad"),
                         tr("Después de un rato sin usar el teclado ni el mouse"),
-                        Choice(lock)
+                        Choice(lock),
                     ),
                     Row::new(
                         Opt::LockNow,
                         tr("Bloquear ahora"),
                         tr("Lo mismo que Win+L"),
-                        Button(tr("BLOQUEAR"))
+                        Button(tr("BLOQUEAR")),
                     ),
                     Row::new(
                         Opt::Info,
                         tr("Borrar = mover a la Papelera"),
                         tr("Ni las apps ni la terminal borran para siempre sin preguntar"),
-                        Value(tr("Siempre").into())
+                        Value(tr("Siempre").into()),
                     ),
-                ]
+                ]);
+                rows
             }
             Section::Antivirus => {
                 let av = &stats.antivirus;
@@ -1948,6 +1970,17 @@ impl Settings {
         self.dirty = true;
         let c = &mut self.cfg;
         match opt {
+            Opt::PinCurrent => {
+                if delta == 0 {
+                    self.editing = Some((opt, TextInput::new("", 8)));
+                }
+                return;
+            }
+            Opt::Pin if delta == 0 && c.pin.is_some() && self.pin_current.is_empty() => {
+                ctx.out.notify(tr("Primero completá el PIN actual"), true);
+                self.selected = 0;
+                return;
+            }
             Opt::Hostname
             | Opt::User
             | Opt::Pin
@@ -2330,6 +2363,23 @@ impl Settings {
             self.dirty = true;
             return;
         }
+        if opt == Opt::PinCurrent {
+            self.pin_current = input.text.trim().to_string();
+            self.dirty = true;
+            return;
+        }
+        if let (Opt::Pin, Some(pin)) = (opt, &self.cfg.pin) {
+            // El PIN solo cambia si el actual coincide (se compara su hash con el guardado); se
+            // escribe de nuevo para cada cambio.
+            let matches = pin.verify(&self.pin_current);
+            self.pin_current.clear();
+            if !matches {
+                ctx.out.notify(tr("PIN actual incorrecto"), true);
+                ctx.log.push("CONFIG_PIN_INCORRECTO".into());
+                self.dirty = true;
+                return;
+            }
+        }
         let v = input.text.trim().to_string();
         let ok = match opt {
             Opt::Hostname if valid_name(&v) => {
@@ -2365,7 +2415,9 @@ impl Settings {
                 true
             }
             Opt::Pin if v.len() <= 8 && v.chars().all(|c| c.is_ascii_digit()) => {
-                self.cfg.pin = v;
+                // Vacío = sin PIN. Si no, solo queda el hash, con una sal nueva.
+                let extra = format!("{:?}{}{}", ctx.clock, ctx.now_ms, self.cfg.user);
+                self.cfg.pin = crate::pin::hash_pin(&v, extra.as_bytes());
                 true
             }
             Opt::FwAddSite if !v.is_empty() => {
@@ -2398,7 +2450,8 @@ impl Settings {
             match key {
                 Key::Enter | Key::Tab => self.finish_edit(ctx),
                 Key::Escape => self.editing = None,
-                Key::Char(ch) if *opt == Opt::Pin && !ch.is_ascii_digit() => {}
+                Key::Char(ch)
+                    if matches!(*opt, Opt::Pin | Opt::PinCurrent) && !ch.is_ascii_digit() => {}
                 other => {
                     input.handle(other);
                 }

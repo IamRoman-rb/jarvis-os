@@ -13,6 +13,8 @@
 //! - [`apic`]: el formato de las entradas del IOAPIC y de los mensajes MSI/MSI-X.
 //! - [`gpt`]: la tabla de particiones de UEFI (leer, crear, ver una partición como disco).
 //! - [`ahci`] y [`nvme`]: los comandos de los discos SATA y NVMe y lo que responden.
+//! - [`ide`]: discos y lectoras IDE (ATA/ATAPI por PIO), la controladora de VirtualBox.
+//! - [`iso`]: la imagen de arranque EFI de un CD (ISO 9660 + El Torito).
 //! - [`nic`]: los anillos de descriptores de las placas de red Intel y Realtek.
 //! - [`usb`]: descriptores, TRB y contextos de xHCI, teclado y mouse HID, BOT y SCSI.
 //! - [`hda`]: los verbos de los codecs de audio y el camino del DAC al parlante.
@@ -33,6 +35,8 @@ pub mod ahci;
 pub mod apic;
 pub mod gpt;
 pub mod hda;
+pub mod ide;
+pub mod iso;
 pub mod nic;
 pub mod nvme;
 pub mod ramdisk;

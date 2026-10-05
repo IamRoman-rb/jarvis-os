@@ -1019,9 +1019,9 @@ pub fn draw_lock(
     text::draw(c, (w - dw) / 2, h / 2 + 10, date.as_str(), &st);
     let hint = match (pin, user) {
         (None, None) => tr("JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC"),
-        (Some(_), None) => tr("JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER"),
+        (Some(_), None) => tr("JARVIS-OS BLOQUEADO · ESCRIBÍ TU CONTRASEÑA Y APRETÁ ENTER"),
         (None, Some(_)) => tr("SESIÓN CERRADA · TOCÁ UNA TECLA O HACÉ CLIC PARA ENTRAR"),
-        (Some(_), Some(_)) => tr("SESIÓN CERRADA · ESCRIBÍ TU PIN Y APRETÁ ENTER"),
+        (Some(_), Some(_)) => tr("SESIÓN CERRADA · ESCRIBÍ TU CONTRASEÑA Y APRETÁ ENTER"),
     };
     // El usuario, con un círculo con su inicial (como en la pantalla de inicio de Windows).
     let pin_y = if let Some(name) = user {
@@ -1045,15 +1045,16 @@ pub fn draw_lock(
         rounded_rect(c, f.x, f.y, f.w, f.h, 8, field_bg(), 255);
         let rim = if wrong { theme::amber() } else { theme::cyan() };
         rounded_outline(c, f.x, f.y, f.w, f.h, 8, rim);
-        for i in 0..n as i32 {
+        // (Una contraseña larga no se sale del campo.)
+        for i in 0..n.min(8) as i32 {
             circle(c, f.x + 24 + i * 30, f.y + f.h / 2, 6, theme::text(), true);
         }
         if n == 0 {
             let st = light(theme::text_dim());
-            text::draw(c, f.x + 16, f.y + 13, "PIN", &st);
+            text::draw(c, f.x + 16, f.y + 13, tr("CONTRASEÑA"), &st);
         }
         if wrong {
-            let msg = tr("PIN INCORRECTO. PROBÁ OTRA VEZ.");
+            let msg = tr("CONTRASEÑA INCORRECTA. PROBÁ OTRA VEZ.");
             let st = label(theme::amber());
             text::draw(c, (w - text::width(msg, &st)) / 2, f.y + f.h + 16, msg, &st);
         }

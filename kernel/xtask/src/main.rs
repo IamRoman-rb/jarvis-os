@@ -382,8 +382,8 @@ fn qemu(image: &Path, disk: &Path, headless: bool) -> Result<Command> {
         cmd.arg("-fw_cfg")
             .arg(format!("name=opt/jarvis/cerebro,string={v}"));
     }
-    if image.extension().is_some_and(|e| e == "iso") {
-        // Desde la ISO, como un CD y sin disco: modo en vivo (el disco se ignora).
+    if image.extension().is_some_and(|e| e == "iso") && disk.as_os_str().is_empty() {
+        // Desde la ISO, como un CD y sin disco: modo en vivo.
         cmd.arg("-cdrom").arg(image);
     } else {
         // La imagen y el disco de datos: virtio-blk, o lo de `hardware::set` (K13: SATA, NVMe,
@@ -618,11 +618,27 @@ fn test_hardware(image: &Path) -> Result<()> {
 /// K13: el instalador de punta a punta. Arranca desde la imagen como pendrive USB (modo en vivo)
 /// con un NVMe vacío, instala desde Configuración → Hardware (dos confirmaciones), y vuelve a
 /// arrancar **solo** desde el NVMe: tiene que llegar al escritorio con su disco del sistema.
+/// Usuario y contraseña que escribe el test en el asistente de instalación.
+const TEST_USER: &str = "roman";
+const TEST_PASSWORD: &str = "clave-de-prueba";
+
 fn test_install(image: &Path) -> Result<()> {
-    use hardware::{Boot, DiskBus, Hw, NetCard};
+    use hardware::Boot;
     let io = |e: std::io::Error| format!("disco de prueba: {e}");
     let stick = target_dir().join("pendrive-instalar.img");
     fs::copy(image, &stick).map_err(io)?;
+    install_and_boot(&stick, Boot::Usb, "pendrive")?;
+    let iso = iso::build(image)?;
+    install_and_boot(&iso, Boot::Cd, "ISO en una lectora SATA")?;
+    hardware::set(hardware::VIRTIO);
+    Ok(())
+}
+
+/// Arranca en vivo desde `medium`, instala con el asistente en un NVMe vacío y vuelve a arrancar
+/// solo desde el NVMe: pide la contraseña y JARVIS presenta el sistema.
+fn install_and_boot(medium: &Path, boot: hardware::Boot, what: &str) -> Result<()> {
+    use hardware::{Boot, DiskBus, Hw, NetCard};
+    let io = |e: std::io::Error| format!("disco de prueba: {e}");
     let target = target_dir().join("disco-instalar.img");
     let _ = fs::remove_file(&target);
     fs::File::create(&target)
@@ -635,55 +651,78 @@ fn test_install(image: &Path) -> Result<()> {
         usb_input: false,
         hda: false,
     };
-    hardware::set(hw(Boot::Usb));
-    let mut s = Session::start(&stick, &target)?;
+    hardware::set(hw(boot));
+    let mut s = Session::start(medium, &target)?;
     s.wait_for("MODO_EN_VIVO", BOOT_TIMEOUT)?;
+    s.wait_for("ESCRITORIO_MENU instalador", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
-    s.monitor("sendkey ctrl-alt-t")?;
-    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
-    s.type_text("instalar")?;
-    s.monitor("sendkey ret")?;
-    s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
     // La lista de discos llega con las estadísticas (una vez por segundo).
     thread::sleep(Duration::from_millis(1500));
-    // El último es el NVMe vacío (el pendrive va primero): dos Enter = instalar y confirmar.
-    s.monitor("sendkey end")?;
-    s.monitor("sendkey ret")?;
-    thread::sleep(Duration::from_millis(300));
-    s.monitor("sendkey ret")?;
+    let step = |s: &mut Session| -> Result<()> {
+        s.monitor("sendkey ret")?;
+        thread::sleep(Duration::from_millis(300));
+        Ok(())
+    };
+    step(&mut s)?; // bienvenida → usuario
+    s.type_text(TEST_USER)?;
+    step(&mut s)?;
+    s.type_text(TEST_PASSWORD)?;
+    step(&mut s)?;
+    s.type_text(TEST_PASSWORD)?;
+    step(&mut s)?; // → disco (el NVMe es el único vacío)
+    step(&mut s)?; // → confirmar
+    step(&mut s)?; // instalar
     s.wait_for("INSTALAR_PEDIDO", STEP)?;
     s.wait_for("INSTALAR_ARRANQUE", Duration::from_secs(120))?;
     s.wait_for("INSTALAR_LISTO", Duration::from_secs(120))?;
+    s.wait_for("INSTALADOR_LISTO", STEP)?;
     thread::sleep(Duration::from_millis(500));
     s.screenshot_head(&target_dir().join("jarvis-os-instalado.png"), None)?;
     s.quit();
     drop(s);
 
-    // Otra vez, sin pendrive: arranca del NVMe.
+    // Otra vez, sin el medio: arranca del NVMe, con inicio de sesión.
     hardware::set(hw(Boot::Data));
     let mut s = Session::start(Path::new("sin-imagen.img"), &target)?;
     s.wait_for("DISCO_SISTEMA NVMe", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.type_text("otra-clave")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("ESCRITORIO_PIN_INCORRECTO", STEP)?;
+    s.type_text(TEST_PASSWORD)?;
+    s.monitor("sendkey ret")?;
+    s.wait_for(&format!("SESION_INICIADA {TEST_USER}"), STEP)?;
+    s.wait_for("JARVIS_HABLA: Bienvenido a JARVIS-OS", STEP)?;
+    s.wait_for("PRESENTACION_FIN", Duration::from_secs(120))?;
     s.quit();
     drop(s);
     hardware::set(hardware::VIRTIO);
     let mut part = hardware::Partition::open(&target)?;
     let fs = fatfs::FileSystem::new(&mut part, fatfs::FsOptions::new())
         .map_err(|e| format!("la partición de datos no es un FAT32 sano: {e}"))?;
-    let mut text = String::new();
-    fs.root_dir()
-        .open_file("Documentos/Bienvenida.txt")
-        .and_then(|mut f| f.read_to_string(&mut text))
-        .map_err(|e| format!("falta /Documentos/Bienvenida.txt: {e}"))?;
-    let mut log = String::new();
-    fs.root_dir()
-        .open_file("Sistema/arranque.log")
-        .and_then(|mut f| f.read_to_string(&mut log))
-        .map_err(|e| format!("falta /Sistema/arranque.log: {e}"))?;
-    if !log.contains("DISCO_SISTEMA NVMe") {
+    let read = |path: &str| -> Result<String> {
+        let mut text = String::new();
+        fs.root_dir()
+            .open_file(path)
+            .and_then(|mut f| f.read_to_string(&mut text))
+            .map_err(|e| format!("falta /{path}: {e}"))?;
+        Ok(text)
+    };
+    read("Documentos/Bienvenida.txt")?;
+    if !read("Sistema/arranque.log")?.contains("DISCO_SISTEMA NVMe") {
         return Err("el registro del arranque del NVMe no dice DISCO_SISTEMA".into());
     }
-    println!("ok: instalado en un NVMe vacío desde el pendrive, y arranca solo desde el NVMe");
+    let config = read("Sistema/config.ini")?;
+    if !config.contains(&format!("usuario={TEST_USER}")) || !config.contains("presentacion=no") {
+        return Err(format!("config.ini no quedó como se esperaba:\n{config}"));
+    }
+    if config.contains(TEST_PASSWORD) {
+        return Err("la contraseña quedó en texto en config.ini".into());
+    }
+    println!(
+        "ok: instalado desde el {what} en un NVMe vacío con el asistente; arranca solo del NVMe, \
+         pide la contraseña y JARVIS presenta el sistema"
+    );
     Ok(())
 }
 
@@ -692,7 +731,11 @@ fn boot_iso(iso: &Path) -> Result<()> {
     let mut s = Session::start(iso, Path::new(""))?;
     s.wait_for("segmentos con W^X", BOOT_TIMEOUT)?;
     s.wait_for("MODO_EN_VIVO", BOOT_TIMEOUT)?;
+    // En vivo arranca el asistente de instalación; Esc = "probar sin instalar".
+    s.wait_for("ESCRITORIO_MENU instalador", BOOT_TIMEOUT)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey esc")?;
+    s.wait_for("JARVIS_HABLA: Modo en vivo", STEP)?;
     // Apagar desde el menú (K13): el kernel usa `\_S5` del AML y QEMU tiene que cerrarse solo.
     s.monitor("sendkey alt-f4")?;
     s.wait_for("ESCRITORIO_MENU apagado", STEP)?;

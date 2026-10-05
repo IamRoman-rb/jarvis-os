@@ -43,6 +43,8 @@ pub enum Boot {
     Usb,
     /// Sin imagen: del disco de datos (el que dejó el instalador).
     Data,
+    /// La imagen es la ISO, en una lectora SATA (puerto 2 de la AHCI de la q35).
+    Cd,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -110,6 +112,14 @@ pub fn disk_args(cmd: &mut Command, image: &Path, disk: &Path) {
                 .args(["-device", "usb-storage,bus=xhci.0,drive=arranque"]);
         }
         Boot::Data => {}
+        Boot::Cd => {
+            cmd.arg("-drive")
+                .arg(format!(
+                    "if=none,id=cd,media=cdrom,readonly=on,file={}",
+                    image.display()
+                ))
+                .args(["-device", "ide-cd,drive=cd,bus=ide.2"]);
+        }
     }
     if hw.usb_input {
         // El mouse, detrás de un hub (el de QEMU es USB 1.1), para probar la enumeración de hubs.

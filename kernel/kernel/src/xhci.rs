@@ -221,6 +221,7 @@ pub fn init() -> Vec<Found> {
             if let Some(s) = &d.storage {
                 disks.push(Found {
                     name: format!("USB: {}", d.name),
+                    read_only: false,
                     disk: Box::new(UsbDisk {
                         controller: index,
                         slot: d.slot,

@@ -72,6 +72,39 @@ fn la_configuracion_se_lee_al_arrancar() {
     );
 }
 
+/// ¿El PIN guardado es `pin`? (Solo se guarda el hash: se comprueba, no se lee.)
+fn pin_is(t: &Driver, pin: &str) -> bool {
+    t.d.config().pin.as_ref().is_some_and(|h| h.verify(pin))
+}
+
+#[test]
+fn el_pin_viejo_en_texto_se_hashea_al_arrancar() {
+    let mut t = Driver::new();
+    t.d.open(
+        Launch::Terminal(Some(
+            "mkdir -p /Sistema && echo pin=2468 > /Sistema/config.ini".into(),
+        )),
+        t.now,
+        CLOCK,
+    );
+    let img = t.d.into_fs().unwrap();
+    let d = jarvis_desktop::Desktop::new(W, H, 100, Some(img));
+    let mut t = Driver { d, now: 1000 };
+    assert!(t.logs().iter().any(|l| l == "CONFIG_PIN_MIGRADO"));
+    assert!(pin_is(&t, "2468"));
+    // El texto ya no está en el archivo: solo la sal y el hash.
+    let img = t.d.into_fs().unwrap();
+    let d = jarvis_desktop::Desktop::new(W, H, 100, Some(img));
+    let mut t = Driver { d, now: 1000 };
+    assert!(
+        !t.logs().iter().any(|l| l == "CONFIG_PIN_MIGRADO"),
+        "una sola vez"
+    );
+    let cfg = String::from_utf8(fatfs_read(t.d, "/Sistema/config.ini").unwrap()).unwrap();
+    assert!(!cfg.contains("2468"), "{cfg}");
+    assert!(cfg.contains("pin_hash=pbkdf2-sha256$"), "{cfg}");
+}
+
 #[test]
 fn pin_de_bloqueo() {
     let mut t = Driver::new();
@@ -98,7 +131,7 @@ fn pin_de_bloqueo() {
     t.key(Key::Enter); // editar el PIN
     t.type_text("12a34");
     t.key(Key::Enter);
-    assert_eq!(t.d.config().pin, "1234", "las letras no entran en el PIN");
+    assert!(pin_is(&t, "1234"), "las letras no entran en el PIN");
     t.combo(Mods::WIN, Key::Char('l'));
     assert!(t.d.is_locked());
     t.key(Key::Char(' '));
@@ -110,6 +143,41 @@ fn pin_de_bloqueo() {
     t.type_text("1234");
     t.key(Key::Enter);
     assert!(!t.d.is_locked());
+}
+
+#[test]
+fn cambiar_el_pin_pide_el_actual() {
+    let mut t = Driver::new();
+    let mut cfg = t.d.config().clone();
+    cfg.pin = jarvis_desktop::pin::hash_pin("1234", b"");
+    t.d.set_config(cfg);
+    t.combo(Mods::WIN, Key::Char('i'));
+    // De Sistema, RePág da la vuelta: Asistente, Aplicaciones predeterminadas, Hardware,
+    // Micrófono, Sincronización, Antivirus, Firewall y Privacidad y seguridad.
+    for _ in 0..8 {
+        t.key(Key::PageUp);
+    }
+    assert_eq!(settings_section(&t), "Privacidad y seguridad");
+    // Sin el PIN actual, el nuevo ni se puede escribir: vuelve a la fila del actual.
+    t.keys(&[Key::Down, Key::Enter]);
+    assert!(pin_is(&t, "1234"));
+    // Con el actual equivocado no cambia nada.
+    t.key(Key::Enter);
+    t.type_text("9999");
+    t.key(Key::Enter);
+    t.keys(&[Key::Down, Key::Enter]);
+    t.type_text("5678");
+    t.key(Key::Enter);
+    assert!(pin_is(&t, "1234"));
+    assert!(t.logs().iter().any(|l| l == "CONFIG_PIN_INCORRECTO"));
+    // Con el correcto, sí.
+    t.keys(&[Key::Home, Key::Enter]);
+    t.type_text("1234");
+    t.key(Key::Enter);
+    t.keys(&[Key::Down, Key::Enter]);
+    t.type_text("5678");
+    t.key(Key::Enter);
+    assert!(pin_is(&t, "5678"));
 }
 
 #[test]

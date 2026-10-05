@@ -28,6 +28,28 @@ pub const ATA_IDENTIFY: u8 = 0xEC;
 
 /// Firma de un puerto con un disco SATA (los ATAPI, como las lectoras de CD, dan 0xEB140101).
 pub const SIG_SATA: u32 = 0x0000_0101;
+/// Firma de una lectora de CD/DVD (ATAPI).
+pub const SIG_ATAPI: u32 = 0xEB14_0101;
+/// IDENTIFY PACKET DEVICE y PACKET (para las lectoras).
+pub const ATA_IDENTIFY_PACKET: u8 = 0xA1;
+pub const ATA_PACKET: u8 = 0xA0;
+
+/// El FIS de un comando PACKET por DMA: el paquete SCSI va aparte, en la tabla (offset 0x40).
+pub fn packet_fis() -> [u8; 20] {
+    let mut f = [0u8; 20];
+    f[0] = 0x27;
+    f[1] = 0x80;
+    f[2] = ATA_PACKET;
+    f[3] = 1; // features: los datos por DMA
+    f
+}
+
+/// La cabecera de un comando PACKET (bit A: la controladora manda los 12 bytes del paquete).
+pub fn packet_header(prdt_len: u16, table_phys: u64) -> [u8; 32] {
+    let mut h = command_header(5, false, prdt_len, table_phys);
+    h[0] |= 1 << 5;
+    h
+}
 
 /// Tamaño de una tabla de comando con `prdt` tramos: 128 bytes fijos + 16 por tramo.
 pub fn command_table_size(prdt: usize) -> usize {

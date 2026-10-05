@@ -37,6 +37,7 @@ mod fw_cfg;
 mod gdt;
 mod hda;
 mod hw;
+mod ide;
 mod installer;
 mod interrupts;
 mod irqlock;
@@ -378,11 +379,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
     });
     storage::park(found);
+    let mut live = false;
     let disk = disk.or_else(|| {
         serial_println!("disco: no hay; modo en vivo (FAT32 en RAM)");
         let fs = live_disk();
         if fs.is_some() {
             serial_println!("MODO_EN_VIVO");
+            live = true;
         }
         fs
     });
@@ -532,7 +535,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     if let Some(fs) = disk.as_mut() {
         save_boot_log(fs);
     }
+    // Azar para las sales del PIN de desbloqueo (antes de leer la configuración: un PIN viejo en
+    // texto se hashea al leerla).
+    let mut seed = [0u8; 32];
+    if entropy::fill(&mut seed) {
+        jarvis_desktop::pin::add_entropy(&seed);
+    }
     let mut desktop = Desktop::new(info.width, info.height, PARTICLES, disk);
+    // En vivo (la ISO): lo primero es el asistente de instalación.
+    if live {
+        desktop.start_setup();
+    }
     if let Some(rate) = sound_rate {
         desktop.enable_sound(rate);
     }
@@ -777,6 +790,7 @@ fn run(
         // K13: instalar en un disco vacío (ya confirmado dos veces en Configuración). Tarda unos
         // segundos: la pantalla queda quieta mientras tanto.
         if let Some(target) = requests.install {
+            let account = requests.install_config.as_deref();
             let name = stats
                 .disks
                 .get(target)
@@ -784,7 +798,7 @@ fn run(
                 .unwrap_or_default();
             stats.install = jarvis_desktop::InstallState::Working(name);
             desktop.set_stats(stats.clone());
-            let result = installer::install(target);
+            let result = installer::install(target, account);
             if let Err(e) = &result {
                 serial_println!("INSTALAR_ERROR {e}");
             }
@@ -796,6 +810,9 @@ fn run(
         if first {
             // La CI busca esta línea para saber que el kernel arrancó y dibujó sin errores.
             bootlog::stop_console();
+            // La consola del arranque escribió sobre la pantalla hasta recién: se dibuja todo de
+            // nuevo en el próximo cuadro para taparla.
+            desktop.invalidate();
             serial_println!("JARVIS_BOOT_OK");
             first = false;
         }

@@ -88,7 +88,7 @@ fn suspender_apaga_la_pantalla_y_una_tecla_despierta() {
 fn con_pin_al_despertar_hay_que_desbloquear() {
     let mut t = Driver::new();
     let mut cfg = t.d.config().clone();
-    cfg.pin = "4321".into();
+    cfg.pin = jarvis_desktop::pin::hash_pin("4321", b"");
     t.d.set_config(cfg);
     power_dialog(&mut t, 2);
     assert!(t.d.is_sleeping());

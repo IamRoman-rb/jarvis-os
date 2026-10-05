@@ -80,12 +80,14 @@ Kernel (desde kernel/):
 - Arrancar:         cargo xtask run            (QEMU con ventana, red, sonido y puente HTTPS)
 - Punta a punta:    cargo xtask test           (sin ventana: teclado, mouse, ventanas, disco y red)
 - Hardware real:    cargo xtask test-hardware (AHCI/NVMe/USB, e1000e/RTL8139, xHCI y HDA en QEMU)
-                    cargo xtask test-instalar (arranca de un pendrive, instala en un NVMe vacío y
-                    vuelve a arrancar solo desde el NVMe)
+                    cargo xtask test-instalar (arranca de un pendrive y de la ISO en una lectora
+                    SATA, instala con el asistente en un NVMe vacío y vuelve a arrancar solo desde
+                    el NVMe: contraseña y presentación de JARVIS)
 - Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
 - Brave:            cargo xtask brave --instalar | --probar URL (el puente sin QEMU → target/brave-prueba.png)
 - Sincronización:   cargo xtask relay | run2 | sincronizar (dos QEMU + relé; verifica los discos con fatfs)
-- ISO:              cargo xtask iso [--probar|--abrir] (El Torito; sin disco → modo en vivo, FAT32 en RAM)
+- ISO:              cargo xtask iso [--probar|--abrir] (El Torito, UEFI 64 bits; sin disco → modo en vivo
+                    con el asistente de instalación, FAT32 en RAM)
 - Programas Linux:  cargo xtask usuario (compila kernel/usuario/ → target/usuario/; run y test lo hacen
                     solos). En JARVIS-OS: apt install programas-linux js ; hola-linux ; js
 - Monitores:        cargo xtask pantallas (dos monitores, capturas por salida); JARVIS_MONITORES=N en run/test

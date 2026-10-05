@@ -12,6 +12,7 @@ use jarvis_gfx::Color;
 
 use crate::firewall::Firewall;
 use crate::i18n::Lang;
+use crate::pin::PinHash;
 
 pub const PATH: &str = "/Sistema/config.ini";
 
@@ -269,10 +270,14 @@ pub struct Config {
     // Cuentas y seguridad
     pub user: String,
     pub hostname: String,
-    /// PIN para desbloquear (vacío = sin PIN).
-    pub pin: String,
+    /// PIN para desbloquear, hasheado (`None` = sin PIN). El texto nunca se guarda: ver
+    /// [`crate::pin`].
+    pub pin: Option<PinHash>,
     /// Bloquear solo después de estos minutos sin usar (0 = nunca).
     pub lock_minutes: u32,
+    /// Falta la presentación de JARVIS del primer inicio de sesión (la pide el asistente de
+    /// instalación; se borra al terminarla).
+    pub tour: bool,
     /// Qué conexiones se permiten (ver [`crate::firewall`]).
     pub firewall: Firewall,
     /// Idioma de la interfaz.
@@ -329,8 +334,9 @@ impl Default for Config {
             ai_council: false,
             user: "roman".into(),
             hostname: "jarvis".into(),
-            pin: String::new(),
+            pin: None,
             lock_minutes: 0,
+            tour: false,
             firewall: Firewall::default(),
             language: Lang::Es,
         }
@@ -348,6 +354,7 @@ fn yn(b: bool) -> &'static str {
 impl Config {
     pub fn parse(text: &str) -> Config {
         let mut c = Config::default();
+        let mut plain_pin = None;
         for line in text.lines() {
             let line = line.trim();
             if line.starts_with('#') || line.starts_with(';') {
@@ -466,9 +473,13 @@ impl Config {
                 "ia_consejo" => c.ai_council = yes(v),
                 "usuario" if valid_name(v) => c.user = v.into(),
                 "equipo" if valid_name(v) => c.hostname = v.into(),
+                "pin_hash" => c.pin = PinHash::decode(v),
+                // Versiones viejas guardaban el PIN en texto: se hashea al final (si no hay
+                // también un `pin_hash`) y [`has_plain_pin`] avisa que hay que reescribir.
                 "pin" if v.chars().all(|ch| ch.is_ascii_digit()) && v.len() <= 8 => {
-                    c.pin = v.into()
+                    plain_pin = Some(v)
                 }
+                "presentacion" => c.tour = yes(v),
                 "bloquear_minutos" => c.lock_minutes = v.parse::<u32>().unwrap_or(0).min(240),
                 "idioma" => c.language = Lang::from_code(v),
                 k if c.default_apps.parse_key(k, v) => {}
@@ -477,7 +488,20 @@ impl Config {
                 }
             }
         }
+        if c.pin.is_none() {
+            c.pin = plain_pin.and_then(|p| crate::pin::hash_pin(p, c.user.as_bytes()));
+        }
         c
+    }
+
+    /// ¿El archivo tiene un PIN en texto (de una versión vieja)? Entonces, después de leerlo con
+    /// [`parse`](Self::parse), hay que guardarlo de nuevo para que el texto desaparezca.
+    pub fn has_plain_pin(text: &str) -> bool {
+        text.lines().any(|l| {
+            l.trim()
+                .split_once('=')
+                .is_some_and(|(k, v)| k.trim() == "pin" && !v.trim().is_empty())
+        })
     }
 
     pub fn serialize(&self) -> String {
@@ -556,8 +580,12 @@ impl Config {
             format!("ia_consejo={}", yn(self.ai_council)),
             format!("usuario={}", self.user),
             format!("equipo={}", self.hostname),
-            format!("pin={}", self.pin),
+            format!(
+                "pin_hash={}",
+                self.pin.as_ref().map_or(String::new(), PinHash::encode)
+            ),
             format!("bloquear_minutos={}", self.lock_minutes),
+            format!("presentacion={}", yn(self.tour)),
             format!("idioma={}", self.language.code()),
         ];
         let mut lines = lines;
@@ -674,7 +702,7 @@ mod tests {
             clock_24h: false,
             mouse_speed: 5,
             search: SearchEngine::Wikipedia,
-            pin: "1234".into(),
+            pin: crate::pin::hash_pin("1234", b""),
             lock_minutes: 5,
             language: Lang::Pt,
             brave_server: "brave.casa.lan:9000".into(),
@@ -717,7 +745,7 @@ mod tests {
         );
         assert_eq!(c.utc_offset, 14);
         assert_eq!(c.mouse_speed, 3);
-        assert_eq!(c.pin, "");
+        assert_eq!(c.pin, None);
         assert_eq!(c.user, "roman");
         assert_eq!(c.wallpaper, Wallpaper::Solid(SOLID_COLORS.len() - 1));
         assert_eq!(Config::default().zone_label(), "UTC-03:00");
@@ -732,5 +760,25 @@ mod tests {
         assert_eq!(c.top_stats, 0);
         assert_eq!(c.accent as usize, crate::look::ACCENTS.len() - 1);
         assert_eq!(Config::default().anim_ms(), 180);
+    }
+
+    #[test]
+    fn el_pin_viejo_en_texto_se_hashea() {
+        let old = "usuario=roman\npin=1234\nzona_utc=-3";
+        assert!(Config::has_plain_pin(old));
+        let c = Config::parse(old);
+        let h = c.pin.as_ref().expect("hay PIN");
+        assert!(h.verify("1234") && !h.verify("4321"));
+        let text = c.serialize();
+        assert!(!text.contains("1234"), "el texto no vuelve al archivo");
+        assert!(!Config::has_plain_pin(&text));
+        assert!(text.contains("pin_hash=pbkdf2-sha256$"));
+        assert_eq!(Config::parse(&text), c, "la sal queda guardada");
+        // Vacío sigue siendo "sin clave".
+        assert!(!Config::has_plain_pin("pin=\npin_hash="));
+        assert_eq!(Config::parse("pin=\npin_hash=").pin, None);
+        // Si hay hash, manda el hash (aunque alguien agregue un `pin=` a mano).
+        let both = format!("{text}pin=9999\n");
+        assert!(Config::parse(&both).pin.expect("hay PIN").verify("1234"));
     }
 }

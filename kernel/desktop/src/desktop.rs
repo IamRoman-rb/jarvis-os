@@ -27,7 +27,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use jarvis_fs::{BlockDevice, FileSystem};
+use jarvis_fs::{BlockDevice, FileSystem, FsError, Timestamp};
 use jarvis_gfx::assistant::Assistant;
 use jarvis_gfx::clock::DateTime;
 use jarvis_gfx::hud;
@@ -138,6 +138,8 @@ enum Overlay {
         sel: usize,
     },
     Lock,
+    /// El asistente de instalación (modo en vivo).
+    Setup(alloc::boxed::Box<crate::setup::Setup>),
     /// Suspendido: pantalla negra, nada se redibuja; una tecla o el mouse despiertan.
     Sleep,
     /// Win+Z: elegir una distribución y la zona para la ventana (índice en
@@ -300,6 +302,9 @@ pub struct Requests {
     pub kill: Vec<u32>,
     /// Instalar en el disco N de `SystemStats::disks` (K13).
     pub install: Option<usize>,
+    /// Con el asistente de instalación: el `config.ini` (usuario y contraseña hasheada) para
+    /// escribir en el disco nuevo.
+    pub install_config: Option<String>,
     /// Pedidos al Wi-Fi (K14).
     pub wifi: Vec<crate::system::WifiOp>,
 }
@@ -389,6 +394,8 @@ pub struct Desktop<D: BlockDevice> {
     /// PIN que se está escribiendo en la pantalla de bloqueo (y si el último estuvo mal).
     pin_input: String,
     pin_wrong: bool,
+    /// La presentación de JARVIS del primer inicio de sesión: la próxima frase y cuándo.
+    tour: Option<(usize, u64)>,
     /// La última hora que llegó (para lo que pasa fuera de un evento, como una respuesta de red).
     last_clock: Option<DateTime>,
     /// La carpeta /Sincronizado con otras máquinas (ADR 0007).
@@ -445,6 +452,16 @@ fn app_tag(kind: AppKind) -> &'static str {
     }
 }
 
+/// Escribe la configuración en `/Sistema/config.ini` (crea la carpeta si falta).
+fn save_config<D: BlockDevice>(
+    fs: &mut FileSystem<D>,
+    cfg: &Config,
+    ts: Timestamp,
+) -> Result<(), FsError> {
+    crate::term::apt::ensure_dirs(fs, "/Sistema", ts)
+        .and_then(|()| fs.write_file(config::PATH, cfg.serialize().as_bytes(), ts))
+}
+
 fn singleton(kind: AppKind) -> bool {
     !matches!(kind, AppKind::Editor | AppKind::Viewer)
 }
@@ -456,18 +473,31 @@ impl<D: BlockDevice> Desktop<D> {
         particles: usize,
         mut fs: Option<FileSystem<D>>,
     ) -> Self {
-        let config = fs
+        let text = fs
             .as_mut()
             .and_then(|fs| fs.read_file(config::PATH).ok())
-            .map(|b| Config::parse(&String::from_utf8_lossy(&b)))
-            .unwrap_or_default();
+            .map(|b| String::from_utf8_lossy(&b).into_owned());
+        let config = text.as_deref().map(Config::parse).unwrap_or_default();
+        let mut boot_logs = Vec::new();
+        // Un PIN en texto de una versión vieja: `parse` ya lo hasheó; se reescribe el archivo
+        // para que el texto no quede en el disco.
+        if let (Some(fs), Some(true)) = (fs.as_mut(), text.as_deref().map(Config::has_plain_pin)) {
+            let saved = save_config(fs, &config, crate::apps::timestamp(None));
+            boot_logs.push(if saved.is_ok() {
+                "CONFIG_PIN_MIGRADO"
+            } else {
+                "CONFIG_PIN_SIN_MIGRAR"
+            });
+        }
         crate::i18n::set(config.language);
         crate::look::apply(&config);
         let screen = Rect::new(0, 0, width as i32, height as i32);
         let work = Rect::new(0, WORK_TOP, width as i32, height as i32 - WORK_TOP);
         let mut wm = WindowManager::new(screen, work);
         wm.set_topbar(config.topbar);
-        Desktop {
+        // Con contraseña (o PIN), se arranca en la pantalla de inicio de sesión.
+        let login = config.pin.is_some();
+        let mut desktop = Desktop {
             width,
             height,
             fs,
@@ -504,7 +534,7 @@ impl<D: BlockDevice> Desktop<D> {
             toolbar_hover: None,
             top_hover: None,
             toasts: Vec::new(),
-            logs: Vec::new(),
+            logs: boot_logs.into_iter().map(String::from).collect(),
             out: Outbox::default(),
             requests: Requests::default(),
             wifi_started: false,
@@ -528,6 +558,7 @@ impl<D: BlockDevice> Desktop<D> {
             bg_dirty: true,
             last_input: 0,
             pin_input: String::new(),
+            tour: None,
             pin_wrong: false,
             notices: Vec::new(),
             beep_until: None,
@@ -542,7 +573,12 @@ impl<D: BlockDevice> Desktop<D> {
             sync: Default::default(),
             brain: Default::default(),
             last_now: 0,
+        };
+        if login {
+            desktop.session_closed = true;
+            desktop.overlay = Overlay::Lock;
         }
+        desktop
     }
 
     /// La capa de fondo: el HUD, un color o una imagen (según la configuración).
@@ -672,6 +708,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Power { .. } => "apagado",
             Overlay::Lock if self.session_closed => "sesion",
             Overlay::Lock => "bloqueo",
+            Overlay::Setup(_) => "instalador",
             Overlay::Sleep => "suspendido",
             Overlay::Layouts { .. } => "distribuciones",
             Overlay::Project { .. } => "proyectar",
@@ -935,6 +972,18 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// El kernel mide la máquina una vez por segundo.
     pub fn set_stats(&mut self, stats: SystemStats) {
+        if let Overlay::Setup(setup) = &mut self.overlay
+            && setup.install_state(&stats.install) == crate::setup::Action::Redraw
+        {
+            self.overlay_dirty = true;
+            let msg = match &setup.step {
+                crate::setup::Step::Done(Ok(_)) => String::from("INSTALADOR_LISTO"),
+                crate::setup::Step::Done(Err(e)) => format!("INSTALADOR_ERROR {e}"),
+                _ => String::from("INSTALADOR"),
+            };
+            self.logs.push(msg);
+        }
+        self.tour_tick();
         if self.last_now > self.greeting_until {
             self.brain.greeting = None;
         }
@@ -1204,6 +1253,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::TaskView { .. }
                 | Overlay::Power { .. }
                 | Overlay::Lock
+                | Overlay::Setup(_)
                 | Overlay::Sleep
                 | Overlay::Confirm { .. }
         )
@@ -1283,6 +1333,11 @@ impl<D: BlockDevice> Desktop<D> {
             self.lock_key(key);
             return;
         }
+        if let Overlay::Setup(setup) = &mut self.overlay {
+            let action = setup.key(key, &self.stats.disks);
+            self.setup_action(action, now_ms);
+            return;
+        }
         let m = self.mods;
         if m.win {
             self.win_alone = false;
@@ -1321,12 +1376,16 @@ impl<D: BlockDevice> Desktop<D> {
     /// En la pantalla de bloqueo: sin PIN, cualquier tecla desbloquea; con PIN, hay que
     /// escribirlo y apretar Enter.
     fn lock_key(&mut self, key: Key) {
-        if self.config.pin.is_empty() {
+        if self.config.pin.is_none() {
             self.unlock();
             return;
         }
         match key {
-            Key::Char(c) if c.is_ascii_digit() && self.pin_input.len() < 8 => {
+            // PIN (dígitos) o la contraseña del asistente de instalación.
+            Key::Char(c)
+                if !c.is_control()
+                    && self.pin_input.chars().count() < crate::setup::MAX_PASSWORD =>
+            {
                 self.pin_input.push(c);
                 self.pin_wrong = false;
             }
@@ -1335,7 +1394,13 @@ impl<D: BlockDevice> Desktop<D> {
             }
             Key::Escape => self.pin_input.clear(),
             Key::Enter => {
-                if self.pin_input == self.config.pin {
+                // Se compara el hash de lo escrito con el guardado, nunca el texto.
+                if self
+                    .config
+                    .pin
+                    .as_ref()
+                    .is_some_and(|p| p.verify(&self.pin_input))
+                {
                     self.unlock();
                     return;
                 }
@@ -1354,6 +1419,10 @@ impl<D: BlockDevice> Desktop<D> {
         if core::mem::take(&mut self.session_closed) {
             let user = self.config.user.clone();
             self.logs.push(format!("SESION_INICIADA {user}"));
+            if self.config.tour {
+                self.tour = Some((0, self.last_now + 800));
+                self.logs.push("PRESENTACION_INICIO".into());
+            }
         } else {
             self.logs.push("ESCRITORIO_DESBLOQUEADO".into());
         }
@@ -1399,13 +1468,78 @@ impl<D: BlockDevice> Desktop<D> {
     fn wake(&mut self) {
         self.logs.push("DESPIERTO".into());
         // Con PIN (o si la sesión estaba cerrada) hay que volver a entrar.
-        if self.session_closed || !self.config.pin.is_empty() {
+        if self.session_closed || self.config.pin.is_some() {
             self.pin_input.clear();
             self.pin_wrong = false;
             self.set_overlay(Overlay::Lock);
         } else {
             self.set_overlay(Overlay::None);
         }
+    }
+
+    /// Modo en vivo: el asistente de instalación a pantalla completa (el kernel lo abre al
+    /// arrancar sin disco de JARVIS).
+    pub fn start_setup(&mut self) {
+        self.set_overlay(Overlay::Setup(alloc::boxed::Box::default()));
+    }
+
+    fn setup_action(&mut self, action: crate::setup::Action, now_ms: u64) {
+        use crate::setup::Action;
+        match action {
+            Action::None => {}
+            Action::Redraw => self.overlay_dirty = true,
+            Action::Leave => {
+                self.set_overlay(Overlay::None);
+                self.say(
+                    tr("Modo en vivo: nada se guarda al apagar. Para instalar, reiniciá desde la ISO."),
+                    now_ms,
+                );
+            }
+            Action::Install {
+                disk,
+                user,
+                password,
+            } => {
+                let mut cfg = self.config.clone();
+                cfg.pin = crate::pin::hash_pin(&password, user.as_bytes());
+                cfg.user = user;
+                cfg.tour = true;
+                self.requests.install = Some(disk);
+                self.requests.install_config = Some(cfg.serialize());
+                self.logs.push(format!("INSTALAR_PEDIDO {disk}"));
+                self.overlay_dirty = true;
+            }
+            Action::Reboot => self.power(Power::Reboot),
+        }
+    }
+
+    /// La presentación del primer inicio de sesión: una frase de [`crate::setup::TOUR`] cuando
+    /// JARVIS terminó la anterior.
+    fn tour_tick(&mut self) {
+        let Some((i, at)) = self.tour else {
+            return;
+        };
+        let now = self.last_now;
+        if now < at || self.assistant.is_speaking(now) {
+            return;
+        }
+        let Some(template) = crate::setup::TOUR.get(i) else {
+            self.tour = None;
+            self.config.tour = false;
+            let ts = crate::apps::timestamp(self.last_clock);
+            if let Some(fs) = self.fs.as_mut() {
+                let _ = save_config(fs, &self.config, ts);
+            }
+            self.logs.push("PRESENTACION_FIN".into());
+            return;
+        };
+        let mut name = self.config.user.clone();
+        if let Some(first) = name.get(..1) {
+            name = first.to_uppercase() + &name[1..];
+        }
+        let text = trf(template, &[&name]);
+        self.say(&text, now);
+        self.tour = Some((i + 1, now + 1500));
     }
 
     fn lock(&mut self) {
@@ -1859,11 +1993,7 @@ impl<D: BlockDevice> Desktop<D> {
             s.content_dirty = true;
         }
         let ts = crate::apps::timestamp(self.last_clock);
-        let text = self.config.serialize();
-        let saved = self.fs.as_mut().map(|fs| {
-            crate::term::apt::ensure_dirs(fs, "/Sistema", ts)
-                .and_then(|()| fs.write_file(config::PATH, text.as_bytes(), ts))
-        });
+        let saved = self.fs.as_mut().map(|fs| save_config(fs, &self.config, ts));
         match saved {
             Some(Ok(())) => self.logs.push("CONFIG_GUARDADA".into()),
             Some(Err(e)) => self.notify(
@@ -1878,7 +2008,7 @@ impl<D: BlockDevice> Desktop<D> {
     /// Teclas para el menú o panel abierto. `true` si se usó.
     fn overlay_key(&mut self, key: Key, now_ms: u64, clock: Option<DateTime>) -> bool {
         match &mut self.overlay {
-            Overlay::None | Overlay::Lock | Overlay::Sleep => false,
+            Overlay::None | Overlay::Lock | Overlay::Setup(_) | Overlay::Sleep => false,
             Overlay::Project { sel } => {
                 let n = crate::display::Mode::ALL.len();
                 match key {
@@ -2298,6 +2428,10 @@ impl<D: BlockDevice> Desktop<D> {
             return;
         };
         self.greeted = true;
+        if self.config.tour {
+            // La primera vez saluda la presentación (después de iniciar sesión).
+            return;
+        }
         let (moment, template) = match t.hour {
             5..=11 => ("manana", "Buenos días, {}."),
             12..=19 => ("tarde", "Buenas tardes, {}."),
@@ -3009,9 +3143,18 @@ impl<D: BlockDevice> Desktop<D> {
                 return;
             }
             Overlay::Lock => {
-                if self.config.pin.is_empty() {
+                if self.config.pin.is_none() {
                     self.unlock();
                 }
+                return;
+            }
+            Overlay::Setup(_) => {
+                let (w, h) = (self.width, self.height);
+                let action = match &mut self.overlay {
+                    Overlay::Setup(setup) => setup.click(x, y, w, h, &self.stats.disks),
+                    _ => crate::setup::Action::None,
+                };
+                self.setup_action(action, now_ms);
                 return;
             }
             Overlay::Menu(menu) => {
@@ -3688,7 +3831,7 @@ impl<D: BlockDevice> Desktop<D> {
             }
             Overlay::Lock => {
                 let pin =
-                    (!self.config.pin.is_empty()).then_some((self.pin_input.len(), self.pin_wrong));
+                    (self.config.pin.is_some()).then_some((self.pin_input.len(), self.pin_wrong));
                 let user = self.session_closed.then_some(self.config.user.as_str());
                 shell::draw_lock(
                     frame,
@@ -3700,6 +3843,10 @@ impl<D: BlockDevice> Desktop<D> {
                     pin,
                     user,
                 );
+                return;
+            }
+            Overlay::Setup(setup) => {
+                crate::setup::draw(frame, w, h, setup, &self.stats.disks);
                 return;
             }
             Overlay::Power { sel } => {

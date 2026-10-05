@@ -130,6 +130,7 @@ static EN: &[(&str, &str)] = &[
     ("APAGAR", "SHUT DOWN"),
     ("APAGAR JARVIS-OS", "SHUT DOWN JARVIS-OS"),
     ("APLICACIONES", "APPS"),
+    ("ATRÁS", "BACK"),
     ("Abajo del principal", "Below the main one"),
     ("Abierta", "Open"),
     (
@@ -164,6 +165,14 @@ static EN: &[(&str, &str)] = &[
     ("Activado", "On"),
     ("Agente principal", "Main agent"),
     ("Agosto", "August"),
+    (
+        "Agregale uno a la máquina (SATA, NVMe o IDE) y reiniciá.",
+        "Add one to the machine (SATA, NVMe or IDE) and restart.",
+    ),
+    (
+        "Algo salió mal. Podés elegir otro disco.",
+        "Something went wrong. You can choose another disk.",
+    ),
     ("Almacenamiento", "Storage"),
     ("Alto contraste", "High contrast"),
     ("Amarillo", "Yellow"),
@@ -263,6 +272,11 @@ static EN: &[(&str, &str)] = &[
     ("CONFIGURACIÓN", "SETTINGS"),
     ("CONFIGURACIÓN RÁPIDA", "QUICK SETTINGS"),
     ("CONFIRMAR", "CONFIRM"),
+    ("CONTRASEÑA", "PASSWORD"),
+    (
+        "CONTRASEÑA INCORRECTA. PROBÁ OTRA VEZ.",
+        "WRONG PASSWORD. TRY AGAIN.",
+    ),
     ("CONTROL DE MISIÓN", "MISSION CONTROL"),
     ("CREADO", "CREATED"),
     ("CREAR", "CREATE"),
@@ -321,6 +335,10 @@ static EN: &[(&str, &str)] = &[
         "JARVIS console. Type \"ayuda\" to see what I can do.",
     ),
     (
+        "Copiando el sistema al disco...",
+        "Copying the system to the disk...",
+    ),
+    (
         "Cuando me conecten con Claude, voy a poder responderte de verdad.",
         "Once I'm connected to Claude, I'll be able to really answer you.",
     ),
@@ -342,6 +360,7 @@ static EN: &[(&str, &str)] = &[
     ("DESVINCULAR", "UNLINK"),
     ("DETENER", "STOP"),
     ("DISCO", "DISK"),
+    ("DISCOS VACÍOS", "EMPTY DISKS"),
     ("DISTRIBUCIONES (WIN+Z)", "LAYOUTS (WIN+Z)"),
     ("Del tema", "Theme's own"),
     ("Denegar", "Deny"),
@@ -377,6 +396,7 @@ static EN: &[(&str, &str)] = &[
     ("Documentos", "Documents"),
     ("Duplicar", "Duplicate"),
     ("ENLACES RÁPIDOS (WIN+X)", "QUICK LINKS (WIN+X)"),
+    ("ENTER: SEGUIR · ESC: VOLVER", "ENTER: CONTINUE · ESC: BACK"),
     ("ESCANEAR", "SCAN"),
     ("ESCUCHAR", "LISTEN"),
     ("ESTADO", "STATUS"),
@@ -507,10 +527,16 @@ static EN: &[(&str, &str)] = &[
         "Hay un solo monitor: no hay nada que extender o duplicar.",
         "There is only one monitor: nothing to extend or duplicate.",
     ),
+    (
+        "Hola, soy JARVIS. Voy a instalar JARVIS-OS en esta computadora.",
+        "Hi, I'm JARVIS. I'm going to install JARVIS-OS on this computer.",
+    ),
     ("Hora e idioma", "Time & language"),
     ("IDENTIFICAR", "IDENTIFY"),
     ("INSPECTOR", "INSPECTOR"),
+    ("INSTALACIÓN DE JARVIS-OS", "JARVIS-OS SETUP"),
     ("INSTALAR", "INSTALL"),
+    ("INSTALAR AHORA", "INSTALL NOW"),
     ("Identificar", "Identify"),
     ("Idioma", "Language"),
     ("Imágenes", "Pictures"),
@@ -522,6 +548,10 @@ static EN: &[(&str, &str)] = &[
     ("Iniciar sesión con Google", "Sign in with Google"),
     ("Inicio", "Home"),
     ("Inicio (Win)", "Start (Win)"),
+    (
+        "Instalando JARVIS-OS. Esto tarda un minuto...",
+        "Installing JARVIS-OS. This takes a minute...",
+    ),
     ("Instalar JARVIS-OS", "Install JARVIS-OS"),
     ("Instalar más programas", "Install more programs"),
     ("Interrupciones", "Interrupts"),
@@ -533,8 +563,8 @@ static EN: &[(&str, &str)] = &[
     ),
     ("JARVIS · escritorio (Win+D)", "JARVIS · desktop (Win+D)"),
     (
-        "JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER",
-        "JARVIS-OS LOCKED · TYPE YOUR PIN AND PRESS ENTER",
+        "JARVIS-OS BLOQUEADO · ESCRIBÍ TU CONTRASEÑA Y APRETÁ ENTER",
+        "JARVIS-OS LOCKED · TYPE YOUR PASSWORD AND PRESS ENTER",
     ),
     (
         "JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC",
@@ -544,9 +574,14 @@ static EN: &[(&str, &str)] = &[
         "JARVIS-OS no ofrece servicios: se rechaza lo que no pidió",
         "JARVIS-OS offers no services: anything it didn't ask for is rejected",
     ),
+    ("JARVIS-OS quedó instalado.", "JARVIS-OS is installed."),
     (
         "JARVIS-OS se reinicia con los cambios en unos segundos.",
         "JARVIS-OS will restart with the changes in a few seconds.",
+    ),
+    (
+        "JARVIS-OS va a quedar instalado en un disco vacío de esta máquina.",
+        "JARVIS-OS will be installed on an empty disk in this machine.",
     ),
     ("Julio", "July"),
     ("Junio", "June"),
@@ -562,6 +597,10 @@ static EN: &[(&str, &str)] = &[
     (
         "La contraseña de una red WPA2 tiene de 8 a 63 caracteres.",
         "A WPA2 network password has 8 to 63 characters.",
+    ),
+    (
+        "La contraseña necesita al menos 4 caracteres.",
+        "The password needs at least 4 characters.",
     ),
     (
         "La del firmware: para cambiarla hace falta una placa virtio-gpu",
@@ -589,6 +628,10 @@ static EN: &[(&str, &str)] = &[
         "The window jumps into place on release (lighter)",
     ),
     (
+        "Las contraseñas no coinciden. Repetila.",
+        "The passwords don't match. Type it again.",
+    ),
+    (
         "Las máquinas virtuales no lo emulan;",
         "Virtual machines don't emulate it;",
     ),
@@ -599,7 +642,15 @@ static EN: &[(&str, &str)] = &[
     ("Lenta", "Slow"),
     ("Letra de la terminal", "Terminal font"),
     ("Letra del editor", "Editor font"),
+    (
+        "Letras, números, - o _. Así te voy a saludar.",
+        "Letters, numbers, - or _. That's how I'll greet you.",
+    ),
     ("Listo", "Done"),
+    (
+        "Listo. Reiniciá (si arrancaste de un pendrive, sacalo antes): te espero del otro lado.",
+        "Done. Restart (if you booted from a USB drive, remove it first): see you on the other side.",
+    ),
     (
         "Lo infectado se aparta en /Cuarentena: no se borra ni se puede ejecutar",
         "Infected files are set aside in /Cuarentena: not deleted and they cannot run",
@@ -644,6 +695,10 @@ static EN: &[(&str, &str)] = &[
         "Minimizar, maximizar y cerrar",
         "Minimize, maximize and close",
     ),
+    (
+        "Modo en vivo: nada se guarda al apagar. Para instalar, reiniciá desde la ISO.",
+        "Live mode: nothing is kept after shutdown. To install, restart from the ISO.",
+    ),
     ("Monitor (Ctrl+Shift+Esc)", "Monitor (Ctrl+Shift+Esc)"),
     ("Monitor del sistema", "System monitor"),
     ("Monitor principal", "Main monitor"),
@@ -665,6 +720,7 @@ static EN: &[(&str, &str)] = &[
     ),
     ("NOMBRE", "NAME"),
     ("NOMBRE 8.3", "8.3 NAME"),
+    ("NOMBRE DE USUARIO", "USER NAME"),
     ("NOTIFICACIONES", "NOTIFICATIONS"),
     ("NUEVA CARPETA", "NEW FOLDER"),
     ("NUEVO ARCHIVO DE TEXTO", "NEW TEXT FILE"),
@@ -693,6 +749,14 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Nivel de entrada", "Input level"),
     (
+        "No apagues la máquina. La pantalla queda quieta mientras tanto.",
+        "Don't turn the machine off. The screen stays still meanwhile.",
+    ),
+    (
+        "No encontré ningún disco vacío.",
+        "I couldn't find an empty disk.",
+    ),
+    (
         "No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales.",
         "I don't understand that and the brain (Claude) is not connected: start JARVIS with \"cargo xtask run\", which launches it. Type \"ayuda\" for the local commands.",
     ),
@@ -711,6 +775,10 @@ static EN: &[(&str, &str)] = &[
         "No disk: start QEMU with the virtual disk",
     ),
     ("No hay nada copiado.", "Nothing has been copied."),
+    (
+        "No hay ningún disco vacío. Agregá uno y reiniciá.",
+        "There is no empty disk. Add one and restart.",
+    ),
     ("No hay notificaciones nuevas.", "No new notifications."),
     (
         "No hay placa de sonido con entrada (en QEMU la agrega cargo xtask run)",
@@ -725,6 +793,7 @@ static EN: &[(&str, &str)] = &[
         "No se cerró la sesión: hay cambios sin guardar.",
         "Did not sign out: there are unsaved changes.",
     ),
+    ("No se pudo instalar:", "Couldn't install:"),
     ("No soportada", "Not supported"),
     ("Nombre del equipo", "Computer name"),
     ("Nombre:", "Name:"),
@@ -741,9 +810,11 @@ static EN: &[(&str, &str)] = &[
     ),
     ("PEGAR", "PASTE"),
     ("PERMITIR", "ALLOW"),
-    ("PIN INCORRECTO. PROBÁ OTRA VEZ.", "WRONG PIN. TRY AGAIN."),
+    ("PIN actual", "Current PIN"),
+    ("PIN actual incorrecto", "Wrong current PIN"),
     ("PIN de desbloqueo", "Unlock PIN"),
     ("PROBAR", "TEST"),
+    ("PROBAR SIN INSTALAR", "TRY WITHOUT INSTALLING"),
     ("PROCESADOR", "PROCESSOR"),
     ("PROYECTAR (WIN+P)", "PROJECT (WIN+P)"),
     ("Panel de estado", "Status panel"),
@@ -753,6 +824,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Paquetes de JARVIS-OS (apt, dpkg)",
         "JARVIS-OS packages (apt, dpkg)",
+    ),
+    (
+        "Para cambiar el PIN, escribí primero el actual",
+        "To change the PIN, type the current one first",
     ),
     (
         "Para lo que no es una dirección (\"buscá...\", open ?...)",
@@ -774,6 +849,10 @@ static EN: &[(&str, &str)] = &[
         "Getting an address (DHCP)...",
     ),
     ("Preguntando al anfitrión...", "Asking the host..."),
+    (
+        "Primero completá el PIN actual",
+        "Fill in the current PIN first",
+    ),
     ("Privacidad y seguridad", "Privacy & security"),
     ("Probando...", "Testing..."),
     ("Probar", "Test"),
@@ -796,6 +875,7 @@ static EN: &[(&str, &str)] = &[
     ("REINICIAR", "RESTART"),
     ("RENDIMIENTO", "PERFORMANCE"),
     ("RENOMBRAR", "RENAME"),
+    ("REPETILA", "REPEAT IT"),
     ("REPRODUCIR", "PLAY"),
     ("RESTAURAR", "RESTORE"),
     ("Red", "Network"),
@@ -823,13 +903,14 @@ static EN: &[(&str, &str)] = &[
     ("Rueda del mouse", "Mouse wheel"),
     ("Rápida", "Fast"),
     (
-        "SESIÓN CERRADA · ESCRIBÍ TU PIN Y APRETÁ ENTER",
-        "SIGNED OUT · TYPE YOUR PIN AND PRESS ENTER",
+        "SESIÓN CERRADA · ESCRIBÍ TU CONTRASEÑA Y APRETÁ ENTER",
+        "SIGNED OUT · TYPE YOUR PASSWORD AND PRESS ENTER",
     ),
     (
         "SESIÓN CERRADA · TOCÁ UNA TECLA O HACÉ CLIC PARA ENTRAR",
         "SIGNED OUT · PRESS A KEY OR CLICK TO SIGN IN",
     ),
+    ("SIGUIENTE", "NEXT"),
     ("SIN DISCO", "NO DISK"),
     ("SIN RED", "NO NETWORK"),
     ("SINCRONIZADO", "SYNCED"),
@@ -846,6 +927,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Se va a escribir en este disco: hacé clic en CONFIRMAR",
         "This disk will be written: click CONFIRM",
+    ),
+    (
+        "Se va a usar el disco entero.",
+        "The whole disk will be used.",
     ),
     ("Segundos en el reloj", "Seconds on the clock"),
     ("Sensores", "Sensors"),
@@ -907,7 +992,15 @@ static EN: &[(&str, &str)] = &[
         "También al maximizar, acoplar y minimizar",
         "Also when maximizing, snapping and minimizing",
     ),
+    (
+        "También podés probarlo sin instalar: nada se guarda al apagar.",
+        "You can also try it without installing: nothing is kept after shutdown.",
+    ),
     ("Te escucho.", "I'm listening."),
+    (
+        "Te voy a pedir un usuario, una contraseña y el disco.",
+        "I'll ask you for a user name, a password and the disk.",
+    ),
     ("Tema", "Theme"),
     ("Temperatura", "Temperature"),
     ("Terminal (Ctrl+Alt+T)", "Terminal (Ctrl+Alt+T)"),
@@ -952,6 +1045,7 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Títulos en negrita", "Bold titles"),
     ("USB", "USB"),
+    ("USUARIO", "USER"),
     (
         "Un La (440 Hz) por el parlante de la PC",
         "An A (440 Hz) through the PC speaker",
@@ -961,12 +1055,17 @@ static EN: &[(&str, &str)] = &[
         "A short beep with error messages",
     ),
     ("Usuario", "User"),
+    (
+        "Usá letras, números, - o _ (hasta 24).",
+        "Use letters, numbers, - or _ (up to 24).",
+    ),
     ("VACIAR", "EMPTY"),
     ("VACIAR LA PAPELERA", "EMPTY TRASH"),
     ("VENTANA (ALT+ESPACIO)", "WINDOW (ALT+SPACE)"),
     ("VER", "VIEW"),
     ("VINCULAR", "LINK"),
     ("VISTA PREVIA", "PREVIEW"),
+    ("VOLVER", "BACK"),
     ("Vaciar la Papelera", "Empty the Trash"),
     ("Velocidad de las animaciones", "Animation speed"),
     ("Velocidad del puntero", "Pointer speed"),
@@ -1069,12 +1168,24 @@ static EN: &[(&str, &str)] = &[
     ("video", "video"),
     ("voz", "voice"),
     (
+        "¿Cómo te llamo? Elegí un nombre de usuario.",
+        "What should I call you? Choose a user name.",
+    ),
+    (
+        "¿En qué disco instalo? Solo uso discos vacíos.",
+        "Which disk should I install on? I only use empty disks.",
+    ),
+    (
         "¿Qué querés que haga la computadora?",
         "What do you want the computer to do?",
     ),
     (
         "¿Seguro? Se borra para siempre: hacé clic otra vez",
         "Sure? It's deleted forever: click again",
+    ),
+    (
+        "Último paso. Confirmá y empiezo a copiar el sistema.",
+        "Last step. Confirm and I'll start copying the system.",
     ),
 ];
 
@@ -1099,6 +1210,7 @@ static PT: &[(&str, &str)] = &[
     ("APAGAR", "DESLIGAR"),
     ("APAGAR JARVIS-OS", "DESLIGAR JARVIS-OS"),
     ("APLICACIONES", "APLICATIVOS"),
+    ("ATRÁS", "VOLTAR"),
     ("Abajo del principal", "Abaixo do principal"),
     ("Abierta", "Aberta"),
     (
@@ -1133,6 +1245,14 @@ static PT: &[(&str, &str)] = &[
     ("Activado", "Ativado"),
     ("Agente principal", "Agente principal"),
     ("Agosto", "Agosto"),
+    (
+        "Agregale uno a la máquina (SATA, NVMe o IDE) y reiniciá.",
+        "Adicione um à máquina (SATA, NVMe ou IDE) e reinicie.",
+    ),
+    (
+        "Algo salió mal. Podés elegir otro disco.",
+        "Algo deu errado. Você pode escolher outro disco.",
+    ),
     ("Almacenamiento", "Armazenamento"),
     ("Alto contraste", "Alto contraste"),
     ("Amarillo", "Amarelo"),
@@ -1241,6 +1361,11 @@ static PT: &[(&str, &str)] = &[
     ("CONFIGURACIÓN", "CONFIGURAÇÕES"),
     ("CONFIGURACIÓN RÁPIDA", "CONFIGURAÇÕES RÁPIDAS"),
     ("CONFIRMAR", "CONFIRMAR"),
+    ("CONTRASEÑA", "SENHA"),
+    (
+        "CONTRASEÑA INCORRECTA. PROBÁ OTRA VEZ.",
+        "SENHA INCORRETA. TENTE DE NOVO.",
+    ),
     ("CONTROL DE MISIÓN", "CONTROLE DE MISSÃO"),
     ("CREADO", "CRIADO"),
     ("CREAR", "CRIAR"),
@@ -1302,6 +1427,10 @@ static PT: &[(&str, &str)] = &[
         "Console do JARVIS. Digite \"ayuda\" para ver o que sei fazer.",
     ),
     (
+        "Copiando el sistema al disco...",
+        "Copiando o sistema para o disco...",
+    ),
+    (
         "Cuando me conecten con Claude, voy a poder responderte de verdad.",
         "Quando me conectarem ao Claude, vou poder te responder de verdade.",
     ),
@@ -1323,6 +1452,7 @@ static PT: &[(&str, &str)] = &[
     ("DESVINCULAR", "DESVINCULAR"),
     ("DETENER", "PARAR"),
     ("DISCO", "DISCO"),
+    ("DISCOS VACÍOS", "DISCOS VAZIOS"),
     ("DISTRIBUCIONES (WIN+Z)", "LAYOUTS (WIN+Z)"),
     ("Del tema", "Do tema"),
     ("Denegar", "Negar"),
@@ -1358,6 +1488,7 @@ static PT: &[(&str, &str)] = &[
     ("Documentos", "Documentos"),
     ("Duplicar", "Duplicar"),
     ("ENLACES RÁPIDOS (WIN+X)", "LINKS RÁPIDOS (WIN+X)"),
+    ("ENTER: SEGUIR · ESC: VOLVER", "ENTER: SEGUIR · ESC: VOLTAR"),
     ("ESCANEAR", "VERIFICAR"),
     ("ESCUCHAR", "OUVIR"),
     ("ESTADO", "ESTADO"),
@@ -1491,10 +1622,16 @@ static PT: &[(&str, &str)] = &[
         "Hay un solo monitor: no hay nada que extender o duplicar.",
         "Há um só monitor: não há o que estender ou duplicar.",
     ),
+    (
+        "Hola, soy JARVIS. Voy a instalar JARVIS-OS en esta computadora.",
+        "Olá, sou o JARVIS. Vou instalar o JARVIS-OS neste computador.",
+    ),
     ("Hora e idioma", "Hora e idioma"),
     ("IDENTIFICAR", "IDENTIFICAR"),
     ("INSPECTOR", "INSPETOR"),
+    ("INSTALACIÓN DE JARVIS-OS", "INSTALAÇÃO DO JARVIS-OS"),
     ("INSTALAR", "INSTALAR"),
+    ("INSTALAR AHORA", "INSTALAR AGORA"),
     ("Identificar", "Identificar"),
     ("Idioma", "Idioma"),
     ("Imágenes", "Imagens"),
@@ -1506,6 +1643,10 @@ static PT: &[(&str, &str)] = &[
     ("Iniciar sesión con Google", "Entrar com o Google"),
     ("Inicio", "Início"),
     ("Inicio (Win)", "Iniciar (Win)"),
+    (
+        "Instalando JARVIS-OS. Esto tarda un minuto...",
+        "Instalando o JARVIS-OS. Isso leva um minuto...",
+    ),
     ("Instalar JARVIS-OS", "Instalar o JARVIS-OS"),
     ("Instalar más programas", "Instalar mais programas"),
     ("Interrupciones", "Interrupções"),
@@ -1520,8 +1661,8 @@ static PT: &[(&str, &str)] = &[
         "JARVIS · área de trabalho (Win+D)",
     ),
     (
-        "JARVIS-OS BLOQUEADO · ESCRIBÍ TU PIN Y APRETÁ ENTER",
-        "JARVIS-OS BLOQUEADO · DIGITE SEU PIN E APERTE ENTER",
+        "JARVIS-OS BLOQUEADO · ESCRIBÍ TU CONTRASEÑA Y APRETÁ ENTER",
+        "JARVIS-OS BLOQUEADO · DIGITE SUA SENHA E APERTE ENTER",
     ),
     (
         "JARVIS-OS BLOQUEADO · TOCÁ UNA TECLA O HACÉ CLIC",
@@ -1531,9 +1672,14 @@ static PT: &[(&str, &str)] = &[
         "JARVIS-OS no ofrece servicios: se rechaza lo que no pidió",
         "JARVIS-OS não oferece serviços: rejeita o que não pediu",
     ),
+    ("JARVIS-OS quedó instalado.", "O JARVIS-OS foi instalado."),
     (
         "JARVIS-OS se reinicia con los cambios en unos segundos.",
         "O JARVIS-OS vai reiniciar com as mudanças em alguns segundos.",
+    ),
+    (
+        "JARVIS-OS va a quedar instalado en un disco vacío de esta máquina.",
+        "O JARVIS-OS será instalado em um disco vazio desta máquina.",
     ),
     ("Julio", "Julho"),
     ("Junio", "Junho"),
@@ -1549,6 +1695,10 @@ static PT: &[(&str, &str)] = &[
     (
         "La contraseña de una red WPA2 tiene de 8 a 63 caracteres.",
         "A senha de uma rede WPA2 tem de 8 a 63 caracteres.",
+    ),
+    (
+        "La contraseña necesita al menos 4 caracteres.",
+        "A senha precisa de pelo menos 4 caracteres.",
     ),
     (
         "La del firmware: para cambiarla hace falta una placa virtio-gpu",
@@ -1576,6 +1726,10 @@ static PT: &[(&str, &str)] = &[
         "A janela pula para o lugar ao soltar (mais leve)",
     ),
     (
+        "Las contraseñas no coinciden. Repetila.",
+        "As senhas não coincidem. Repita.",
+    ),
+    (
         "Las máquinas virtuales no lo emulan;",
         "As máquinas virtuais não o emulam;",
     ),
@@ -1586,7 +1740,15 @@ static PT: &[(&str, &str)] = &[
     ("Lenta", "Lenta"),
     ("Letra de la terminal", "Fonte do terminal"),
     ("Letra del editor", "Fonte do editor"),
+    (
+        "Letras, números, - o _. Así te voy a saludar.",
+        "Letras, números, - ou _. É assim que vou te cumprimentar.",
+    ),
     ("Listo", "Pronto"),
+    (
+        "Listo. Reiniciá (si arrancaste de un pendrive, sacalo antes): te espero del otro lado.",
+        "Pronto. Reinicie (se iniciou de um pendrive, retire-o antes): te espero do outro lado.",
+    ),
     (
         "Lo infectado se aparta en /Cuarentena: no se borra ni se puede ejecutar",
         "O que estiver infectado vai para /Cuarentena: não é apagado nem pode rodar",
@@ -1637,6 +1799,10 @@ static PT: &[(&str, &str)] = &[
         "Minimizar, maximizar y cerrar",
         "Minimizar, maximizar e fechar",
     ),
+    (
+        "Modo en vivo: nada se guarda al apagar. Para instalar, reiniciá desde la ISO.",
+        "Modo ao vivo: nada é guardado ao desligar. Para instalar, reinicie pela ISO.",
+    ),
     ("Monitor (Ctrl+Shift+Esc)", "Monitor (Ctrl+Shift+Esc)"),
     ("Monitor del sistema", "Monitor do sistema"),
     ("Monitor principal", "Monitor principal"),
@@ -1658,6 +1824,7 @@ static PT: &[(&str, &str)] = &[
     ),
     ("NOMBRE", "NOME"),
     ("NOMBRE 8.3", "NOME 8.3"),
+    ("NOMBRE DE USUARIO", "NOME DE USUÁRIO"),
     ("NOTIFICACIONES", "NOTIFICAÇÕES"),
     ("NUEVA CARPETA", "NOVA PASTA"),
     ("NUEVO ARCHIVO DE TEXTO", "NOVO ARQUIVO DE TEXTO"),
@@ -1686,6 +1853,14 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Nivel de entrada", "Nível de entrada"),
     (
+        "No apagues la máquina. La pantalla queda quieta mientras tanto.",
+        "Não desligue a máquina. A tela fica parada enquanto isso.",
+    ),
+    (
+        "No encontré ningún disco vacío.",
+        "Não encontrei nenhum disco vazio.",
+    ),
+    (
         "No entiendo eso y el cerebro (Claude) no está conectado: abrí JARVIS con \"cargo xtask run\", que lo levanta. Escribí \"ayuda\" para las órdenes locales.",
         "Não entendo isso e o cérebro (Claude) não está conectado: abra o JARVIS com \"cargo xtask run\", que o inicia. Digite \"ayuda\" para os comandos locais.",
     ),
@@ -1704,6 +1879,10 @@ static PT: &[(&str, &str)] = &[
         "Sem disco: inicie o QEMU com o disco virtual",
     ),
     ("No hay nada copiado.", "Nada foi copiado."),
+    (
+        "No hay ningún disco vacío. Agregá uno y reiniciá.",
+        "Não há nenhum disco vazio. Adicione um e reinicie.",
+    ),
     ("No hay notificaciones nuevas.", "Nenhuma notificação nova."),
     (
         "No hay placa de sonido con entrada (en QEMU la agrega cargo xtask run)",
@@ -1718,6 +1897,7 @@ static PT: &[(&str, &str)] = &[
         "No se cerró la sesión: hay cambios sin guardar.",
         "A sessão não foi encerrada: há alterações não salvas.",
     ),
+    ("No se pudo instalar:", "Não foi possível instalar:"),
     ("No soportada", "Não suportada"),
     ("Nombre del equipo", "Nome do computador"),
     ("Nombre:", "Nome:"),
@@ -1734,12 +1914,11 @@ static PT: &[(&str, &str)] = &[
     ),
     ("PEGAR", "COLAR"),
     ("PERMITIR", "PERMITIR"),
-    (
-        "PIN INCORRECTO. PROBÁ OTRA VEZ.",
-        "PIN INCORRETO. TENTE DE NOVO.",
-    ),
+    ("PIN actual", "PIN atual"),
+    ("PIN actual incorrecto", "PIN atual incorreto"),
     ("PIN de desbloqueo", "PIN de desbloqueio"),
     ("PROBAR", "TESTAR"),
+    ("PROBAR SIN INSTALAR", "EXPERIMENTAR SEM INSTALAR"),
     ("PROCESADOR", "PROCESSADOR"),
     ("PROYECTAR (WIN+P)", "PROJETAR (WIN+P)"),
     ("Panel de estado", "Painel de status"),
@@ -1749,6 +1928,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Paquetes de JARVIS-OS (apt, dpkg)",
         "Pacotes do JARVIS-OS (apt, dpkg)",
+    ),
+    (
+        "Para cambiar el PIN, escribí primero el actual",
+        "Para mudar o PIN, digite primeiro o atual",
     ),
     (
         "Para lo que no es una dirección (\"buscá...\", open ?...)",
@@ -1767,6 +1950,10 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Pidiendo dirección (DHCP)...", "Pedindo endereço (DHCP)..."),
     ("Preguntando al anfitrión...", "Perguntando ao anfitrião..."),
+    (
+        "Primero completá el PIN actual",
+        "Preencha primeiro o PIN atual",
+    ),
     ("Privacidad y seguridad", "Privacidade e segurança"),
     ("Probando...", "Testando..."),
     ("Probar", "Testar"),
@@ -1795,6 +1982,7 @@ static PT: &[(&str, &str)] = &[
     ("REINICIAR", "REINICIAR"),
     ("RENDIMIENTO", "DESEMPENHO"),
     ("RENOMBRAR", "RENOMEAR"),
+    ("REPETILA", "REPITA"),
     ("REPRODUCIR", "TOCAR"),
     ("RESTAURAR", "RESTAURAR"),
     ("Red", "Rede"),
@@ -1822,13 +2010,14 @@ static PT: &[(&str, &str)] = &[
     ("Rueda del mouse", "Roda do mouse"),
     ("Rápida", "Rápida"),
     (
-        "SESIÓN CERRADA · ESCRIBÍ TU PIN Y APRETÁ ENTER",
-        "SESSÃO ENCERRADA · DIGITE SEU PIN E APERTE ENTER",
+        "SESIÓN CERRADA · ESCRIBÍ TU CONTRASEÑA Y APRETÁ ENTER",
+        "SESSÃO ENCERRADA · DIGITE SUA SENHA E APERTE ENTER",
     ),
     (
         "SESIÓN CERRADA · TOCÁ UNA TECLA O HACÉ CLIC PARA ENTRAR",
         "SESSÃO ENCERRADA · TOQUE UMA TECLA OU CLIQUE PARA ENTRAR",
     ),
+    ("SIGUIENTE", "PRÓXIMO"),
     ("SIN DISCO", "SEM DISCO"),
     ("SIN RED", "SEM REDE"),
     ("SINCRONIZADO", "SINCRONIZADO"),
@@ -1845,6 +2034,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Se va a escribir en este disco: hacé clic en CONFIRMAR",
         "Este disco será gravado: clique em CONFIRMAR",
+    ),
+    (
+        "Se va a usar el disco entero.",
+        "O disco inteiro será usado.",
     ),
     ("Segundos en el reloj", "Segundos no relógio"),
     ("Sensores", "Sensores"),
@@ -1906,7 +2099,15 @@ static PT: &[(&str, &str)] = &[
         "También al maximizar, acoplar y minimizar",
         "Também ao maximizar, encaixar e minimizar",
     ),
+    (
+        "También podés probarlo sin instalar: nada se guarda al apagar.",
+        "Também pode experimentar sem instalar: nada é guardado ao desligar.",
+    ),
     ("Te escucho.", "Estou ouvindo."),
+    (
+        "Te voy a pedir un usuario, una contraseña y el disco.",
+        "Vou pedir um usuário, uma senha e o disco.",
+    ),
     ("Tema", "Tema"),
     ("Temperatura", "Temperatura"),
     ("Terminal (Ctrl+Alt+T)", "Terminal (Ctrl+Alt+T)"),
@@ -1951,6 +2152,7 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Títulos en negrita", "Títulos em negrito"),
     ("USB", "USB"),
+    ("USUARIO", "USUÁRIO"),
     (
         "Un La (440 Hz) por el parlante de la PC",
         "Um Lá (440 Hz) pelo alto-falante do PC",
@@ -1960,12 +2162,17 @@ static PT: &[(&str, &str)] = &[
         "Um bipe curto com os avisos de erro",
     ),
     ("Usuario", "Usuário"),
+    (
+        "Usá letras, números, - o _ (hasta 24).",
+        "Use letras, números, - ou _ (até 24).",
+    ),
     ("VACIAR", "ESVAZIAR"),
     ("VACIAR LA PAPELERA", "ESVAZIAR A LIXEIRA"),
     ("VENTANA (ALT+ESPACIO)", "JANELA (ALT+ESPAÇO)"),
     ("VER", "VER"),
     ("VINCULAR", "VINCULAR"),
     ("VISTA PREVIA", "PRÉ-VISUALIZAÇÃO"),
+    ("VOLVER", "VOLTAR"),
     ("Vaciar la Papelera", "Esvaziar a Lixeira"),
     ("Velocidad de las animaciones", "Velocidade das animações"),
     ("Velocidad del puntero", "Velocidade do ponteiro"),
@@ -2074,6 +2281,14 @@ static PT: &[(&str, &str)] = &[
     ("video", "vídeo"),
     ("voz", "voz"),
     (
+        "¿Cómo te llamo? Elegí un nombre de usuario.",
+        "Como devo te chamar? Escolha um nome de usuário.",
+    ),
+    (
+        "¿En qué disco instalo? Solo uso discos vacíos.",
+        "Em qual disco eu instalo? Só uso discos vazios.",
+    ),
+    (
         "¿Qué querés que haga la computadora?",
         "O que você quer que o computador faça?",
     ),
@@ -2081,12 +2296,20 @@ static PT: &[(&str, &str)] = &[
         "¿Seguro? Se borra para siempre: hacé clic otra vez",
         "Certeza? Será apagado para sempre: clique de novo",
     ),
+    (
+        "Último paso. Confirmá y empiezo a copiar el sistema.",
+        "Último passo. Confirme e eu começo a copiar o sistema.",
+    ),
 ];
 
 static EN_F: &[(&str, &str)] = &[
     (
         "\"{}\" se borra para siempre.",
         "\"{}\" will be deleted forever.",
+    ),
+    (
+        "Abajo a la izquierda, el estado de la máquina: procesador, memoria, disco y red.",
+        "Bottom left, the machine's status: processor, memory, disk and network.",
     ),
     ("Abrir {}", "Open {}"),
     (
@@ -2098,6 +2321,14 @@ static EN_F: &[(&str, &str)] = &[
         "Threat in {}: {}. It could not be quarantined: {}",
     ),
     ("Archivos · {}", "Files · {}"),
+    (
+        "Arriba a la izquierda está la barra con tus aplicaciones: archivos, terminal, música y más.",
+        "Top left is the bar with your apps: files, terminal, music and more.",
+    ),
+    (
+        "Bienvenido a JARVIS-OS, {}. Te muestro dónde está cada cosa.",
+        "Welcome to JARVIS-OS, {}. Let me show you around.",
+    ),
     ("Buenas noches, {}.", "Good evening, {}."),
     ("Buenas tardes, {}.", "Good afternoon, {}."),
     ("Buenos días, {}.", "Good morning, {}."),
@@ -2127,13 +2358,29 @@ static EN_F: &[(&str, &str)] = &[
         "En esta sesión: {} archivos revisados, {} amenazas",
         "This session: {} files checked, {} threats",
     ),
+    (
+        "Encantado, {}. Ahora una contraseña para proteger tu sesión.",
+        "Nice to meet you, {}. Now a password to protect your session.",
+    ),
     ("Escritorio {} de {}", "Desktop {} of {}"),
+    (
+        "Eso es todo. Estoy a tu disposición.",
+        "That's all. I'm at your service.",
+    ),
     ("Firewall: bloqueó {} ({})", "Firewall: blocked {} ({})"),
     (
         "Funciona: respuesta {} con {} bytes",
         "It works: response {} with {} bytes",
     ),
     ("Gráfico: {}", "Graph: {}"),
+    (
+        "INSTALACIÓN DE JARVIS-OS · PASO {} DE 4",
+        "JARVIS-OS SETUP · STEP {} OF 4",
+    ),
+    (
+        "La tecla Windows abre el menú de inicio; Windows + X, el menú rápido.",
+        "The Windows key opens the start menu; Windows + X, the quick menu.",
+    ),
     (
         "LÍN {} · COL {} · CTRL+S GUARDAR",
         "LN {} · COL {} · CTRL+S SAVE",
@@ -2160,6 +2407,10 @@ static EN_F: &[(&str, &str)] = &[
     (
         "Papelera vacía ({} elementos).",
         "Trash emptied ({} items).",
+    ),
+    (
+        "Para hablar conmigo, abrí mi consola: el último ícono de la barra.",
+        "To talk to me, open my console: the last icon on the bar.",
     ),
     ("Permitir: {}", "Allow: {}"),
     ("Regla {}", "Rule {}"),
@@ -2239,6 +2490,10 @@ static PT_F: &[(&str, &str)] = &[
         "\"{}\" se borra para siempre.",
         "\"{}\" será apagado para sempre.",
     ),
+    (
+        "Abajo a la izquierda, el estado de la máquina: procesador, memoria, disco y red.",
+        "No canto inferior esquerdo, o estado da máquina: processador, memória, disco e rede.",
+    ),
     ("Abrir {}", "Abrir {}"),
     (
         "Amenaza bloqueada en {}: {}. Quedó en cuarentena ({}).",
@@ -2249,6 +2504,14 @@ static PT_F: &[(&str, &str)] = &[
         "Ameaça em {}: {}. Não foi possível pôr em quarentena: {}",
     ),
     ("Archivos · {}", "Arquivos · {}"),
+    (
+        "Arriba a la izquierda está la barra con tus aplicaciones: archivos, terminal, música y más.",
+        "No canto superior esquerdo fica a barra com seus aplicativos: arquivos, terminal, música e mais.",
+    ),
+    (
+        "Bienvenido a JARVIS-OS, {}. Te muestro dónde está cada cosa.",
+        "Bem-vindo ao JARVIS-OS, {}. Vou te mostrar onde fica cada coisa.",
+    ),
     ("Buenas noches, {}.", "Boa noite, {}."),
     ("Buenas tardes, {}.", "Boa tarde, {}."),
     ("Buenos días, {}.", "Bom dia, {}."),
@@ -2278,13 +2541,29 @@ static PT_F: &[(&str, &str)] = &[
         "En esta sesión: {} archivos revisados, {} amenazas",
         "Nesta sessão: {} arquivos verificados, {} ameaças",
     ),
+    (
+        "Encantado, {}. Ahora una contraseña para proteger tu sesión.",
+        "Prazer, {}. Agora uma senha para proteger sua sessão.",
+    ),
     ("Escritorio {} de {}", "Área de trabalho {} de {}"),
+    (
+        "Eso es todo. Estoy a tu disposición.",
+        "É isso. Estou à sua disposição.",
+    ),
     ("Firewall: bloqueó {} ({})", "Firewall: bloqueou {} ({})"),
     (
         "Funciona: respuesta {} con {} bytes",
         "Funciona: resposta {} com {} bytes",
     ),
     ("Gráfico: {}", "Gráfico: {}"),
+    (
+        "INSTALACIÓN DE JARVIS-OS · PASO {} DE 4",
+        "INSTALAÇÃO DO JARVIS-OS · PASSO {} DE 4",
+    ),
+    (
+        "La tecla Windows abre el menú de inicio; Windows + X, el menú rápido.",
+        "A tecla Windows abre o menu iniciar; Windows + X, o menu rápido.",
+    ),
     (
         "LÍN {} · COL {} · CTRL+S GUARDAR",
         "LIN {} · COL {} · CTRL+S SALVAR",
@@ -2314,6 +2593,10 @@ static PT_F: &[(&str, &str)] = &[
     (
         "Papelera vacía ({} elementos).",
         "Lixeira esvaziada ({} itens).",
+    ),
+    (
+        "Para hablar conmigo, abrí mi consola: el último ícono de la barra.",
+        "Para falar comigo, abra meu console: o último ícone da barra.",
     ),
     ("Permitir: {}", "Permitir: {}"),
     ("Regla {}", "Regra {}"),

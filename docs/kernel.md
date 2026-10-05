@@ -68,8 +68,14 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   en una y se escribe en la otra; las dos se conectan a un **relé** (`cargo xtask relay`) que solo
   ve bytes cifrados. Si las dos cambian el mismo archivo, gana el cambio más nuevo y el otro queda
   como `nombre (conflicto de PC2).ext`; un borrado remoto va a la Papelera.
-- **ISO**: `cargo xtask iso` arma `target/jarvis-os.iso`, que arranca como CD (UEFI). Sin disco,
-  arranca en **modo en vivo**: un FAT32 en RAM de 48 MiB (lo que se guarda se pierde al apagar).
+- **ISO**: `cargo xtask iso` arma `target/jarvis-os.iso`, que arranca como CD (UEFI de 64 bits:
+  en VirtualBox, tipo "Other/Unknown (64-bit)" con EFI). Sin disco, arranca en **modo en vivo**: un
+  FAT32 en RAM de 48 MiB (lo que se guarda se pierde al apagar).
+- **Asistente de instalación** (desktop/src/setup.rs): en vivo, JARVIS pide un nombre de usuario,
+  una contraseña (dos veces) y un disco vacío, e instala ahí (desde la ISO o un pendrive). La
+  contraseña queda hasheada en `/Sistema/config.ini` del disco nuevo; al arrancar desde él se
+  inicia sesión con ella y JARVIS presenta el sistema la primera vez (`presentacion=si`). Esc en
+  la bienvenida: probar sin instalar.
 - **Varios monitores**: con la placa virtio-gpu (QEMU la trae con una salida por monitor de la
   PC), extender, duplicar o usar uno solo (Win+P o Configuración → Pantallas); el segundo a la
   derecha o abajo, y cuál es el principal. Win+Shift+←/→ lleva una ventana al otro monitor;
@@ -117,7 +123,8 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
 - **Configuración** (Win+I): fondo de pantalla, apariencia, tipografía, ventanas, idioma, zona horaria, reloj, red, Brave,
   sonido, mouse, teclado, gestos con la cámara, programas, aplicaciones predeterminadas (con qué
   app se abre cada tipo de archivo), almacenamiento, PIN de bloqueo y firewall. Se guarda en
-  `/Sistema/config.ini`.
+  `/Sistema/config.ini`. El PIN no queda en texto: se guarda `pin_hash` (PBKDF2-HMAC-SHA256,
+  100 000 vueltas, sal al azar; desktop/src/pin.rs) y una línea `pin=` vieja se hashea al leerla.
 - **Firewall**: reglas por sitio, puerto y app (`ufw` en la terminal o Configuración →
   Firewall). Lo bloqueado queda en `/Sistema/firewall.log`.
 - **`snap`** (tienda propia con canales y revisiones; búsqueda y descarga en Snapcraft) y
@@ -491,6 +498,17 @@ firmware UEFI (OVMF en QEMU)
   después se escriben el MBR protector, la GPT y la partición de datos. La tabla se escribe
   **después** de la copia, así un error a la mitad deja el disco "vacío" para reintentar, y se
   vuelve a verificar que esté vacío justo antes de escribir.
+- **Instalar desde un CD.** Desde la ISO no hay GPT de donde copiar: la partición de arranque es
+  la imagen EFI que señala el catálogo de El Torito (drivers/src/iso.rs). El catálogo guarda su
+  tamaño en 16 bits (sectores de 512) y una imagen de más de 32 MiB pone 0, así que el tamaño
+  sale del BPB del propio FAT. Las lectoras se leen con paquetes SCSI (READ(10), bloques de
+  2048) por IDE (kernel/src/ide.rs, PIO) o por AHCI (bit ATAPI de la cabecera y el paquete en la
+  tabla del comando), y se ven como discos de 512 de solo lectura. Al terminar, la lectora IDE
+  expulsa el CD (START STOP UNIT), así el reinicio no vuelve a la ISO.
+- **IDE por PIO.** VirtualBox pone por defecto una controladora IDE (PIIX), que el kernel no veía:
+  ni el disco ni el CD. Sin DMA ni interrupciones (nIEN): se espera mirando el estado y los datos
+  pasan con `rep insw`/`rep outsw`, que las máquinas virtuales atienden de a bloques. Un comando
+  LBA48 escribe dos veces los registros de conteo y dirección: primero los bytes altos.
 - **Un bug de lectura desordenada.** El anillo de eventos de xHCI se leía de a 16 bytes de una
   vez; con transferencias largas llegaba un evento "bien" con el puntero de la vuelta anterior
   (0) y la lectura quedaba sin respuesta. La controladora escribe la palabra del ciclo **al
@@ -781,7 +799,9 @@ firmware UEFI (OVMF en QEMU)
   propio (lo encontró la prueba con dos QEMU, no los tests en memoria).
 - **El Torito**: una ISO 9660 mínima (descriptores, tabla de rutas, raíz) con un catálogo que
   apunta a una imagen FAT "sin emulación" para EFI: la partición EFI que ya genera el bootloader,
-  sacada de la tabla GPT. El firmware la monta y ejecuta `EFI/BOOT/BOOTX64.EFI`.
+  sacada de la tabla GPT. El firmware la monta y ejecuta `EFI/BOOT/BOOTX64.EFI`. Es solo para
+  UEFI de 64 bits: un firmware BIOS o UEFI de 32 bits (VirtualBox con tipo "Other/Unknown" a
+  secas) dice "No bootable medium found" o "Not Found".
 - **virtio moderno**: el disco y la red usan la interfaz vieja (por puertos). La placa de video solo
   existe en la moderna, con los registros en memoria: su dirección sale de la lista de
   "capacidades" PCI, y hay que mapearla **sin caché** (`paging.rs`), porque un registro de un
@@ -984,7 +1004,7 @@ puntos de acceso de mentira, y el registro del arranque dice qué pasó).
 | **K10** ✅ | **TLS en el kernel** (sin puente, ADR 0009): entropía y generador ChaCha20 ✅; cliente TLS 1.3/1.2 (rustls `no_std` con proveedor propio) ✅; HTTPS directo ✅; decodificadores PNG (propio) y JPEG (`zune-jpeg`) ✅ | Criptografía, certificados, compresión |
 | **K11** ✅ | Espacio de usuario (ADR 0010): ring 3, syscalls, cargador ELF ✅. Los primeros programas de Linux estáticos ✅; sockets (y el firewall en la pila de red) ✅; un intérprete de JavaScript (Boa, `apt install js`) ✅. Brave **nativo** (sin el anfitrión) necesita además bibliotecas dinámicas, hilos, un servidor gráfico y mucha memoria: es la meta de este camino | Aislamiento, ABI |
 | **K12** ✅ | Audio y video: salida por virtio-sound con su propia tarea ✅; mezclador, WAV e IMA ADPCM propios ✅; la voz de JARVIS suena en JARVIS-OS y la envolvente de la esfera sale del audio que suena ✅; Música con archivos y el sintetizador ✅; videos AVI (MJPEG + audio) en el Visor ✅. HDA queda para K13 (hardware real) | Drivers de audio, códecs |
-| **K13** ✅ | Hardware real (ADR 0011): ACPI (tablas propias y AML), APIC y MSI ✅; discos SATA (AHCI) y NVMe con GPT ✅; placas de red e1000/e1000e, RTL8139 y RTL8168 ✅; USB (xHCI): teclado, mouse, pendrives y hubs ✅; sonido HDA ✅; sensores de temperatura (Intel, AMD, ACPI) y registro del arranque ✅; instalador desde el pendrive a un disco vacío ✅. La suspensión S3 queda para cuando haya un driver de video (ver "Lo que se aprendió") | Drivers reales |
+| **K13** ✅ | Hardware real (ADR 0011): ACPI (tablas propias y AML), APIC y MSI ✅; discos SATA (AHCI) y NVMe con GPT ✅; placas de red e1000/e1000e, RTL8139 y RTL8168 ✅; USB (xHCI): teclado, mouse, pendrives y hubs ✅; sonido HDA ✅; sensores de temperatura (Intel, AMD, ACPI) y registro del arranque ✅; instalador desde el pendrive o la ISO a un disco vacío, con asistente (usuario, contraseña y presentación de JARVIS) ✅; discos y lectoras IDE ✅. La suspensión S3 queda para cuando haya un driver de video (ver "Lo que se aprendió") | Drivers reales |
 | **K14** ✅ | **Wi-Fi** (ADR 0012), en 4 etapas: 1) tramas 802.11, RSN, WPA2-PSK (PMK, PTK, saludos de 4 vías y de grupo) y CCMP en `jarvis-wifi`, cruzados contra Python ✅; 2) driver de la RTL8821CE (port de rtw88: encendido, efuse, firmware por la página reservada, tablas de Realtek, canales, potencia, antena sin Bluetooth) y su firmware en el ramdisk del arranque ✅; 3) la estación (buscar, autenticar, asociar, saludo, datos cifrados), cable y Wi-Fi juntos con DHCP al cambiar de conexión, y Wi-Fi en Configuración → Red ✅; 4) 5 GHz (con los canales de radar solo escuchando), 802.11n/ac con WMM y reconexión con espera ✅. Falta verificarlo en la PC. El ahorro de energía queda para después | Redes inalámbricas, criptografía de enlace, firmware de dispositivos |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),

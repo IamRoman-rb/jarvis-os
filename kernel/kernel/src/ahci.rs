@@ -13,10 +13,12 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use jarvis_drivers::ahci::{
-    ATA_FLUSH_CACHE_EXT, ATA_IDENTIFY, ATA_READ_DMA_EXT, ATA_WRITE_DMA_EXT, ATA_WRITE_DMA_FUA_EXT,
-    IS_TFES, SIG_SATA, TFD_BUSY, TFD_DRQ, TFD_ERR, command_header, command_table_size, h2d_fis,
-    parse_identify, prdt_entry,
+    ATA_FLUSH_CACHE_EXT, ATA_IDENTIFY, ATA_IDENTIFY_PACKET, ATA_READ_DMA_EXT, ATA_WRITE_DMA_EXT,
+    ATA_WRITE_DMA_FUA_EXT, IS_TFES, SIG_ATAPI, SIG_SATA, TFD_BUSY, TFD_DRQ, TFD_ERR,
+    command_header, command_table_size, h2d_fis, packet_fis, packet_header, parse_identify,
+    prdt_entry,
 };
+use jarvis_drivers::ide::{READ_CAPACITY, parse_capacity, read10};
 use jarvis_fs::{BlockDevice, IoError, SECTOR_SIZE};
 
 use crate::mmio::{Mmio, wait_until};
@@ -66,6 +68,8 @@ pub struct AhciDisk {
     bounce: *mut u8,
     sectors: u64,
     fua: bool,
+    /// Una lectora de CD/DVD (ATAPI): bloques de 2048, solo lectura. `sectors` cuenta de a 512.
+    cd: bool,
     pub model: String,
 }
 
@@ -111,10 +115,11 @@ pub fn probe() -> Vec<AhciDisk> {
             }
             let port = hba.sub(0x100 + n * 0x80, 0x80);
             // DET = 3: hay un dispositivo y la conexión está establecida.
-            if port.r32(PX_SSTS) & 0xF != 3 || port.r32(PX_SIG) != SIG_SATA {
+            let sig = port.r32(PX_SIG);
+            if port.r32(PX_SSTS) & 0xF != 3 || (sig != SIG_SATA && sig != SIG_ATAPI) {
                 continue;
             }
-            match AhciDisk::start(hba, port, n, cap, msi) {
+            match AhciDisk::start(hba, port, n, cap, msi, sig == SIG_ATAPI) {
                 Some(d) => {
                     serial_println!(
                         "AHCI_DISCO puerto {n}: \"{}\", {} MiB",
@@ -145,7 +150,14 @@ fn take_ownership(hba: &Mmio) {
 }
 
 impl AhciDisk {
-    fn start(hba: Mmio, port: Mmio, number: usize, cap: u32, msi: bool) -> Option<AhciDisk> {
+    fn start(
+        hba: Mmio,
+        port: Mmio,
+        number: usize,
+        cap: u32,
+        msi: bool,
+        cd: bool,
+    ) -> Option<AhciDisk> {
         // Detener el puerto antes de cambiarle las listas (§10.1.2).
         port.w32(PX_CMD, port.r32(PX_CMD) & !CMD_ST);
         let t = time::millis();
@@ -191,8 +203,34 @@ impl AhciDisk {
             bounce,
             sectors: 0,
             fua: false,
+            cd,
             model: String::new(),
         };
+        if cd {
+            disk.command(ATA_IDENTIFY_PACKET, 0, 1, false).ok()?;
+            // SAFETY: ídem abajo.
+            let raw = unsafe { core::slice::from_raw_parts(bounce, SECTOR_SIZE) };
+            disk.model = parse_identify(raw).map_or_else(|| "CD/DVD".into(), |i| i.model);
+            // La primera orden después de cambiar el disco responde "atención de unidad".
+            for _ in 0..3 {
+                if disk.packet(READ_CAPACITY, 8).is_ok() {
+                    // SAFETY: la respuesta (8 bytes) quedó en `bounce`.
+                    let r = unsafe { core::slice::from_raw_parts(bounce, 8) };
+                    if let Some((blocks, 2048)) = parse_capacity(r) {
+                        disk.sectors = blocks * 4;
+                        break;
+                    }
+                }
+            }
+            if disk.sectors == 0 {
+                // Lectora sin disco: el puerto queda apagado y sin interrupciones.
+                port.w32(PX_IE, 0);
+                port.w32(PX_CMD, port.r32(PX_CMD) & !(CMD_ST | CMD_FRE));
+                port.w32(PX_IS, u32::MAX);
+                return None;
+            }
+            return Some(disk);
+        }
         disk.command(ATA_IDENTIFY, 0, 1, false).ok()?;
         // SAFETY: `bounce` tiene al menos 512 bytes y la controladora terminó de escribirlos.
         let raw = unsafe { core::slice::from_raw_parts(bounce, SECTOR_SIZE) };
@@ -212,9 +250,33 @@ impl AhciDisk {
         Some(disk)
     }
 
-    /// Nombre para mostrar ("SATA 0: modelo").
+    /// Nombre para mostrar ("SATA 0: modelo", "CD SATA 2: modelo").
     pub fn name(&self) -> String {
-        format!("SATA {}: {}", self.number, self.model)
+        if self.cd {
+            format!("CD SATA {}: {}", self.number, self.model)
+        } else {
+            format!("SATA {}: {}", self.number, self.model)
+        }
+    }
+
+    pub fn is_cd(&self) -> bool {
+        self.cd
+    }
+
+    /// Un paquete SCSI (lectoras): la respuesta, de `bytes` bytes, queda en `bounce`.
+    fn packet(&mut self, pkt: [u8; 12], bytes: usize) -> Result<(), IoError> {
+        let fis = packet_fis();
+        let header = packet_header(1, dma::phys(self.table));
+        let prdt = prdt_entry(dma::phys(self.bounce), bytes.max(2) as u32);
+        // SAFETY: como en `command`; el paquete va en el área ACMD de la tabla (0x40–0x4F).
+        unsafe {
+            core::ptr::copy_nonoverlapping(fis.as_ptr(), self.table, fis.len());
+            core::ptr::copy_nonoverlapping(pkt.as_ptr(), self.table.add(0x40), pkt.len());
+            core::ptr::copy_nonoverlapping(prdt.as_ptr(), self.table.add(0x80), prdt.len());
+            core::ptr::copy_nonoverlapping(header.as_ptr(), self.header, header.len());
+        }
+        // (Sin disco en la lectora, los paquetes fallan: no es para avisar.)
+        self.issue(pkt[0], 0, false)
     }
 
     /// Manda un comando en la ranura 0 con `count` sectores del buffer intermedio (0: sin datos)
@@ -231,6 +293,11 @@ impl AhciDisk {
             core::ptr::copy_nonoverlapping(prdt.as_ptr(), self.table.add(0x80), prdt.len());
             core::ptr::copy_nonoverlapping(header.as_ptr(), self.header, header.len());
         }
+        self.issue(ata, lba, true)
+    }
+
+    /// Manda lo que quedó armado en la ranura 0 y espera.
+    fn issue(&mut self, ata: u8, lba: u64, log: bool) -> Result<(), IoError> {
         core::sync::atomic::fence(Ordering::SeqCst);
         self.port.w32(PX_IS, u32::MAX);
         self.port.w32(PX_CI, 1);
@@ -246,6 +313,9 @@ impl AhciDisk {
         self.hba.w32(IS, 1 << self.number);
         core::sync::atomic::fence(Ordering::SeqCst);
         if !done || self.port.r32(PX_TFD) & TFD_ERR != 0 {
+            if !log {
+                return Err(IoError);
+            }
             serial_println!(
                 "AHCI: error en el puerto {} (comando {ata:#x}, sector {lba}, TFD {:#x})",
                 self.number,
@@ -263,6 +333,9 @@ impl BlockDevice for AhciDisk {
     }
 
     fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), IoError> {
+        if self.cd {
+            return self.read_cd(lba, buf);
+        }
         for (i, chunk) in buf.chunks_mut(BOUNCE_SECTORS * SECTOR_SIZE).enumerate() {
             let count = chunk.len().div_ceil(SECTOR_SIZE);
             self.command(
@@ -279,6 +352,9 @@ impl BlockDevice for AhciDisk {
     }
 
     fn write(&mut self, lba: u64, buf: &[u8]) -> Result<(), IoError> {
+        if self.cd {
+            return Err(IoError);
+        }
         for (i, chunk) in buf.chunks(BOUNCE_SECTORS * SECTOR_SIZE).enumerate() {
             // SAFETY: ídem `read`.
             let dst = unsafe { core::slice::from_raw_parts_mut(self.bounce, chunk.len()) };
@@ -293,6 +369,33 @@ impl BlockDevice for AhciDisk {
         }
         if !self.fua {
             self.command(ATA_FLUSH_CACHE_EXT, 0, 0, false)?;
+        }
+        Ok(())
+    }
+}
+
+impl AhciDisk {
+    /// Lectura de una lectora vista en sectores de 512: se leen los bloques de 2048 que los
+    /// contienen (de a 64 KiB, lo que entra en `bounce`).
+    fn read_cd(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), IoError> {
+        const PER: u64 = (BOUNCE_SECTORS * SECTOR_SIZE / 2048) as u64;
+        let start = lba * 512;
+        let end = start + buf.len() as u64;
+        if end > self.sectors * 512 {
+            return Err(IoError);
+        }
+        let mut block = start / 2048;
+        while block * 2048 < end {
+            let n = PER.min((end - block * 2048).div_ceil(2048));
+            self.packet(read10(block as u32, n as u16), n as usize * 2048)?;
+            // SAFETY: la respuesta (`n` bloques, hasta 64 KiB) quedó en `bounce`.
+            let data = unsafe { core::slice::from_raw_parts(self.bounce, n as usize * 2048) };
+            let from = (block * 2048).max(start);
+            let to = ((block + n) * 2048).min(end);
+            buf[(from - start) as usize..(to - start) as usize].copy_from_slice(
+                &data[(from - block * 2048) as usize..(to - block * 2048) as usize],
+            );
+            block += n;
         }
         Ok(())
     }

@@ -14,7 +14,7 @@ use jarvis_drivers::gpt::{self, JARVIS_DATA, PartitionDevice};
 use jarvis_fs::{BlockDevice, FileSystem, Timestamp};
 use spin::Mutex;
 
-use crate::{ahci, nvme, serial_println, xhci};
+use crate::{ahci, ide, nvme, serial_println, xhci};
 
 pub type AnyDisk = Box<dyn BlockDevice + Send>;
 
@@ -22,24 +22,45 @@ pub type AnyDisk = Box<dyn BlockDevice + Send>;
 pub struct Found {
     /// Para mostrar: "SATA 0: WD Green 2.5 480GB".
     pub name: String,
+    /// Una lectora de CD/DVD: se puede leer (el instalador copia el arranque de la ISO), nunca
+    /// es destino.
+    pub read_only: bool,
     pub disk: AnyDisk,
 }
 
 /// Los discos que no son el del sistema.
 static SPARE: Mutex<Vec<Found>> = Mutex::new(Vec::new());
 
-/// Busca los discos SATA, NVMe y USB (esto último arranca también el teclado y el mouse USB).
+/// Busca los discos SATA, NVMe, IDE y USB (esto último arranca también el teclado y el mouse
+/// USB), y las lectoras de CD/DVD IDE.
 pub fn probe() -> Vec<Found> {
     let mut found = Vec::new();
     for d in ahci::probe() {
         found.push(Found {
             name: d.name(),
+            read_only: d.is_cd(),
             disk: Box::new(d),
         });
     }
     for d in nvme::probe() {
         found.push(Found {
             name: d.name(),
+            read_only: false,
+            disk: Box::new(d),
+        });
+    }
+    let (ide_disks, cds) = ide::probe();
+    for d in ide_disks {
+        found.push(Found {
+            name: d.name(),
+            read_only: false,
+            disk: Box::new(d),
+        });
+    }
+    for d in cds {
+        found.push(Found {
+            name: d.name(),
+            read_only: true,
             disk: Box::new(d),
         });
     }
@@ -50,6 +71,9 @@ pub fn probe() -> Vec<Found> {
 /// Saca de la lista el primer disco con partición de JARVIS y devuelve esa partición.
 pub fn take_system(found: &mut Vec<Found>) -> Option<(String, PartitionDevice<AnyDisk>)> {
     for i in 0..found.len() {
+        if found[i].read_only {
+            continue;
+        }
         let Some(parts) = gpt::read(&mut *found[i].disk) else {
             serial_println!("DISCO {}: sin GPT", found[i].name);
             continue;
