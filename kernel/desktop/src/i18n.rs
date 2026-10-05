@@ -136,6 +136,10 @@ static EN: &[(&str, &str)] = &[
         "Opens the PC's browser at claude.ai: choose \"Continue with Google\"",
     ),
     (
+        "Abre el navegador de la PC para entrar",
+        "Opens the PC's browser to sign in",
+    ),
+    (
         "Abre la terminal con la lista de paquetes (apt list)",
         "Opens the terminal with the package list (apt list)",
     ),
@@ -157,6 +161,7 @@ static EN: &[(&str, &str)] = &[
     ("Acoplar a la izquierda", "Snap left"),
     ("Acoplar a los bordes", "Snap to edges"),
     ("Activado", "On"),
+    ("Agente principal", "Main agent"),
     ("Agosto", "August"),
     ("Almacenamiento", "Storage"),
     ("Alto contraste", "High contrast"),
@@ -214,6 +219,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Bordes, íconos activos, el cursor de texto y la esfera",
         "Borders, active icons, the text cursor and the sphere",
+    ),
+    (
+        "Borra la clave o la sesión guardada en el anfitrión",
+        "Deletes the key or session stored on the host",
     ),
     (
         "Borra para siempre lo que hay en /Papelera",
@@ -291,6 +300,7 @@ static EN: &[(&str, &str)] = &[
     ("Configuración", "Settings"),
     ("Configuración (Win+I)", "Settings (Win+I)"),
     ("Configuración (prueba de red)", "Settings (network test)"),
+    ("Consejo de agentes", "Agent council"),
     ("Consola JARVIS", "JARVIS console"),
     ("Consola JARVIS (Win+R)", "JARVIS console (Win+R)"),
     (
@@ -311,6 +321,7 @@ static EN: &[(&str, &str)] = &[
     ("Código nuevo", "New code"),
     ("DESCONECTAR", "DISCONNECT"),
     ("DESINSTALAR", "UNINSTALL"),
+    ("DESVINCULAR", "UNLINK"),
     ("DETENER", "STOP"),
     ("DISCO", "DISK"),
     ("DISTRIBUCIONES (WIN+Z)", "LAYOUTS (WIN+Z)"),
@@ -397,6 +408,10 @@ static EN: &[(&str, &str)] = &[
         "The one the bar opens: Brave (on the host) or JARVIS's simple one",
     ),
     (
+        "El que contesta y actúa sobre JARVIS-OS (si falla, contesta otro)",
+        "The one that answers and acts on JARVIS-OS (if it fails, another answers)",
+    ),
+    (
         "El reloj de la máquina está en UTC",
         "The machine clock is in UTC",
     ),
@@ -410,6 +425,10 @@ static EN: &[(&str, &str)] = &[
     ("Enero", "January"),
     ("Enter guarda · Esc cancela", "Enter saves · Esc cancels"),
     ("Enter para abrir la carpeta", "Enter to open the folder"),
+    (
+        "Enviando la clave al anfitrión...",
+        "Sending the key to the host...",
+    ),
     (
         "Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3).",
         "That network uses a security JARVIS-OS does not support (WEP, WPA or WPA3).",
@@ -466,6 +485,10 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Fondo de escritorio", "Desktop background"),
     ("Formato de 24 horas", "24-hour format"),
+    (
+        "Formulario: pegá la clave y Enter (se valida y se guarda en el anfitrión)",
+        "Form: paste the key and press Enter (it is checked and stored on the host)",
+    ),
     ("GENERAR", "GENERATE"),
     ("GOOGLE", "GOOGLE"),
     ("GUARDAR COMO", "SAVE AS"),
@@ -590,6 +613,10 @@ static EN: &[(&str, &str)] = &[
         "What you put here shows up on the other machines",
     ),
     ("Los da el servidor DHCP", "Given by the DHCP server"),
+    (
+        "Los demás agentes vinculados opinan y el principal decide",
+        "The other linked agents give their opinion and the main one decides",
+    ),
     ("MEMORIA", "MEMORY"),
     ("MEMORIA (HEAP DEL NÚCLEO)", "MEMORY (KERNEL HEAP)"),
     ("MODIFICADO", "MODIFIED"),
@@ -941,6 +968,10 @@ static EN: &[(&str, &str)] = &[
     ("Ver lo bloqueado", "View what's blocked"),
     ("Verde", "Green"),
     ("Versión", "Version"),
+    (
+        "Vinculalo con Google o con el formulario",
+        "Link it with Google or with the form",
+    ),
     ("Violeta", "Violet"),
     ("Visor de imágenes", "Image viewer"),
     ("Volumen", "Volume"),
@@ -969,6 +1000,8 @@ static EN: &[(&str, &str)] = &[
     ("archivo comprimido", "archive"),
     ("audio", "audio"),
     ("carpeta", "folder"),
+    ("con Google", "with Google"),
+    ("con clave", "with key"),
     ("con sesión", "signed in"),
     ("conectado", "connected"),
     ("contraseña incorrecta", "wrong password"),
@@ -1019,6 +1052,7 @@ static EN: &[(&str, &str)] = &[
     ("sin placa", "no adapter"),
     ("sin sensor", "no sensor"),
     ("sin sesión", "signed out"),
+    ("sin vincular", "not linked"),
     ("sá", "sa"),
     ("terminó", "finished"),
     ("texto", "text"),
@@ -1062,6 +1096,10 @@ static PT: &[(&str, &str)] = &[
         "Abre o navegador do PC em claude.ai: escolha \"Continuar com o Google\"",
     ),
     (
+        "Abre el navegador de la PC para entrar",
+        "Abre o navegador do PC para entrar",
+    ),
+    (
         "Abre la terminal con la lista de paquetes (apt list)",
         "Abre o terminal com a lista de pacotes (apt list)",
     ),
@@ -1083,6 +1121,7 @@ static PT: &[(&str, &str)] = &[
     ("Acoplar a la izquierda", "Encaixar à esquerda"),
     ("Acoplar a los bordes", "Encaixar nas bordas"),
     ("Activado", "Ativado"),
+    ("Agente principal", "Agente principal"),
     ("Agosto", "Agosto"),
     ("Almacenamiento", "Armazenamento"),
     ("Alto contraste", "Alto contraste"),
@@ -1143,6 +1182,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Bordes, íconos activos, el cursor de texto y la esfera",
         "Bordas, ícones ativos, o cursor de texto e a esfera",
+    ),
+    (
+        "Borra la clave o la sesión guardada en el anfitrión",
+        "Apaga a chave ou a sessão guardada no anfitrião",
     ),
     (
         "Borra para siempre lo que hay en /Papelera",
@@ -1232,6 +1275,7 @@ static PT: &[(&str, &str)] = &[
         "Configuración (prueba de red)",
         "Configurações (teste de rede)",
     ),
+    ("Consejo de agentes", "Conselho de agentes"),
     ("Consola JARVIS", "Console JARVIS"),
     ("Consola JARVIS (Win+R)", "Console JARVIS (Win+R)"),
     (
@@ -1252,6 +1296,7 @@ static PT: &[(&str, &str)] = &[
     ("Código nuevo", "Código novo"),
     ("DESCONECTAR", "DESCONECTAR"),
     ("DESINSTALAR", "DESINSTALAR"),
+    ("DESVINCULAR", "DESVINCULAR"),
     ("DETENER", "PARAR"),
     ("DISCO", "DISCO"),
     ("DISTRIBUCIONES (WIN+Z)", "LAYOUTS (WIN+Z)"),
@@ -1341,6 +1386,10 @@ static PT: &[(&str, &str)] = &[
         "O que a barra abre: Brave (no anfitrião) ou o simples do JARVIS",
     ),
     (
+        "El que contesta y actúa sobre JARVIS-OS (si falla, contesta otro)",
+        "O que responde e age no JARVIS-OS (se falhar, outro responde)",
+    ),
+    (
         "El reloj de la máquina está en UTC",
         "O relógio da máquina está em UTC",
     ),
@@ -1354,6 +1403,10 @@ static PT: &[(&str, &str)] = &[
     ("Enero", "Janeiro"),
     ("Enter guarda · Esc cancela", "Enter salva · Esc cancela"),
     ("Enter para abrir la carpeta", "Enter para abrir a pasta"),
+    (
+        "Enviando la clave al anfitrión...",
+        "Enviando a chave ao anfitrião...",
+    ),
     (
         "Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3).",
         "Essa rede usa uma segurança que o JARVIS-OS não suporta (WEP, WPA ou WPA3).",
@@ -1410,6 +1463,10 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Fondo de escritorio", "Papel de parede"),
     ("Formato de 24 horas", "Formato de 24 horas"),
+    (
+        "Formulario: pegá la clave y Enter (se valida y se guarda en el anfitrión)",
+        "Formulário: cole a chave e Enter (é validada e guardada no anfitrião)",
+    ),
     ("GENERAR", "GERAR"),
     ("GOOGLE", "GOOGLE"),
     ("GUARDAR COMO", "SALVAR COMO"),
@@ -1543,6 +1600,10 @@ static PT: &[(&str, &str)] = &[
         "O que você colocar aqui aparece nas outras máquinas",
     ),
     ("Los da el servidor DHCP", "Fornecidos pelo servidor DHCP"),
+    (
+        "Los demás agentes vinculados opinan y el principal decide",
+        "Os outros agentes vinculados opinam e o principal decide",
+    ),
     ("MEMORIA", "MEMÓRIA"),
     ("MEMORIA (HEAP DEL NÚCLEO)", "MEMÓRIA (HEAP DO NÚCLEO)"),
     ("MODIFICADO", "MODIFICADO"),
@@ -1900,6 +1961,10 @@ static PT: &[(&str, &str)] = &[
     ("Ver lo bloqueado", "Ver o bloqueado"),
     ("Verde", "Verde"),
     ("Versión", "Versão"),
+    (
+        "Vinculalo con Google o con el formulario",
+        "Vincule com o Google ou com o formulário",
+    ),
     ("Violeta", "Violeta"),
     ("Visor de imágenes", "Visualizador de imagens"),
     ("Volumen", "Volume"),
@@ -1931,6 +1996,8 @@ static PT: &[(&str, &str)] = &[
     ("archivo comprimido", "arquivo compactado"),
     ("audio", "áudio"),
     ("carpeta", "pasta"),
+    ("con Google", "com o Google"),
+    ("con clave", "com chave"),
     ("con sesión", "conectado"),
     ("conectado", "conectado"),
     ("contraseña incorrecta", "senha incorreta"),
@@ -1981,6 +2048,7 @@ static PT: &[(&str, &str)] = &[
     ("sin placa", "sem placa"),
     ("sin sensor", "sem sensor"),
     ("sin sesión", "sem sessão"),
+    ("sin vincular", "não vinculado"),
     ("sá", "sá"),
     ("terminó", "terminou"),
     ("texto", "texto"),
@@ -2022,6 +2090,7 @@ static EN_F: &[(&str, &str)] = &[
         "Desde {}: se copia el arranque y se crea la partición de datos",
         "From {}: the boot files are copied and the data partition is created",
     ),
+    ("Desvincular {}", "Unlink {}"),
     (
         "Dirección del puente inválida: {}",
         "Invalid bridge address: {}",
@@ -2125,6 +2194,8 @@ static EN_F: &[(&str, &str)] = &[
         "{} · has partitions: left untouched",
     ),
     ("{} · vacío", "{} · empty"),
+    ("{}: clave de API", "{}: API key"),
+    ("{}: iniciar sesión con Google", "{}: sign in with Google"),
     ("{}{} · Editor", "{}{} · Editor"),
     ("¿Mover \"{}\" a la Papelera?", "Move \"{}\" to the Trash?"),
     (
@@ -2158,6 +2229,7 @@ static PT_F: &[(&str, &str)] = &[
         "Desde {}: se copia el arranque y se crea la partición de datos",
         "De {}: a inicialização é copiada e a partição de dados é criada",
     ),
+    ("Desvincular {}", "Desvincular {}"),
     (
         "Dirección del puente inválida: {}",
         "Endereço da ponte inválido: {}",
@@ -2264,6 +2336,8 @@ static PT_F: &[(&str, &str)] = &[
         "{} · tem partições: não é tocado",
     ),
     ("{} · vacío", "{} · vazio"),
+    ("{}: clave de API", "{}: chave de API"),
+    ("{}: iniciar sesión con Google", "{}: entrar com o Google"),
     ("{}{} · Editor", "{}{} · Editor"),
     (
         "¿Mover \"{}\" a la Papelera?",

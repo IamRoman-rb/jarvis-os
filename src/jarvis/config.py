@@ -5,6 +5,11 @@ Ejemplo (todo es opcional):
     modelo = "claude-sonnet-5"
     proyectos = "C:/Users/USER/Documents/proyectos"
     puerto = 8121
+
+    [agentes]  # el modelo de cada agente vinculado (Configuración → Asistente)
+    gemini = "gemini-2.5-pro"
+    chatgpt = "gpt-5"
+    deepseek = "deepseek-reasoner"
 """
 
 from __future__ import annotations
@@ -30,6 +35,8 @@ class Config:
     puerto: int = DEFAULT_PORT
     #: La voz de JARVIS: "jarvis" (grave, con toque de IA) o "daniela".
     voz: str = "jarvis"
+    #: El modelo de Gemini, ChatGPT o DeepSeek (vacío = el de `agent/providers.py`).
+    agentes: dict[str, str] = field(default_factory=dict)
 
     @staticmethod
     def path() -> Path:
@@ -53,4 +60,9 @@ class Config:
             proyectos=Path(proyectos) if isinstance(proyectos, str) else _default_projects(),
             puerto=puerto if isinstance(puerto, int) and 0 < puerto < 65536 else DEFAULT_PORT,
             voz=str(data.get("voz", "jarvis")),
+            agentes={
+                str(k): v
+                for k, v in (data.get("agentes") or {}).items()
+                if isinstance(v, str) and v
+            },
         )

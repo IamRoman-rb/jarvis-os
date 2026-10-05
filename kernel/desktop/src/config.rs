@@ -263,6 +263,11 @@ pub struct Config {
     pub sync_code: String,
     /// Dónde está el relé: `host:puerto`.
     pub sync_relay: String,
+    // El cerebro (Configuración → Asistente)
+    /// El agente principal de JARVIS: índice de [`crate::brain::AGENTS`] (0 = Claude).
+    pub ai_lead: u8,
+    /// Los demás agentes vinculados opinan antes de que conteste el principal.
+    pub ai_council: bool,
     // Cuentas y seguridad
     pub user: String,
     pub hostname: String,
@@ -324,6 +329,8 @@ impl Default for Config {
             wifi_pmk: None,
             sync_code: String::new(),
             sync_relay: "10.0.2.2:8120".into(),
+            ai_lead: 0,
+            ai_council: false,
             user: "roman".into(),
             hostname: "jarvis".into(),
             pin: String::new(),
@@ -457,6 +464,13 @@ impl Config {
                     }
                 }
                 "wifi_clave" => c.wifi_pmk = unhex(v).and_then(|b| b.try_into().ok()),
+                "ia_principal" => {
+                    c.ai_lead = crate::brain::AGENTS
+                        .iter()
+                        .position(|(id, _)| *id == v)
+                        .unwrap_or(0) as u8
+                }
+                "ia_consejo" => c.ai_council = yes(v),
                 "usuario" if valid_name(v) => c.user = v.into(),
                 "equipo" if valid_name(v) => c.hostname = v.into(),
                 "pin" if v.chars().all(|ch| ch.is_ascii_digit()) && v.len() <= 8 => {
@@ -548,6 +562,11 @@ impl Config {
             ),
             format!("sync_codigo={}", self.sync_code),
             format!("sync_rele={}", self.sync_relay),
+            format!(
+                "ia_principal={}",
+                crate::brain::AGENTS[(self.ai_lead as usize).min(3)].0
+            ),
+            format!("ia_consejo={}", yn(self.ai_council)),
             format!("usuario={}", self.user),
             format!("equipo={}", self.hostname),
             format!("pin={}", self.pin),
@@ -691,6 +710,8 @@ mod tests {
             display_mode: crate::display::Mode::Duplicate,
             display_vertical: true,
             display_primary: 1,
+            ai_lead: 3,
+            ai_council: true,
             ..Config::default()
         };
         let mut c = c;

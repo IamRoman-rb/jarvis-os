@@ -25,6 +25,8 @@ LEVELS: dict[str, int] = {
     "listar_proyectos": 1,
     "abrir_archivo": 1,
     "leer_terminal": 1,
+    # Le pasa la pregunta a otro agente que Roman vinculó él mismo (no toca JARVIS-OS).
+    "consultar_agente": 1,
     "escribir_archivo": 2,
     "crear_carpeta": 2,
     "copiar": 2,

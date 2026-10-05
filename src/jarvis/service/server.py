@@ -19,6 +19,8 @@ from typing import Any
 
 from jarvis import account
 from jarvis.agent.brain import Brain, BrainError
+from jarvis.agent.council import LEADS, Mode
+from jarvis.agent.providers import PROVIDERS, AgentError, AgentHub
 from jarvis.projects import ProjectError, ProjectRunner, list_projects, resolve_project
 from jarvis.protocol import MAX_LINE, Message, ProtocolError, decode, encode
 from jarvis.service.voicehub import VoiceHub
@@ -32,7 +34,7 @@ CONFIRM_TIMEOUT = 120.0
 
 
 #: Tools que se atienden acá, en el anfitrión (no en el kernel).
-HOST_TOOLS = {"listar_proyectos", "abrir_proyecto"}
+HOST_TOOLS = {"listar_proyectos", "abrir_proyecto", "consultar_agente"}
 
 MakeProject = Callable[[Path, str, bool], ProjectRunner]
 AccountCall = Callable[[], Awaitable[account.Account]]
@@ -49,6 +51,8 @@ class Host:
     #: La cuenta de Claude (Configuración → Asistente). None = no se pregunta (tests).
     account_status: AccountCall | None = None
     account_login: AccountCall | None = None
+    #: Gemini, ChatGPT y DeepSeek (Configuración → Asistente). None = no se vinculan (tests).
+    agents: AgentHub | None = None
 
 
 class Session:
@@ -70,6 +74,9 @@ class Session:
         self._calls = itertools.count(1)
         self._pending: dict[int, asyncio.Future[Any]] = {}
         self._login: asyncio.Task[None] | None = None
+        self._linking: dict[str, asyncio.Task[None]] = {}
+        #: El agente principal y el consejo (los elige Roman en Configuración → Asistente).
+        self.mode = Mode()
 
     async def _ask(self, msg: dict[str, Any], wait: float) -> Any:
         call = next(self._calls)
@@ -104,6 +111,8 @@ class Session:
             return False
 
     async def _host_call(self, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
+        if tool == "consultar_agente":
+            return await self._consult(str(args.get("agente", "")), str(args.get("pregunta", "")))
         if self.host is None:
             return False, "Este JARVIS no tiene carpeta de proyectos."
         root = self.host.projects
@@ -124,6 +133,57 @@ class Session:
         self.project = runner
         self.project_task = asyncio.create_task(self._run_project(runner))
         return True, f"Abrí {path.name}: el avance se ve en la ventana Proyecto de JARVIS-OS."
+
+    async def _consult(self, agent: str, question: str) -> tuple[bool, str]:
+        from jarvis.agent.council import ADVISOR_PROMPT
+
+        hub = self.host.agents if self.host else None
+        agent = agent.strip().lower()
+        if hub is None:
+            return False, "Este JARVIS no tiene otros agentes."
+        if agent != "claude" and agent not in hub.linked():
+            linked = ", ".join(["claude", *hub.linked()])
+            return False, f"«{agent}» no está vinculado. Se puede consultar a: {linked}."
+        try:
+            return True, await asyncio.wait_for(hub.ask(agent, ADVISOR_PROMPT, question), 120.0)
+        except (AgentError, TimeoutError) as e:
+            return False, str(e) or "no contestó a tiempo"
+
+    def set_mode(self, msg: Message) -> None:
+        lead = msg.get("principal")
+        if isinstance(lead, str) and lead in LEADS:
+            self.mode.principal = lead
+        if isinstance(msg.get("consejo"), bool):
+            self.mode.consejo = msg["consejo"]
+
+    async def send_agents(self, only: str | None = None) -> None:
+        """El estado de los agentes (uno `agente` por cada uno)."""
+        hub = self.host.agents if self.host else None
+        if hub is None:
+            return
+        for m in hub.messages():
+            if only is None or m["id"] == only:
+                await self.send(m)
+
+    async def _link(self, agent: str, metodo: str, key: str) -> None:
+        hub = self.host.agents if self.host else None
+        if hub is None:
+            return
+        try:
+            if metodo == "clave":
+                hub.estados[agent] = "Validando la clave..."
+                await self.send_agents(agent)
+                await hub.link_key(agent, key)
+            else:
+                hub.estados[agent] = "Seguí en el navegador de la PC (entrá con Google)."
+                await self.send_agents(agent)
+                await hub.link_google(agent)
+        except AgentError as e:
+            hub.estados[agent] = str(e)
+        except Exception as e:  # el kernel tiene que enterarse de cualquier falla
+            log.exception("falló vincular %s", agent)
+            hub.estados[agent] = f"falla: {e}"
+        await self.send_agents(agent)
 
     async def _run_project(self, runner: ProjectRunner) -> None:
         async def emit(ev: str, text: str) -> None:
@@ -262,6 +322,34 @@ class Session:
                     'Seguí en el navegador de la PC: elegí "Continuar con Google".',
                 )
             )
+        elif t == "agentes":
+            await self.send_agents()
+        elif t == "agentes_modo":
+            self.set_mode(msg)
+        elif t == "vincular":
+            agent, metodo = msg.get("agente"), msg.get("metodo")
+            hub = self.host.agents if self.host else None
+            if hub is None or agent not in PROVIDERS:
+                raise ProtocolError("vincular: agente desconocido")
+            running = self._linking.get(agent)
+            if running is not None and not running.done():
+                hub.estados[agent] = "Ya hay un inicio de sesión en curso."
+                await self.send_agents(agent)
+                return
+            key = msg.get("clave")
+            self._linking[agent] = self._spawn(
+                self._link(agent, "clave" if metodo == "clave" else "google", str(key or ""))
+            )
+        elif t == "desvincular":
+            agent = msg.get("agente")
+            hub = self.host.agents if self.host else None
+            if hub is not None and isinstance(agent, str):
+                try:
+                    hub.unlink(agent)
+                except AgentError as e:
+                    log.info("desvincular: %s", e)
+                    return
+                await self.send_agents(agent)
         elif t == "escuchar":
             if self.host is not None and self.host.voice is not None:
                 self.host.voice.listen_now()
@@ -291,6 +379,7 @@ async def serve_connection(
             log.warning("token inválido desde %s", peer)
             return
         log.info("kernel conectado desde %s (%s)", peer, hello.get("equipo", "?"))
+        session.set_mode(hello)
         if host is not None and host.voice is not None:
             host.voice.session = session
             parlantes = hello.get("parlantes")
@@ -298,6 +387,7 @@ async def serve_connection(
         await session.send({"t": "listo", "voz": host is not None and host.voice is not None})
         if host is not None and host.account_status is not None:
             session._spawn(session.send_account(host.account_status))
+        await session.send_agents()
         while True:
             line = await reader.readline()
             if not line:

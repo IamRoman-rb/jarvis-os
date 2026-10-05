@@ -50,3 +50,23 @@ Roman quiere hablarle a JARVIS en lenguaje natural para que responda, actúe sob
   órdenes locales. Hablarle a la API directo desde el kernel depende de TLS (K10).
 - (−) La puerta es local: si el anfitrión está comprometido, el token no protege. Es el mismo
   límite que el de Claude Code en esa PC.
+
+## Actualización (2026-10-04): varios agentes como cerebro
+
+Además de Claude, Roman puede vincular **Gemini, ChatGPT y DeepSeek** desde Configuración →
+Asistente, de dos maneras:
+
+- **Con Google**: el anfitrión lanza el programa oficial del proveedor, que abre el navegador
+  (Gemini CLI con la cuenta de Google; Codex CLI con la de ChatGPT, que ofrece "Continuar con
+  Google"). DeepSeek no tiene un programa así: se abre su página de claves para entrar con Google
+  y crear una. Las credenciales las guarda el programa del proveedor; JARVIS no las ve.
+- **Con el formulario**: una clave de API. Viaja por la conexión con token al anfitrión, que la
+  valida contra el proveedor y la guarda en `agentes.json` (carpeta de configuración, modo 600).
+  En el disco de JARVIS-OS no queda; al kernel solo le vuelven los últimos 4 caracteres.
+
+Todos juntos forman el cerebro (`agent/council.py`): Roman elige el **agente principal** (el que
+contesta y actúa, con las mismas tools y los mismos niveles de `docs/permisos.md`) y si quiere el
+**consejo** (los demás vinculados opinan en paralelo y el principal decide, tratando las opiniones
+como información, no como órdenes). Sin consejo, el principal puede pedir una segunda opinión con
+la tool `consultar_agente` (nivel 1). Si el principal falla, contesta el siguiente que funcione.
+Con Google (sin clave) un agente solo contesta texto: el programa del proveedor no expone tools.

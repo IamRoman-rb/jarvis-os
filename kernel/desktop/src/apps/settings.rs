@@ -183,6 +183,14 @@ pub enum Opt {
     /// Iniciar sesión en Claude con Google (en el navegador del anfitrión).
     AiLogin,
     AiRefresh,
+    /// El agente principal (Claude, Gemini, ChatGPT o DeepSeek) y el consejo.
+    AiLead,
+    AiCouncil,
+    /// El agente N de `BrainService::agents`: vincularlo con Google, con el formulario (la
+    /// clave de API) o desvincularlo.
+    AiAgentGoogle(usize),
+    AiAgentKey(usize),
+    AiAgentUnlink(usize),
     SyncCode,
     SyncRelay,
     BraveToken,
@@ -890,7 +898,7 @@ impl Settings {
                 } else {
                     a.login.clone()
                 };
-                alloc::vec![
+                let mut rows = alloc::vec![
                     Row::new(
                         Opt::Info,
                         tr("Cerebro"),
@@ -922,7 +930,9 @@ impl Settings {
                         tr("Volver a preguntarle al anfitrión"),
                         Button(tr("ACTUALIZAR"))
                     ),
-                ]
+                ];
+                rows.extend(self.agent_rows(stats));
+                rows
             }
             Section::Sync => {
                 use crate::sync::Status;
@@ -1653,6 +1663,69 @@ impl Settings {
 
     // --- acciones -----------------------------------------------------------------------------
 
+    /// Configuración → Asistente: el agente principal, el consejo y, por cada agente (Gemini,
+    /// ChatGPT, DeepSeek), su estado, entrar con Google, el formulario y desvincular.
+    fn agent_rows(&self, stats: &crate::system::SystemStats) -> Vec<Row> {
+        use Control::*;
+        let lead = (self.cfg.ai_lead as usize).min(crate::brain::AGENTS.len() - 1);
+        let mut rows = alloc::vec![
+            Row::new(
+                Opt::AiLead,
+                tr("Agente principal"),
+                tr("El que contesta y actúa sobre JARVIS-OS (si falla, contesta otro)"),
+                Choice(crate::brain::AGENTS[lead].1.into())
+            ),
+            Row::new(
+                Opt::AiCouncil,
+                tr("Consejo de agentes"),
+                tr("Los demás agentes vinculados opinan y el principal decide"),
+                Toggle(self.cfg.ai_council)
+            ),
+        ];
+        for (i, a) in stats.brain_agents.iter().enumerate() {
+            let status = if a.linked {
+                let how = if a.method == "google" {
+                    tr("con Google")
+                } else {
+                    tr("con clave")
+                };
+                format!("{how} · {}", a.detail)
+            } else {
+                tr("sin vincular").into()
+            };
+            let detail = if a.state.is_empty() {
+                String::from(tr("Vinculalo con Google o con el formulario"))
+            } else {
+                a.state.clone()
+            };
+            rows.push(Row::new(Opt::Info, a.name.clone(), detail, Value(status)));
+            rows.push(Row::new(
+                Opt::AiAgentGoogle(i),
+                trf("{}: iniciar sesión con Google", &[&a.name]),
+                tr("Abre el navegador de la PC para entrar"),
+                Button(tr("GOOGLE")),
+            ));
+            rows.push(Row::new(
+                Opt::AiAgentKey(i),
+                trf("{}: clave de API", &[&a.name]),
+                tr("Formulario: pegá la clave y Enter (se valida y se guarda en el anfitrión)"),
+                Text {
+                    value: String::new(),
+                    secret: true,
+                },
+            ));
+            if a.linked {
+                rows.push(Row::new(
+                    Opt::AiAgentUnlink(i),
+                    trf("Desvincular {}", &[&a.name]),
+                    tr("Borra la clave o la sesión guardada en el anfitrión"),
+                    Button(tr("DESVINCULAR")),
+                ));
+            }
+        }
+        rows
+    }
+
     /// Las filas del Wi-Fi (K14): estado, la contraseña que falta, buscar y las redes vistas.
     fn wifi_rows(&self, stats: &crate::system::SystemStats) -> Vec<Row> {
         use crate::system::{WifiSecurity, WifiState};
@@ -1892,6 +1965,28 @@ impl Settings {
             }
             Opt::AiRefresh => {
                 ctx.out.brain.push(crate::brain::BrainOp::AccountStatus);
+                ctx.out.brain.push(crate::brain::BrainOp::AgentsStatus);
+                return;
+            }
+            Opt::AiLead => {
+                c.ai_lead = step(c.ai_lead as i32, crate::brain::AGENTS.len() as i32) as u8
+            }
+            Opt::AiCouncil => c.ai_council = !c.ai_council,
+            Opt::AiAgentGoogle(i) | Opt::AiAgentKey(i) | Opt::AiAgentUnlink(i) => {
+                let Some(a) = ctx.stats.brain_agents.get(i) else {
+                    return;
+                };
+                let id = a.id.clone();
+                match opt {
+                    Opt::AiAgentGoogle(_) => {
+                        ctx.out.brain.push(crate::brain::BrainOp::AgentGoogle(id))
+                    }
+                    Opt::AiAgentUnlink(_) => {
+                        ctx.out.brain.push(crate::brain::BrainOp::AgentUnlink(id))
+                    }
+                    _ if delta == 0 => self.editing = Some((opt, TextInput::new("", 200))),
+                    _ => {}
+                }
                 return;
             }
             Opt::SyncNewCode => {
@@ -2075,6 +2170,17 @@ impl Settings {
                 pmk: Some(pmk),
             });
             self.commit(ctx);
+            self.dirty = true;
+            return;
+        }
+        if let Opt::AiAgentKey(i) = opt {
+            // La clave va directo al anfitrión: en la configuración de JARVIS-OS no queda.
+            let key = input.text.trim().to_string();
+            if let (Some(a), false) = (ctx.stats.brain_agents.get(i), key.is_empty()) {
+                ctx.out
+                    .brain
+                    .push(crate::brain::BrainOp::AgentKey(a.id.clone(), key));
+            }
             self.dirty = true;
             return;
         }

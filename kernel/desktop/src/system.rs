@@ -195,6 +195,8 @@ pub struct SystemStats {
     pub brain_voice: bool,
     /// La cuenta de Claude del anfitrión (Configuración → Asistente).
     pub brain_account: crate::brain::Account,
+    /// Gemini, ChatGPT y DeepSeek: si están vinculados (Configuración → Asistente).
+    pub brain_agents: alloc::vec::Vec<crate::brain::AiAgent>,
     /// El micrófono de JARVIS-OS (virtio-sound), si el kernel encontró uno.
     pub mic: Option<crate::audio::MicInfo>,
     /// Las tareas del kernel (K9) y los cambios de contexto desde el arranque.

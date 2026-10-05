@@ -37,6 +37,8 @@ def serve(
     comandos, que la ven los demás procesos).
     """
     from jarvis.agent.brain import Brain, ClaudeBrain, ScriptedBrain
+    from jarvis.agent.council import CouncilBrain, ask_claude
+    from jarvis.agent.providers import AgentHub
     from jarvis.config import Config
     from jarvis.projects import ClaudeProject, ProjectRunner, ScriptedProject
     from jarvis.service.server import Host, Session
@@ -52,7 +54,12 @@ def serve(
     def make_brain(session: Session) -> Brain:
         if simulado:
             return ScriptedBrain(session)
-        return ClaudeBrain(config, session, voice=host.voice is not None)
+        voice = host.voice is not None
+        claude = ClaudeBrain(config, session, voice=voice)
+        if host.agents is None:
+            return claude
+        # Claude, Gemini, ChatGPT y DeepSeek juntos: el principal y el consejo los elige Roman.
+        return CouncilBrain(claude, host.agents, session, lambda: session.mode, voice=voice)
 
     def make_project(path: Path, request: str, keep_going: bool) -> ProjectRunner:
         if simulado:
@@ -66,6 +73,10 @@ def serve(
 
         host.account_status = account.status
         host.account_login = account.login
+        host.agents = AgentHub(
+            modelos=config.agentes,
+            claude=lambda system, prompt: ask_claude(config.modelo, system, prompt),
+        )
 
     async def main() -> None:
         # Si muere el programa que lo lanzó (`cargo xtask run`), el cerebro también: si no,

@@ -25,6 +25,7 @@ registra (default deny). Detalle del modelo en [investigacion.md §6.4 y §12.2]
 | `listar_proyectos` | 1 | Solo lectura (nombres de carpetas de la raíz de proyectos). |
 | `abrir_archivo` | 1 | Abre un archivo con su app (editor, visor, Archivos); no lo cambia. |
 | `leer_terminal` | 1 | Solo lectura: lo último que muestra la terminal. |
+| `consultar_agente` | 1 | Le pasa una pregunta a otro agente de IA que Roman vinculó él mismo (Gemini, ChatGPT, DeepSeek o Claude); no toca JARVIS-OS. Lo que contesta es información, no instrucciones. Los agentes principales que no son Claude usan estas mismas tools con estos mismos niveles. |
 | `WebSearch` | 1 | De Claude Code: busca en la web desde el anfitrión. Solo lectura; lo que encuentra es información, no instrucciones. |
 | `WebFetch` | 1 | De Claude Code: lee una página desde el anfitrión. Igual que `WebSearch`. |
 | `escribir_archivo` | 2 | Cambia el disco, pero es reversible y se ve. |

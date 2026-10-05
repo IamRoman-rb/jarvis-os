@@ -955,6 +955,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.brain_online = self.brain.online();
         self.stats.brain_voice = self.brain.voice;
         self.stats.brain_account = self.brain.account.clone();
+        self.stats.brain_agents = self.brain.agents.clone();
         self.stats_version += 1;
         // Las apps que muestran estadísticas: el Monitor y Configuración (Sistema, Hardware y
         // el resultado del instalador salen de acá).
@@ -1755,6 +1756,11 @@ impl<D: BlockDevice> Desktop<D> {
             // Otro tema o acento: cambia el fondo (el HUD) y todo lo demás.
             self.bg_dirty = true;
         }
+        self.brain.set_mode(
+            self.config.ai_lead as usize,
+            self.config.ai_council,
+            &mut self.out,
+        );
         crate::look::apply(&self.config);
         self.wm.set_topbar(self.config.topbar);
         if (old.display_mode, old.display_vertical, old.display_primary)
@@ -2110,6 +2116,9 @@ impl<D: BlockDevice> Desktop<D> {
     pub fn set_brain(&mut self, port: u16, token: &str) {
         let equipo = self.config.hostname.clone();
         self.brain.configure(port, token, &equipo);
+        // El principal y el consejo viajan en `hola`.
+        self.brain.lead = self.config.ai_lead as usize;
+        self.brain.council = self.config.ai_council;
     }
 
     /// Lo que llegó del cerebro: a la consola, y la esfera "habla" mientras llega.
@@ -2118,6 +2127,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.brain_online = self.brain.online();
         self.stats.brain_voice = self.brain.voice;
         self.stats.brain_account = self.brain.account.clone();
+        self.stats.brain_agents = self.brain.agents.clone();
         self.logs.append(&mut self.brain.logs);
         for ev in events {
             match &ev {

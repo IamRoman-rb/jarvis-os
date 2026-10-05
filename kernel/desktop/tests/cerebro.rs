@@ -375,3 +375,69 @@ fn iniciar_sesion_con_google_desde_configuracion() {
             .any(|l| l == "CEREBRO_CUENTA si Listo: entraste.")
     );
 }
+
+#[test]
+fn vincular_gemini_chatgpt_y_deepseek_desde_configuracion() {
+    let mut b = Brain::new();
+    b.second();
+    // El principal y el consejo viajan en `hola` (por defecto, Claude y sin consejo).
+    assert!(
+        b.sent.contains(r#""principal":"claude","consejo":false}"#),
+        "{}",
+        b.sent
+    );
+    b.reply(r#"{"t":"listo"}"#);
+    b.reply(r#"{"t":"agente","id":"gemini","nombre":"Gemini","vinculado":false,"metodo":"","detalle":"","estado":""}"#);
+    b.second();
+    b.sent.clear();
+    b.t.combo(Mods::WIN, Key::Char('i'));
+    b.t.key(Key::PageUp);
+    // Cerebro, Cuenta, Google (Claude), Actualizar, Agente principal, Consejo, Gemini (estado),
+    // Gemini con Google, Gemini clave de API...
+    b.t.keys(&[Key::Down, Key::Down, Key::Down]);
+    // Agente principal: → pasa de Claude a Gemini y se le avisa al cerebro.
+    b.t.key(Key::Down);
+    b.t.key(Key::Right);
+    b.collect();
+    assert!(
+        b.sent
+            .contains(r#"{"t":"agentes_modo","principal":"gemini","consejo":false}"#),
+        "{}",
+        b.sent
+    );
+    assert_eq!(b.t.d.config().ai_lead, 1);
+    // El consejo.
+    b.t.key(Key::Down);
+    b.t.key(Key::Enter);
+    b.collect();
+    assert!(b.sent.contains(r#""consejo":true}"#), "{}", b.sent);
+    // Gemini con Google (la fila de su estado es solo lectura).
+    b.sent.clear();
+    b.t.keys(&[Key::Down, Key::Down]);
+    b.t.key(Key::Enter);
+    b.collect();
+    assert_eq!(
+        b.sent,
+        "{\"t\":\"vincular\",\"agente\":\"gemini\",\"metodo\":\"google\"}\n"
+    );
+    // ChatGPT con el formulario: la clave va al anfitrión y no a los logs.
+    b.sent.clear();
+    b.t.keys(&[Key::Down, Key::Down, Key::Down, Key::Down]);
+    b.t.key(Key::Enter);
+    b.t.type_text("sk-prueba-1234");
+    b.t.key(Key::Enter);
+    b.collect();
+    assert_eq!(
+        b.sent,
+        "{\"t\":\"vincular\",\"agente\":\"chatgpt\",\"metodo\":\"clave\",\"clave\":\"sk-prueba-1234\"}\n"
+    );
+    assert!(!b.t.d.config().serialize().contains("sk-prueba"));
+    b.reply(r#"{"t":"agente","id":"chatgpt","nombre":"ChatGPT","vinculado":true,"metodo":"clave","detalle":"clave ...1234","estado":"Listo: clave guardada en el anfitrión."}"#);
+    let logs = b.t.logs();
+    assert!(logs.iter().any(|l| l == "CEREBRO_VINCULAR chatgpt clave"));
+    assert!(!logs.iter().any(|l| l.contains("sk-prueba")));
+    assert!(
+        logs.iter()
+            .any(|l| l == "CEREBRO_AGENTE chatgpt si Listo: clave guardada en el anfitrión.")
+    );
+}

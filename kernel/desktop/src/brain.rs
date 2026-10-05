@@ -68,8 +68,34 @@ pub enum BrainEvent {
         ev: String,
         text: String,
     },
-    /// Cambió la cuenta de Claude del anfitrión (o el estado del inicio de sesión).
+    /// Cambió la cuenta de Claude del anfitrión, un agente vinculado o el estado de un inicio
+    /// de sesión (Configuración → Asistente se redibuja).
     Account,
+}
+
+/// Los agentes que pueden ser el cerebro de JARVIS: (código del protocolo, nombre). Claude es
+/// el de siempre (la cuenta de Claude Code del anfitrión); los demás se vinculan desde
+/// Configuración → Asistente, con Google o con el formulario (una clave de API).
+pub const AGENTS: [(&str, &str); 4] = [
+    ("claude", "Claude"),
+    ("gemini", "Gemini"),
+    ("chatgpt", "ChatGPT"),
+    ("deepseek", "DeepSeek"),
+];
+
+/// Un agente que se vincula (Gemini, ChatGPT, DeepSeek), como lo cuenta el cerebro.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AiAgent {
+    /// El código del protocolo ("gemini", "chatgpt", "deepseek").
+    pub id: String,
+    pub name: String,
+    pub linked: bool,
+    /// "google" o "clave" (vacío = sin vincular).
+    pub method: String,
+    /// Con qué cuenta entró, o los últimos 4 caracteres de la clave (nunca la clave entera).
+    pub detail: String,
+    /// El inicio de sesión en curso o cómo terminó.
+    pub state: String,
 }
 
 /// La cuenta con la que el cerebro usa Claude (la de Claude Code en el anfitrión).
@@ -101,6 +127,14 @@ pub enum BrainOp {
     Login,
     /// Volver a preguntar la cuenta.
     AccountStatus,
+    /// Vincular un agente (por su código) con Google: el anfitrión abre su navegador.
+    AgentGoogle(String),
+    /// Vincular un agente con el formulario: la clave de API viaja al anfitrión, que la valida
+    /// y la guarda (en JARVIS-OS no queda).
+    AgentKey(String, String),
+    AgentUnlink(String),
+    /// Volver a preguntar el estado de los agentes.
+    AgentsStatus,
 }
 
 pub struct BrainService {
@@ -120,6 +154,12 @@ pub struct BrainService {
     /// entonces manda la voz como audio (K12).
     pub speakers: u32,
     pub account: Account,
+    /// Gemini, ChatGPT y DeepSeek (en el orden de [`AGENTS`], sin Claude).
+    pub agents: Vec<AiAgent>,
+    /// El agente principal (índice de [`AGENTS`]) y si opina el consejo de los demás: los
+    /// elige Roman en Configuración y viajan en `hola` y en `agentes_modo`.
+    pub lead: usize,
+    pub council: bool,
     /// La respuesta en curso (para la esfera y el mensaje del escritorio).
     pub answer: String,
     pub status: Status,
@@ -142,6 +182,16 @@ impl Default for BrainService {
             voice: false,
             speakers: 0,
             account: Account::default(),
+            agents: AGENTS[1..]
+                .iter()
+                .map(|(id, name)| AiAgent {
+                    id: (*id).into(),
+                    name: (*name).into(),
+                    ..AiAgent::default()
+                })
+                .collect(),
+            lead: 0,
+            council: false,
             answer: String::new(),
             status: Status::Off,
             logs: Vec::new(),
@@ -193,6 +243,26 @@ impl BrainService {
 
     pub fn busy(&self) -> bool {
         self.current.is_some()
+    }
+
+    /// Cambió el agente principal o el consejo (Configuración): se le avisa al cerebro.
+    pub fn set_mode(&mut self, lead: usize, council: bool, out: &mut Outbox) {
+        let lead = lead.min(AGENTS.len() - 1);
+        if (lead, council) == (self.lead, self.council) {
+            return;
+        }
+        (self.lead, self.council) = (lead, council);
+        self.logs
+            .push(format!("CEREBRO_MODO {} {}", AGENTS[lead].0, council));
+        if self.ready {
+            self.send(
+                out,
+                format!(
+                    "{{\"t\":\"agentes_modo\",\"principal\":\"{}\",\"consejo\":{council}}}",
+                    AGENTS[lead].0
+                ),
+            );
+        }
     }
 
     fn send(&self, out: &mut Outbox, line: String) {
@@ -257,8 +327,46 @@ impl BrainService {
                 );
             }
             BrainOp::AccountStatus => self.send(out, "{\"t\":\"cuenta\"}".into()),
+            BrainOp::AgentGoogle(id) => {
+                self.set_agent_state(&id, crate::i18n::tr("Abriendo el navegador de la PC..."));
+                self.logs.push(format!("CEREBRO_VINCULAR {id} google"));
+                self.send(
+                    out,
+                    format!(
+                        "{{\"t\":\"vincular\",\"agente\":{},\"metodo\":\"google\"}}",
+                        quote(&id)
+                    ),
+                );
+            }
+            BrainOp::AgentKey(id, key) => {
+                self.set_agent_state(&id, crate::i18n::tr("Enviando la clave al anfitrión..."));
+                // La clave no va a los logs.
+                self.logs.push(format!("CEREBRO_VINCULAR {id} clave"));
+                self.send(
+                    out,
+                    format!(
+                        "{{\"t\":\"vincular\",\"agente\":{},\"metodo\":\"clave\",\"clave\":{}}}",
+                        quote(&id),
+                        quote(&key)
+                    ),
+                );
+            }
+            BrainOp::AgentUnlink(id) => {
+                self.logs.push(format!("CEREBRO_DESVINCULAR {id}"));
+                self.send(
+                    out,
+                    format!("{{\"t\":\"desvincular\",\"agente\":{}}}", quote(&id)),
+                );
+            }
+            BrainOp::AgentsStatus => self.send(out, "{\"t\":\"agentes\"}".into()),
         }
         true
+    }
+
+    fn set_agent_state(&mut self, id: &str, state: &str) {
+        if let Some(a) = self.agents.iter_mut().find(|a| a.id == id) {
+            a.state = state.into();
+        }
     }
 
     /// Un evento de conexión: `None` si no era la del cerebro.
@@ -279,10 +387,12 @@ impl BrainService {
                 self.send(
                     out,
                     format!(
-                        "{{\"t\":\"hola\",\"token\":{},\"equipo\":{},\"parlantes\":{}}}",
+                        "{{\"t\":\"hola\",\"token\":{},\"equipo\":{},\"parlantes\":{},\"principal\":\"{}\",\"consejo\":{}}}",
                         quote(&self.token),
                         quote(&self.equipo),
-                        self.speakers
+                        self.speakers,
+                        AGENTS[self.lead].0,
+                        self.council
                     ),
                 );
             }
@@ -462,6 +572,23 @@ impl BrainService {
                         None => "?",
                     },
                     self.account.login
+                ));
+                events.push(BrainEvent::Account);
+            }
+            "agente" => {
+                let s = |k: &str| msg.get(k).and_then(Json::str).unwrap_or("").to_string();
+                let id = s("id");
+                let Some(a) = self.agents.iter_mut().find(|a| a.id == id) else {
+                    return;
+                };
+                a.linked = matches!(msg.get("vinculado"), Some(Json::Bool(true)));
+                a.method = s("metodo");
+                a.detail = s("detalle");
+                a.state = s("estado");
+                self.logs.push(format!(
+                    "CEREBRO_AGENTE {id} {} {}",
+                    if a.linked { "si" } else { "no" },
+                    a.state
                 ));
                 events.push(BrainEvent::Account);
             }

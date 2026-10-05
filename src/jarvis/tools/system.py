@@ -82,6 +82,12 @@ SPECS: list[tuple[str, str, dict[str, type]]] = [
         {"comando": str},
     ),
     ("leer_terminal", "Lo último que muestra la terminal de JARVIS-OS.", {}),
+    (
+        "consultar_agente",
+        "Le pregunta algo a otro agente de IA que Roman vinculó (claude, gemini, chatgpt o "
+        "deepseek) y devuelve su respuesta: para una segunda opinión o algo que otro sepa mejor.",
+        {"agente": str, "pregunta": str},
+    ),
 ]
 
 if {s[0] for s in SPECS} != set(LEVELS):
