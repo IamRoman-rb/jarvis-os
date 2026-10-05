@@ -1,0 +1,15 @@
+# Programas de Windows de prueba en Rust (x86_64-pc-windows-msvc, con el CRT adentro), para la
+# capa de compatibilidad con Windows del kernel. Los compila `cargo xtask` (fuera del workspace
+# del kernel). Los de C (`*.c`) se compilan con el compilador de Visual Studio.
+[package]
+name = "usuario-win"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+panic = "abort"
+debug = false

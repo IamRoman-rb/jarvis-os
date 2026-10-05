@@ -22,6 +22,7 @@ extern crate alloc;
 pub mod abi;
 pub mod elf;
 pub mod mm;
+pub mod pe;
 pub mod process;
 pub mod stack;
 pub mod sys;
