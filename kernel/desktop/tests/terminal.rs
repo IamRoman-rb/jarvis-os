@@ -78,6 +78,25 @@ fn serve(t: &mut Driver) {
                         body: b"no existe".to_vec(),
                     }),
                 }
+            } else if let Some(path) = r.url.strip_prefix("http://deb.debian.org/debian/") {
+                // Un Debian de mentira chiquito (tests/debian/): el índice y dos .deb de verdad.
+                let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/debian")
+                    .join(path);
+                match std::fs::read(&file) {
+                    Ok(body) => Ok(HttpResponse {
+                        status: 200,
+                        content_type: "application/octet-stream".into(),
+                        url: r.url.clone(),
+                        body,
+                    }),
+                    Err(_) => Ok(HttpResponse {
+                        status: 404,
+                        content_type: "text/plain".into(),
+                        url: r.url.clone(),
+                        body: b"no existe".to_vec(),
+                    }),
+                }
             } else if let Some(body) = fake_internet(&r.url) {
                 Ok(HttpResponse {
                     status: 200,
@@ -238,6 +257,59 @@ fn tab_completa_y_flechas_recorren_el_historial() {
     t.type_text("algo a medias");
     t.combo(Mods::CTRL, Key::Char('c'));
     assert!(screen(&t).contains("algo a medias^C"));
+}
+
+/// ¿Está en el disco? (sin cerrar el escritorio, a diferencia de `fatfs_exists`)
+fn existe(t: &mut Driver, path: &str) -> bool {
+    t.d.fs_mut().unwrap().exists(path)
+}
+
+#[test]
+fn apt_instala_programas_de_debian() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    // No está en el repositorio de JARVIS-OS: se busca en Debian (la primera vez baja el
+    // índice), con sus dependencias; debconf se saltea.
+    let out = run(&mut t, "apt install hola-deb");
+    assert!(out.contains("paquetes de Debian disponibles"), "{out}");
+    assert!(
+        out.contains(
+            "Se instalarán los siguientes paquetes NUEVOS (de Debian):
+  libhola1 hola-deb"
+        ),
+        "{out}"
+    );
+    assert!(out.contains("Configurando hola-deb (1.0-1)"), "{out}");
+    assert!(out.contains("Listo."), "{out}");
+    assert!(existe(&mut t, "/usr/bin/hola-deb"));
+    assert!(existe(&mut t, "/usr/bin/hola"), "el enlace es una copia");
+    assert!(existe(&mut t, "/usr/lib/x86_64-linux-gnu/libhola.so.1"));
+    assert!(
+        !existe(&mut t, "/usr/share/doc/hola-deb/copyright"),
+        "la documentación no se instala"
+    );
+    assert!(
+        run(&mut t, "apt list --installed").contains("hola"),
+        "anotado"
+    );
+    assert!(run(&mut t, "apt show hola-deb").contains("deb.debian.org"));
+    assert!(run(&mut t, "apt search hola").contains("hola-deb/debian"));
+    // Ya instalado: la segunda vez no baja nada.
+    assert!(run(&mut t, "apt install hola-deb").contains("ya está instalado"));
+    // Está en el PATH (/usr/bin): se ejecuta como cualquier programa de Linux.
+    t.type_text("hola");
+    t.key(Key::Enter);
+    let spawn = t.d.take_requests().spawn;
+    assert_eq!(spawn.len(), 1, "{}", screen(&t));
+    assert_eq!(spawn[0].path, "/usr/bin/hola");
+    t.d.proc_event(jarvis_desktop::procs::ProcEvent::Exited {
+        pid: spawn[0].pid,
+        code: 0,
+        why: None,
+    });
+    // Se desinstala como los demás: a la Papelera.
+    assert!(run(&mut t, "apt remove hola-deb").contains("Papelera"));
+    assert!(!existe(&mut t, "/usr/bin/hola-deb"));
 }
 
 #[test]

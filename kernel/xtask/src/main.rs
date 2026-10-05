@@ -1619,10 +1619,9 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     shot(&mut s, "jarvis-os-sesion.png")
 }
 
-/// `cargo xtask pantallas`: dos monitores (virtio-gpu con dos salidas). Extender: el Monitor pasa
-/// `cargo xtask glibc`: un programa de Linux dinámico de verdad (`hello` de Debian, con glibc).
-/// Los archivos los deja en `target/usuario/glibc/` un script del anfitrión; la Terminal los
-/// baja del puente al disco y ejecuta `hello`, que arranca por `ld-linux-x86-64.so.2`.
+/// `cargo xtask glibc`: un programa de Linux de verdad, bajado desde la Terminal. `apt install
+/// hello` lo trae de Debian estable (deb.debian.org, por internet) con sus dependencias (glibc), y
+/// `hello` corre: arranca por `ld-linux-x86-64.so.2`, que carga `libc.so.6`. Necesita internet.
 fn glibc(image: &Path, disk: &Path) -> Result<()> {
     puente::start();
     let mut s = Session::start(image, disk)?;
@@ -1630,31 +1629,25 @@ fn glibc(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey ctrl-alt-t")?;
     s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
     thread::sleep(Duration::from_millis(500));
-    let lib = "/usr/lib/x86_64-linux-gnu";
-    s.type_text(&format!("mkdir -p {lib} /usr/bin"))?;
+    s.type_text("apt install hello")?;
     s.monitor("sendkey ret")?;
-    for (file, to) in [
-        ("ld-linux-x86-64.so.2", lib),
-        ("libc.so.6", lib),
-        ("hello", "/usr/bin"),
-    ] {
-        s.type_text(&format!(
-            "curl -o {to}/{file} http://paquetes.jarvis/usuario/glibc/{file}"
-        ))?;
+    let t0 = Instant::now();
+    let installed = s.wait_for("APT_INSTALADO hello ", Duration::from_secs(600));
+    println!("[tiempo] apt install hello: {} s", t0.elapsed().as_secs());
+    if installed.is_ok() {
+        s.type_text("hello")?;
         s.monitor("sendkey ret")?;
-        s.wait_for(&format!("DESCARGA {to}/{file}"), Duration::from_secs(60))?;
     }
-    s.type_text("/usr/bin/hello")?;
-    s.monitor("sendkey ret")?;
-    let fin = s.wait_for("PROCESO_FIN", Duration::from_secs(30));
+    let fin = installed.and_then(|_| s.wait_for("PROCESO_FIN", Duration::from_secs(60)));
     thread::sleep(Duration::from_secs(1));
     s.screenshot(&target_dir().join("jarvis-os-glibc.png"))?;
     s.quit();
     fin?;
-    println!("ok: hello (glibc) termino");
+    println!("ok: apt install hello (Debian, glibc) y hello corrió");
     Ok(())
 }
 
+/// `cargo xtask pantallas`: dos monitores (virtio-gpu con dos salidas). Extender: el Monitor pasa
 /// a la segunda pantalla (Win+Shift+→) y se captura cada una; después Win+P → Duplicar.
 fn screens(image: &Path, disk: &Path) -> Result<()> {
     MONITORS.store(2, std::sync::atomic::Ordering::Relaxed);

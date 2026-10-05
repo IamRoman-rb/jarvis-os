@@ -15,6 +15,7 @@
 pub mod apt;
 pub mod binfmt;
 mod cmds;
+pub mod debian;
 pub mod parse;
 mod regex;
 pub mod snap;
@@ -50,8 +51,8 @@ pub mod ansi {
 pub const HOME: &str = "/";
 /// Dónde quedan los programas instalados con `apt`.
 pub const BIN: &str = "/Programas/bin";
-/// El `PATH`: los programas de `apt` y los de `snap`.
-pub const PATH: &str = "/Programas/bin:/snap/bin";
+/// El `PATH`: los programas de `apt` (los de JARVIS-OS y los de Debian) y los de `snap`.
+pub const PATH: &str = "/Programas/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin";
 const MAX_DEPTH: u32 = 8;
 
 /// Lo que devuelve un comando.

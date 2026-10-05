@@ -21,6 +21,11 @@
 //!
 //! Los programas son scripts de `jsh` (van a `/Programas/bin`, que está en el `PATH`); también
 //! hay paquetes de datos (fondos de pantalla, canciones, documentos).
+//!
+//! **Debian**: lo que no está en el repositorio de JARVIS-OS se busca en Debian estable
+//! (`deb.debian.org`, ver [`super::debian`]): programas de Linux de verdad, con glibc. `apt
+//! update` baja también su índice; `apt install hello` baja `hello` y sus dependencias (`libc6`…)
+//! y los desarma en el disco (`/usr/bin`, `/usr/lib/x86_64-linux-gnu`…).
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -29,6 +34,7 @@ use alloc::vec::Vec;
 
 use jarvis_fs::{BlockDevice, FileSystem};
 
+use super::debian::{self, DebPkg};
 use super::{Out, ansi};
 use crate::apps::Ctx;
 use crate::files::{FilesApp, format_size, parent};
@@ -148,6 +154,12 @@ enum Step {
     },
     Manifest,
     File,
+    /// Bajando el índice de Debian. Después: instalar lo que se pidió de Debian (o terminar).
+    DebIndex {
+        then_install: bool,
+    },
+    /// Bajando un `.deb`.
+    DebPackage,
 }
 
 struct Current {
@@ -167,6 +179,10 @@ pub struct AptJob {
     current: Option<Current>,
     count: u32,
     bytes: u64,
+    /// Lo pedido que no está en el repositorio de JARVIS-OS: se busca en Debian.
+    debian: Vec<String>,
+    deb_queue: Vec<DebPkg>,
+    deb_current: Option<DebPkg>,
 }
 
 impl AptJob {
@@ -182,6 +198,10 @@ impl AptJob {
             FetchKind::Download
         };
         self.waiting = Some(ctx.out.fetch_as(&url, kind, "apt"));
+    }
+
+    fn fetch_url<D: BlockDevice>(&mut self, ctx: &mut Ctx<'_, D>, url: &str) {
+        self.waiting = Some(ctx.out.fetch_as(url, FetchKind::Download, "apt"));
     }
 
     /// Llegó una respuesta. `Some((código, salida))` cuando terminó.
@@ -203,9 +223,14 @@ impl AptJob {
                 return Some((100, String::new()));
             }
             Err(e) => {
-                out.err(&format!(
-                    "E: No se pudo conectar con {REPO}: {e}\n   (el repositorio lo sirve `cargo xtask run` desde el anfitrión)"
-                ));
+                let debian = matches!(self.step, Step::DebIndex { .. } | Step::DebPackage);
+                out.err(&if debian {
+                    format!("E: No se pudo conectar con {}: {e}", debian::MIRROR)
+                } else {
+                    format!(
+                        "E: No se pudo conectar con {REPO}: {e}\n   (el repositorio lo sirve `cargo xtask run` desde el anfitrión)"
+                    )
+                });
                 return Some((100, String::new()));
             }
         };
@@ -251,16 +276,36 @@ impl AptJob {
                         0 => "Todos los paquetes están actualizados.".to_string(),
                         n => format!("Se pueden actualizar {n} paquetes. Ejecutá «apt list --upgradable» para verlos."),
                     });
-                    return Some((0, String::new()));
+                    // Y el índice de Debian.
+                    out.info(&format!(
+                        "Obj:2 {} stable/main amd64 Packages",
+                        debian::MIRROR
+                    ));
+                    self.step = Step::DebIndex {
+                        then_install: false,
+                    };
+                    self.fetch_url(ctx, debian::PACKAGES);
+                    return None;
                 }
                 let names: Vec<String> = if upgrade {
                     upgradable.iter().map(|p| p.name.clone()).collect()
                 } else {
-                    core::mem::take(&mut self.requested)
+                    // Lo que no es de JARVIS-OS se busca en Debian, después.
+                    let (ours, others): (Vec<String>, Vec<String>) =
+                        core::mem::take(&mut self.requested)
+                            .into_iter()
+                            .partition(|n| index.iter().any(|p| p.name == *n));
+                    self.debian = others;
+                    ours
                 };
+                if names.is_empty() && !self.debian.is_empty() {
+                    return self.start_debian(ctx, out);
+                }
                 match plan(&index, &have, &names, upgrade, out) {
                     Err(code) => Some((code, String::new())),
-                    Ok(queue) if queue.is_empty() => Some((0, String::new())),
+                    Ok(queue) if queue.is_empty() && self.debian.is_empty() => {
+                        Some((0, String::new()))
+                    }
                     Ok(queue) => {
                         self.queue = queue;
                         self.next_package(ctx, out)
@@ -309,7 +354,130 @@ impl AptJob {
                 }
                 self.next_package(ctx, out)
             }
+            Step::DebIndex { then_install } => {
+                out.info(&format!(
+                    "Des:{} {} stable/main amd64 Packages [{}]\nLeyendo lista de paquetes de Debian...",
+                    self.count,
+                    debian::MIRROR,
+                    format_size(resp.body.len() as u64)
+                ));
+                let mut b = debian::IndexBuilder::default();
+                if let Err(e) = debian::xz_decode(&resp.body, debian::MAX_UNPACKED, |c| b.feed(c)) {
+                    out.err(&format!("E: el índice de Debian vino dañado: {e}"));
+                    return Some((100, String::new()));
+                }
+                let (text, n) = b.finish();
+                let Some(fs) = ctx.fs.as_deref_mut() else {
+                    out.err("E: no hay disco");
+                    return Some((100, String::new()));
+                };
+                let saved = ensure_dirs(fs, DB, now)
+                    .and_then(|()| fs.write_file(debian::INDEX, text.as_bytes(), now));
+                if let Err(e) = saved {
+                    out.err(&format!("E: no se pudo guardar el índice de Debian: {e}"));
+                    return Some((100, String::new()));
+                }
+                ctx.log.push(format!("APT_DEBIAN_INDICE {n}"));
+                out.info(&format!("{n} paquetes de Debian disponibles."));
+                if !then_install {
+                    return Some((0, String::new()));
+                }
+                let index = debian::parse_compact(&text);
+                self.plan_debian(&index, ctx, out)
+            }
+            Step::DebPackage => {
+                let pkg = self.deb_current.take()?;
+                out.info(&format!(
+                    "Des:{} {} {} {} [{}]",
+                    self.count,
+                    debian::MIRROR,
+                    pkg.name,
+                    pkg.version,
+                    format_size(resp.body.len() as u64)
+                ));
+                if let Err(e) = install_deb(&pkg, &resp.body, ctx, out) {
+                    out.err(&format!("E: no se pudo instalar {}: {e}", pkg.name));
+                    return Some((100, String::new()));
+                }
+                self.next_deb(ctx, out)
+            }
         }
+    }
+
+    /// Lo pedido que no es de JARVIS-OS, de Debian: con el índice guardado, o bajándolo.
+    fn start_debian<D: BlockDevice>(
+        &mut self,
+        ctx: &mut Ctx<'_, D>,
+        out: &mut Out,
+    ) -> Option<(i32, String)> {
+        let saved = ctx
+            .fs
+            .as_deref_mut()
+            .and_then(|fs| fs.read_file(debian::INDEX).ok());
+        match saved {
+            Some(text) => {
+                let index = debian::parse_compact(&String::from_utf8_lossy(&text));
+                self.plan_debian(&index, ctx, out)
+            }
+            None => {
+                out.info(&format!(
+                    "Obj:2 {} stable/main amd64 Packages (la primera vez tarda un poco)",
+                    debian::MIRROR
+                ));
+                self.step = Step::DebIndex { then_install: true };
+                self.fetch_url(ctx, debian::PACKAGES);
+                None
+            }
+        }
+    }
+
+    fn plan_debian<D: BlockDevice>(
+        &mut self,
+        index: &[DebPkg],
+        ctx: &mut Ctx<'_, D>,
+        out: &mut Out,
+    ) -> Option<(i32, String)> {
+        let have = ctx.fs.as_deref_mut().map(installed).unwrap_or_default();
+        let names = core::mem::take(&mut self.debian);
+        let queue = match debian::plan(index, &have, &names) {
+            Ok(q) => q,
+            Err(e) => {
+                out.err(&format!("E: {e}"));
+                return Some((100, String::new()));
+            }
+        };
+        if queue.is_empty() {
+            for n in &names {
+                out.info(&format!("{n} ya está instalado."));
+            }
+            return Some((0, String::new()));
+        }
+        let list: Vec<&str> = queue.iter().map(|p| p.name.as_str()).collect();
+        let size: u64 = queue.iter().map(|p| p.size).sum();
+        out.info(&format!(
+            "Se instalarán los siguientes paquetes NUEVOS (de Debian):\n  {}\nSe necesita descargar {}.",
+            list.join(" "),
+            format_size(size)
+        ));
+        self.deb_queue = queue;
+        self.next_deb(ctx, out)
+    }
+
+    fn next_deb<D: BlockDevice>(
+        &mut self,
+        ctx: &mut Ctx<'_, D>,
+        out: &mut Out,
+    ) -> Option<(i32, String)> {
+        if self.deb_queue.is_empty() {
+            out.info(&format!("{}Listo.{}", ansi::GREEN, ansi::RESET));
+            return Some((0, String::new()));
+        }
+        let pkg = self.deb_queue.remove(0);
+        let url = format!("{}/{}", debian::MIRROR, pkg.filename);
+        self.deb_current = Some(pkg);
+        self.step = Step::DebPackage;
+        self.fetch_url(ctx, &url);
+        None
     }
 
     fn next_package<D: BlockDevice>(
@@ -318,6 +486,9 @@ impl AptJob {
         out: &mut Out,
     ) -> Option<(i32, String)> {
         if self.queue.is_empty() {
+            if !self.debian.is_empty() {
+                return self.start_debian(ctx, out);
+            }
             out.info(&format!("{}Listo.{}", ansi::GREEN, ansi::RESET));
             return Some((0, String::new()));
         }
@@ -404,6 +575,61 @@ fn install_files<D: BlockDevice>(
         cur.pkg.name, cur.pkg.version
     ));
     Ok(())
+}
+
+/// Desarma un `.deb` en el disco y lo anota como instalado.
+fn install_deb<D: BlockDevice>(
+    pkg: &DebPkg,
+    deb: &[u8],
+    ctx: &mut Ctx<'_, D>,
+    out: &mut Out,
+) -> Result<(), String> {
+    out.info(&format!(
+        "Desempaquetando {} ({})...",
+        pkg.name, pkg.version
+    ));
+    let u = debian::unpack(deb)?;
+    let now = ctx.timestamp();
+    let fs = ctx.fs.as_deref_mut().ok_or("no hay disco")?;
+    let mut list = String::new();
+    for d in &u.dirs {
+        ensure_dirs(fs, d, now).map_err(|e| format!("{d}: {e}"))?;
+    }
+    for (path, data) in &u.files {
+        ensure_dirs(fs, &parent(path), now).map_err(|e| e.to_string())?;
+        fs.write_file(path, data, now)
+            .map_err(|e| format!("{path}: {e}"))?;
+        list.push_str(path);
+        list.push('\n');
+    }
+    // Enlaces a archivos de otro paquete (ya instalado): una copia, si está.
+    for (path, target) in &u.links_out {
+        if let Ok(data) = fs.read_file(target) {
+            ensure_dirs(fs, &parent(path), now).map_err(|e| e.to_string())?;
+            fs.write_file(path, &data, now)
+                .map_err(|e| format!("{path}: {e}"))?;
+            list.push_str(path);
+            list.push('\n');
+        }
+    }
+    ensure_dirs(fs, DB, now).map_err(|e| e.to_string())?;
+    fs.write_file(&format!("{DB}/{}.lista", pkg.name), list.as_bytes(), now)
+        .map_err(|e| e.to_string())?;
+    let mut have = installed(fs);
+    have.retain(|(n, _)| *n != pkg.name);
+    have.push((pkg.name.clone(), pkg.version.clone()));
+    save_installed(fs, &have, now).map_err(|e| e.to_string())?;
+    out.info(&format!("Configurando {} ({})...", pkg.name, pkg.version));
+    ctx.log
+        .push(format!("APT_INSTALADO {} {}", pkg.name, pkg.version));
+    Ok(())
+}
+
+/// El índice de Debian guardado (lo arma `apt update`).
+fn debian_index<D: BlockDevice>(fs: &mut FileSystem<D>) -> Vec<DebPkg> {
+    fs.read_file(debian::INDEX)
+        .map(|b| debian::parse_compact(&String::from_utf8_lossy(&b)))
+        .unwrap_or_default()
 }
 
 /// Qué hay que bajar para instalar `names` (con sus dependencias, en orden).
@@ -516,6 +742,9 @@ pub(crate) fn run<D: BlockDevice>(
         current: None,
         count: 0,
         bytes: 0,
+        debian: Vec::new(),
+        deb_queue: Vec::new(),
+        deb_current: None,
     };
     let Some(fs) = ctx.fs.as_deref_mut() else {
         e.push_str("E: no hay disco\n");
@@ -626,6 +855,19 @@ pub(crate) fn run<D: BlockDevice>(
                     p.description
                 ));
             }
+            // Los de Debian instalados (el índice de Debian entero no se lista: son miles).
+            if !only_upgradable {
+                for (n, v) in have
+                    .iter()
+                    .filter(|(n, _)| !index.iter().any(|p| p.name == *n))
+                {
+                    o.push_str(&format!(
+                        "{}{n}{}/debian {v} amd64 [instalado]\n",
+                        ansi::GREEN,
+                        ansi::RESET
+                    ));
+                }
+            }
             Ok(0)
         }
         "search" => {
@@ -646,6 +888,31 @@ pub(crate) fn run<D: BlockDevice>(
                     p.description
                 ));
             }
+            // Y en Debian (los primeros 50, por nombre primero).
+            let deb = debian_index(fs);
+            let mut hits: Vec<&DebPkg> = deb
+                .iter()
+                .filter(|p| p.name.to_lowercase().contains(&q))
+                .collect();
+            if hits.len() < 50 {
+                hits.extend(deb.iter().filter(|p| {
+                    !p.name.to_lowercase().contains(&q) && p.description.to_lowercase().contains(&q)
+                }));
+            }
+            let total = hits.len();
+            for p in hits.into_iter().take(50) {
+                o.push_str(&format!(
+                    "{}{}{}/debian {}\n  {}\n",
+                    ansi::GREEN,
+                    p.name,
+                    ansi::RESET,
+                    p.version,
+                    p.description
+                ));
+            }
+            if total > 50 {
+                o.push_str(&format!("... y {} más de Debian.\n", total - 50));
+            }
             Ok(0)
         }
         "show" => {
@@ -657,8 +924,21 @@ pub(crate) fn run<D: BlockDevice>(
                 .first()
                 .and_then(|n| index.iter().find(|p| p.name == *n))
             else {
-                e.push_str("E: No se encontró el paquete\n");
-                return Ok(100);
+                let deb = debian_index(fs);
+                let Some(p) = rest.first().and_then(|n| deb.iter().find(|p| p.name == *n)) else {
+                    e.push_str("E: No se encontró el paquete\n");
+                    return Ok(100);
+                };
+                o.push_str(&format!(
+                    "Package: {}\nVersion: {}\nDepends: {}\nDownload-Size: {}\nAPT-Sources: {} stable/main\nDescription: {}\n",
+                    p.name,
+                    p.version,
+                    if p.depends.is_empty() { "-".into() } else { p.depends.join(", ") },
+                    format_size(p.size),
+                    debian::MIRROR,
+                    p.description
+                ));
+                return Ok(0);
             };
             o.push_str(&format!(
                 "Package: {}\nVersion: {}\nDepends: {}\nDownload-Size: {}\nAPT-Sources: {REPO}\nDescription: {}\n",

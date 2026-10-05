@@ -17,6 +17,8 @@ lz4_flex = { version = "0.11", default-features = false }
 jarvis-sync = { path = "../sync" }
 # La clave de WPA2 (PMK) sale de la contraseña acá, al escribirla (K14).
 jarvis-wifi = { path = "../wifi" }
+# Los paquetes de Debian (`apt`): XZ sin `std` (term/debian.rs).
+xz4rust = { version = "0.2", default-features = false, features = ["alloc", "crc64"] }
 
 [dev-dependencies]
 fatfs = "0.3.6"
