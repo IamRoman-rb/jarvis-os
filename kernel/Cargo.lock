@@ -827,6 +827,7 @@ dependencies = [
  "jarvis-wifi",
  "lz4_flex",
  "resvg",
+ "sha2",
  "xz4rust",
 ]
 

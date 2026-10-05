@@ -65,6 +65,8 @@ pub struct Ctx<'a, D: BlockDevice> {
     pub clipboard: &'a mut String,
     /// Los parlantes (K12): lo que las apps quieren que suene.
     pub audio: &'a mut crate::sound::Sound,
+    /// El antivirus: las apps le pasan lo que guardan y lo que van a ejecutar.
+    pub antivirus: &'a mut crate::antivirus::Antivirus,
 }
 
 impl<D: BlockDevice> Ctx<'_, D> {

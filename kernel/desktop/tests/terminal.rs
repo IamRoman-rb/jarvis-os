@@ -97,6 +97,21 @@ fn serve(t: &mut Driver) {
                         body: b"no existe".to_vec(),
                     }),
                 }
+            } else if r.url == jarvis_desktop::antivirus::FEED {
+                // MalwareBazaar de mentira: la muestra de prueba y el programa marcado.
+                Ok(HttpResponse {
+                    status: 200,
+                    content_type: "text/plain".into(),
+                    url: r.url.clone(),
+                    body: malware_feed().into_bytes(),
+                })
+            } else if r.url == "http://ejemplo.test/malo.bin" {
+                Ok(HttpResponse {
+                    status: 200,
+                    content_type: "application/octet-stream".into(),
+                    url: r.url.clone(),
+                    body: MALWARE.to_vec(),
+                })
             } else if let Some(body) = fake_internet(&r.url) {
                 Ok(HttpResponse {
                     status: 200,
@@ -257,6 +272,118 @@ fn tab_completa_y_flechas_recorren_el_historial() {
     t.type_text("algo a medias");
     t.combo(Mods::CTRL, Key::Char('c'));
     assert!(screen(&t).contains("algo a medias^C"));
+}
+
+/// Una "muestra de malware" de prueba (bytes cualquiera cuyo SHA-256 está en la lista).
+const MALWARE: &[u8] = b"muestra de malware de prueba para el antivirus de JARVIS-OS";
+
+/// La lista de MalwareBazaar de mentira: la muestra y un programa de Linux marcado.
+fn malware_feed() -> String {
+    use jarvis_desktop::antivirus::{hex, sha256};
+    format!(
+        "# MalwareBazaar recent malware samples (SHA256 hashes)
+#
+# sha256_hash
+{}
+{}
+",
+        hex(&sha256(MALWARE)),
+        hex(&sha256(&tiny_elf(None)))
+    )
+}
+
+/// El archivo de prueba EICAR, armado de a partes (escrito de corrido, el antivirus del
+/// anfitrión marcaría este archivo).
+fn eicar() -> Vec<u8> {
+    [
+        r"X5O!P%@AP[4\PZX54(P^)7CC)7}$",
+        "EICAR-STANDARD-",
+        "ANTIVIRUS-TEST-",
+        "FILE!$H+H*",
+    ]
+    .concat()
+    .into_bytes()
+}
+
+#[test]
+fn el_antivirus_bloquea_lo_infectado_y_lo_pone_en_cuarentena() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let out = run(&mut t, "antivirus");
+    assert!(out.contains("Protección en tiempo real: activada"), "{out}");
+    assert!(out.contains("Firmas: 0"), "{out}");
+    // Actualizar: las firmas de MalwareBazaar se suman a la base.
+    let out = run(&mut t, "antivirus actualizar");
+    assert!(
+        out.contains("2 firmas nuevas. La base tiene 2 firmas."),
+        "{out}"
+    );
+    assert!(run(&mut t, "antivirus actualizar").contains("0 firmas nuevas"));
+    // Una descarga infectada va derecho a cuarentena (y se avisa).
+    let out = run(
+        &mut t,
+        "curl -o /Documentos/malo.bin http://ejemplo.test/malo.bin",
+    );
+    assert!(
+        out.contains("Amenaza bloqueada en /Documentos/malo.bin"),
+        "{out}"
+    );
+    assert!(out.contains("/Cuarentena/malo.bin"), "{out}");
+    assert!(!existe(&mut t, "/Documentos/malo.bin"));
+    assert!(existe(&mut t, "/Cuarentena/malo.bin"));
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l == "ANTIVIRUS_AMENAZA /Documentos/malo.bin MalwareBazaar")
+    );
+    // Escanear una carpeta: el archivo de prueba EICAR.
+    t.d.fs_mut()
+        .unwrap()
+        .write_file(
+            "/Documentos/eicar.com",
+            &eicar(),
+            jarvis_fs::Timestamp::EPOCH,
+        )
+        .unwrap();
+    let out = run(&mut t, "antivirus escanear /Documentos");
+    assert!(
+        out.contains("/Documentos/eicar.com: EICAR-Test-File"),
+        "{out}"
+    );
+    assert!(out.contains("Amenazas: 1"), "{out}");
+    assert!(existe(&mut t, "/Cuarentena/eicar.com"));
+    // Un programa marcado no se ejecuta.
+    t.d.fs_mut()
+        .unwrap()
+        .write_file(
+            "/Documentos/marcado",
+            &tiny_elf(None),
+            jarvis_fs::Timestamp::EPOCH,
+        )
+        .unwrap();
+    let out = run(&mut t, "/Documentos/marcado");
+    assert!(out.contains("el antivirus lo bloqueó"), "{out}");
+    assert!(t.d.take_requests().spawn.is_empty());
+    // La cuarentena se puede ver y restaurar.
+    let out = run(&mut t, "antivirus cuarentena");
+    assert!(out.contains("malo.bin  (de /Documentos/malo.bin)"), "{out}");
+    assert!(
+        out.contains("eicar.com  (de /Documentos/eicar.com)"),
+        "{out}"
+    );
+    assert!(
+        run(&mut t, "antivirus restaurar eicar.com")
+            .contains("Restaurado en /Documentos/eicar.com")
+    );
+    assert!(existe(&mut t, "/Documentos/eicar.com"));
+    // Sin protección en tiempo real, lo que se baja no se revisa.
+    assert!(run(&mut t, "antivirus desactivar").contains("DESACTIVADA"));
+    let out = run(
+        &mut t,
+        "curl -o /Documentos/otro.bin http://ejemplo.test/malo.bin",
+    );
+    assert!(!out.contains("Amenaza"), "{out}");
+    assert!(existe(&mut t, "/Documentos/otro.bin"));
 }
 
 /// ¿Está en el disco? (sin cerrar el escritorio, a diferencia de `fatfs_exists`)

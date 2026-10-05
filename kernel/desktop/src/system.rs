@@ -187,6 +187,8 @@ pub struct SystemStats {
     pub displays: Vec<(u32, u32)>,
     /// Los píxeles reservados para el escritorio (0: sin tope).
     pub display_capacity: usize,
+    /// El antivirus: protección, firmas y lo encontrado.
+    pub antivirus: crate::antivirus::Summary,
     /// La sincronización: estado, la otra máquina y cuántos archivos fueron y vinieron.
     pub sync: Option<crate::sync::Status>,
     pub sync_peer: Option<String>,

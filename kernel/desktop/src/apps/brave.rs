@@ -360,8 +360,11 @@ impl Brave {
         match fs.write_file(&path, data, ts) {
             Ok(()) => {
                 ctx.log.push(format!("BRAVE_DESCARGA {path}"));
-                ctx.out
-                    .notify(trf("Descarga guardada en {}", &[&path]), false);
+                // El antivirus la revisa (si está infectada, avisa y va a cuarentena).
+                if crate::antivirus::guard(ctx, &path, data).is_none() {
+                    ctx.out
+                        .notify(trf("Descarga guardada en {}", &[&path]), false);
+                }
             }
             Err(e) => ctx.out.notify(crate::files::error_message(e), true),
         }

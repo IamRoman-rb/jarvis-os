@@ -57,6 +57,7 @@ pub enum Section {
     Storage,
     Security,
     Firewall,
+    Antivirus,
     Sync,
     Microphone,
     Hardware,
@@ -64,7 +65,7 @@ pub enum Section {
     Assistant,
 }
 
-pub const SECTIONS: [Section; 21] = [
+pub const SECTIONS: [Section; 22] = [
     Section::System,
     Section::Displays,
     Section::Personalization,
@@ -81,6 +82,7 @@ pub const SECTIONS: [Section; 21] = [
     Section::Storage,
     Section::Security,
     Section::Firewall,
+    Section::Antivirus,
     Section::Sync,
     Section::Microphone,
     Section::Hardware,
@@ -92,7 +94,7 @@ pub const SECTIONS: [Section; 21] = [
 pub const SOUND: usize = 10;
 
 /// El número de la sección Hardware (para `Launch::Settings` y el comando `instalar`).
-pub const HARDWARE: usize = 18;
+pub const HARDWARE: usize = 19;
 
 impl Section {
     pub fn name(self) -> &'static str {
@@ -114,6 +116,7 @@ impl Section {
             Section::Storage => tr("Almacenamiento"),
             Section::Security => tr("Privacidad y seguridad"),
             Section::Firewall => tr("Firewall"),
+            Section::Antivirus => tr("Antivirus"),
             Section::Sync => tr("Sincronización"),
             Section::Microphone => tr("Micrófono"),
             Section::Assistant => tr("Asistente (IA)"),
@@ -140,6 +143,7 @@ impl Section {
             Section::Storage => Icon::Folder,
             Section::Security => Icon::Lock,
             Section::Firewall => Icon::Globe,
+            Section::Antivirus => Icon::Shield,
             Section::Sync => Icon::Folder,
             Section::Microphone => Icon::Mic,
             Section::Assistant => Icon::Chat,
@@ -226,6 +230,11 @@ pub enum Opt {
     FwAddSite,
     FwRule(usize),
     FwShowLog,
+    /// El antivirus: la protección en tiempo real, actualizar, escanear y la cuarentena.
+    AvEnabled,
+    AvUpdate,
+    AvScan,
+    AvQuarantine,
     /// Instalar en el disco N de `SystemStats::disks` (K13).
     Install(usize),
     /// Wi-Fi (K14): buscar, conectarse a la red N de la lista, la contraseña, desconectarse.
@@ -1257,6 +1266,48 @@ impl Settings {
                     ),
                 ]
             }
+            Section::Antivirus => {
+                let av = &stats.antivirus;
+                alloc::vec![
+                    Row::new(
+                        Opt::AvEnabled,
+                        tr("Protección en tiempo real"),
+                        tr(
+                            "Revisa lo que se baja (Brave, curl, apt, winget) y cada programa antes de ejecutarlo"
+                        ),
+                        on(av.enabled)
+                    ),
+                    Row::new(
+                        Opt::AvUpdate,
+                        tr("Firmas de malware"),
+                        match av.updated {
+                            Some(u) => trf(
+                                "{} firmas de MalwareBazaar, actualizadas el {}",
+                                &[&av.signatures.to_string(), &crate::antivirus::date(u)],
+                            ),
+                            None => tr("Todavía no se bajaron: ACTUALIZAR").into(),
+                        },
+                        Button(tr("ACTUALIZAR"))
+                    ),
+                    Row::new(
+                        Opt::AvScan,
+                        tr("Escanear todo el disco"),
+                        trf(
+                            "En esta sesión: {} archivos revisados, {} amenazas",
+                            &[&av.scanned.to_string(), &av.found.to_string()],
+                        ),
+                        Button(tr("ESCANEAR"))
+                    ),
+                    Row::new(
+                        Opt::AvQuarantine,
+                        tr("Cuarentena"),
+                        tr(
+                            "Lo infectado se aparta en /Cuarentena: no se borra ni se puede ejecutar"
+                        ),
+                        Button(tr("VER"))
+                    ),
+                ]
+            }
             Section::Firewall => {
                 let fw = &c.firewall;
                 let mut rows = alloc::vec![
@@ -2219,6 +2270,28 @@ impl Settings {
                     c.firewall.rules.remove(i);
                     self.selected = self.selected.saturating_sub(1);
                 }
+            }
+            Opt::AvEnabled => {
+                let now = ctx.timestamp();
+                ctx.antivirus.enabled = !ctx.antivirus.enabled;
+                if let Some(fs) = ctx.fs.as_deref_mut() {
+                    ctx.antivirus.load(fs);
+                    let _ = ctx.antivirus.save_state(fs, now);
+                }
+                ctx.log.push(format!(
+                    "ANTIVIRUS_PROTECCION {}",
+                    if ctx.antivirus.enabled { "si" } else { "no" }
+                ));
+                return;
+            }
+            Opt::AvUpdate | Opt::AvScan | Opt::AvQuarantine => {
+                let cmd = match opt {
+                    Opt::AvUpdate => "antivirus actualizar",
+                    Opt::AvScan => "antivirus escanear /",
+                    _ => "antivirus cuarentena",
+                };
+                ctx.out.launch.push(Launch::Terminal(Some(cmd.into())));
+                return;
             }
             Opt::FwShowLog => {
                 ctx.out

@@ -304,7 +304,7 @@ impl Procs {
 }
 
 /// Segundos desde 1970 de una fecha del FAT32 (tomada como UTC).
-fn unix_seconds(t: jarvis_fs::Timestamp) -> u64 {
+pub(crate) fn unix_seconds(t: jarvis_fs::Timestamp) -> u64 {
     // days_from_civil (Howard Hinnant): días desde 1970-01-01 del calendario gregoriano.
     let (y, m, d) = (i64::from(t.year), i64::from(t.month), i64::from(t.day));
     let y = if m <= 2 { y - 1 } else { y };

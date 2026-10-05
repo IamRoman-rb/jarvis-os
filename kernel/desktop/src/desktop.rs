@@ -412,6 +412,7 @@ pub struct Desktop<D: BlockDevice> {
     procs: crate::procs::Procs,
     /// Los parlantes (K12): el mezclador.
     sound: crate::sound::Sound,
+    antivirus: crate::antivirus::Antivirus,
 }
 
 /// Arma un `Ctx` con campos separados de `self` (así se puede usar junto con `self.slots`).
@@ -428,6 +429,7 @@ macro_rules! ctx {
             config: &$s.config,
             clipboard: &mut $s.clipboard,
             audio: &mut $s.sound,
+            antivirus: &mut $s.antivirus,
         }
     };
 }
@@ -535,6 +537,7 @@ impl<D: BlockDevice> Desktop<D> {
             fw_blocked_streams: Vec::new(),
             procs: Default::default(),
             sound: Default::default(),
+            antivirus: crate::antivirus::Antivirus::new(),
             last_clock: None,
             sync: Default::default(),
             brain: Default::default(),
@@ -963,6 +966,10 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.mic = mic;
         self.stats.displays = self.outputs.clone();
         self.stats.display_capacity = self.display_capacity;
+        if let Some(fs) = self.fs.as_mut() {
+            self.antivirus.load(fs);
+        }
+        self.stats.antivirus = self.antivirus.summary();
         // K14: la primera vez que aparece la placa Wi-Fi, a la red guardada (o a buscar redes).
         if !self.wifi_started && self.stats.net.wifi.is_some() {
             self.wifi_started = true;

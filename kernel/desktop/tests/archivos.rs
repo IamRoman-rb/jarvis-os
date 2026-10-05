@@ -321,7 +321,7 @@ fn cada_tipo_se_abre_con_la_app_predeterminada_que_se_elija() {
     t.combo(Mods::ALT, Key::F(4));
     // Configuración → Aplicaciones predeterminadas: Navegador web, Buscador, Carpetas, Texto,
     // Código y Páginas web guardadas (la sexta fila): → elige la terminal.
-    t.d.open(Launch::Settings(19), t.now, CLOCK);
+    t.d.open(Launch::Settings(20), t.now, CLOCK);
     let Some(App::Settings(st)) = t.d.app(AppKind::Settings) else {
         panic!("no se abrió Configuración");
     };

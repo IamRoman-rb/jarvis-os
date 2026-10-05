@@ -1147,7 +1147,7 @@ pub(crate) fn unique_name<D: BlockDevice>(fs: &mut FileSystem<D>, dir: &str, nam
 
 /// Mueve `src` a la carpeta `dir`; si ahí ya hay algo con ese nombre, le agrega " (2)".
 /// Devuelve el nombre final.
-fn move_unique<D: BlockDevice>(
+pub(crate) fn move_unique<D: BlockDevice>(
     fs: &mut FileSystem<D>,
     src: &str,
     dir: &str,

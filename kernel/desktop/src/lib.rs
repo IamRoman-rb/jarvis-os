@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+pub mod antivirus;
 pub mod apps;
 pub mod audio;
 pub mod bmp;

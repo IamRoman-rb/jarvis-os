@@ -584,6 +584,16 @@ fn install_deb<D: BlockDevice>(
     ctx: &mut Ctx<'_, D>,
     out: &mut Out,
 ) -> Result<(), String> {
+    // El antivirus revisa el paquete antes de desarmarlo.
+    if let Some(fs) = ctx.fs.as_deref_mut() {
+        ctx.antivirus.load(fs);
+        if ctx.antivirus.enabled
+            && let Some(t) = ctx.antivirus.scan(deb)
+        {
+            ctx.log.push(format!("ANTIVIRUS_BLOQUEO {}", pkg.name));
+            return Err(format!("el antivirus lo bloqueó: {}", t.name()));
+        }
+    }
     out.info(&format!(
         "Desempaquetando {} ({})...",
         pkg.name, pkg.version

@@ -81,6 +81,10 @@ pub(crate) enum Job {
     Apt(alloc::boxed::Box<apt::AptJob>),
     Snap(alloc::boxed::Box<snap::SnapJob>),
     Winget(alloc::boxed::Box<winget::WingetJob>),
+    /// `antivirus actualizar`: bajando las firmas.
+    Antivirus {
+        id: u32,
+    },
     Sleep {
         until: u64,
     },
@@ -95,7 +99,7 @@ pub(crate) enum Job {
 impl Job {
     fn net_id(&self) -> Option<u32> {
         match self {
-            Job::Fetch { id, .. } | Job::Ping { id, .. } => Some(*id),
+            Job::Fetch { id, .. } | Job::Ping { id, .. } | Job::Antivirus { id } => Some(*id),
             Job::Apt(a) => a.waiting_id(),
             Job::Snap(s) => s.waiting_id(),
             Job::Winget(w) => w.waiting_id(),
@@ -822,6 +826,7 @@ impl Shell {
             Job::Apt(job) => job.on_response(id, result, ctx, &mut out),
             Job::Snap(job) => job.on_response(result, ctx, &mut out),
             Job::Winget(job) => job.on_response(result, ctx, &mut out),
+            Job::Antivirus { .. } => Some(crate::antivirus::on_update(result, ctx, &mut out)),
             Job::Sleep { .. } | Job::Process { .. } => Some((0, String::new())),
         };
         match finished {

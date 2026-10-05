@@ -18,6 +18,10 @@ use crate::web::url::Url;
 /// Comandos que existen (para `help`, `which` y completar con Tab).
 pub const NAMES: &[(&str, &str)] = &[
     ("alias", "define un alias: alias ll='ls -l'"),
+    (
+        "antivirus",
+        "revisa archivos contra malware (actualizar, escanear, cuarentena)",
+    ),
     ("apt", "gestor de paquetes: apt install neofetch"),
     ("basename", "el nombre de una ruta, sin carpetas"),
     ("cal", "calendario del mes"),
@@ -1290,6 +1294,13 @@ impl Shell {
                 });
             }
             "curl" | "wget" => return self.download(name, argv, ctx, e),
+            "antivirus" => {
+                let root = argv.get(2).map(|r| self.abs(r));
+                return match crate::antivirus::command(argv, root, ctx, o, e) {
+                    Ok(code) => Res::Code(code),
+                    Err(id) => Res::Wait(Job::Antivirus { id }),
+                };
+            }
             "apt" => {
                 return match apt::run(argv, ctx, o, e, out) {
                     Ok(code) => Res::Code(code),
@@ -2080,6 +2091,18 @@ impl Shell {
                 return Res::Code(126);
             }
         };
+        // El antivirus revisa el programa antes de ejecutarlo.
+        let now = ctx.timestamp();
+        if let Some(fs) = ctx.fs.as_deref_mut()
+            && let Err(why) = ctx.antivirus.may_run(fs, path, &image, now)
+        {
+            e.push_str(&format!("{}: {why}\n", argv[0]));
+            ctx.log.push(format!("ANTIVIRUS_BLOQUEO {path}"));
+            return Res::Code(126);
+        }
+        let Some(fs) = Self::fs(ctx, e) else {
+            return Res::Code(1);
+        };
         // Un programa dinámico (glibc) necesita su intérprete: va en el pedido.
         let interp = match binfmt::detect(&image) {
             binfmt::Kind::Elf(info) => match info.interpreter {
@@ -2203,6 +2226,10 @@ pub(crate) fn finish_fetch<D: BlockDevice>(
                 Ok(()) => {
                     ctx.log
                         .push(format!("DESCARGA {path} ({} bytes)", resp.body.len()));
+                    if let Some(msg) = crate::antivirus::guard(ctx, path, &resp.body) {
+                        out.err(&msg);
+                        return (1, String::new());
+                    }
                     out.info(&format!(
                         "«{path}» guardado [{}]\n{}",
                         resp.body.len(),

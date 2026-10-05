@@ -170,6 +170,7 @@ static EN: &[(&str, &str)] = &[
     ("Animaciones", "Animations"),
     ("Animación al abrir y cerrar", "Open and close animation"),
     ("Anotar lo bloqueado", "Log what's blocked"),
+    ("Antivirus", "Antivirus"),
     (
         "Apagada: generá un código acá o escribí el de la otra máquina",
         "Off: generate a code here or type the other machine's",
@@ -319,6 +320,7 @@ static EN: &[(&str, &str)] = &[
         "Cuando me conecten con Claude, voy a poder responderte de verdad.",
         "Once I'm connected to Claude, I'll be able to really answer you.",
     ),
+    ("Cuarentena", "Quarantine"),
     ("Cuenta de Claude", "Claude account"),
     ("Cursor grande", "Large cursor"),
     (
@@ -371,6 +373,7 @@ static EN: &[(&str, &str)] = &[
     ("Documentos", "Documents"),
     ("Duplicar", "Duplicate"),
     ("ENLACES RÁPIDOS (WIN+X)", "QUICK LINKS (WIN+X)"),
+    ("ESCANEAR", "SCAN"),
     ("ESCUCHAR", "LISTEN"),
     ("ESTADO", "STATUS"),
     ("Editor de texto", "Text editor"),
@@ -441,6 +444,7 @@ static EN: &[(&str, &str)] = &[
         "Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3).",
         "That network uses a security JARVIS-OS does not support (WEP, WPA or WPA3).",
     ),
+    ("Escanear todo el disco", "Scan the whole disk"),
     (
         "Escribí para buscar apps o la web",
         "Type to search apps or the web",
@@ -466,6 +470,7 @@ static EN: &[(&str, &str)] = &[
     ("Facultad", "University"),
     ("Febrero", "February"),
     ("Firewall", "Firewall"),
+    ("Firmas de malware", "Malware signatures"),
     ("Firmware", "Firmware"),
     (
         "Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan",
@@ -599,6 +604,10 @@ static EN: &[(&str, &str)] = &[
     ("Letra de la terminal", "Terminal font"),
     ("Letra del editor", "Editor font"),
     ("Listo", "Done"),
+    (
+        "Lo infectado se aparta en /Cuarentena: no se borra ni se puede ejecutar",
+        "Infected files are set aside in /Cuarentena: not deleted and they cannot run",
+    ),
     ("Lo mismo que Win+L", "Same as Win+L"),
     ("Lo primero que abre Brave", "The first thing Brave opens"),
     ("Lo que no dice ninguna regla", "What no rule mentions"),
@@ -777,6 +786,7 @@ static EN: &[(&str, &str)] = &[
     ("Procesador", "Processor"),
     ("Programas de Windows (winget)", "Windows programs (winget)"),
     ("Programas instalados", "Installed programs"),
+    ("Protección en tiempo real", "Real-time protection"),
     ("Proyecto", "Project"),
     ("Proyectos", "Projects"),
     ("Puente de Brave", "Brave bridge"),
@@ -807,6 +817,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Revisa cada conexión que sale antes de que llegue a la red",
         "Checks every outgoing connection before it reaches the network",
+    ),
+    (
+        "Revisa lo que se baja (Brave, curl, apt, winget) y cada programa antes de ejecutarlo",
+        "Checks what is downloaded (Brave, curl, apt, winget) and every program before it runs",
     ),
     ("Rojo", "Red"),
     ("Rosa", "Pink"),
@@ -909,6 +923,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Todavía no instalaste ninguno. Probá: apt install neofetch",
         "You haven't installed any yet. Try: apt install neofetch",
+    ),
+    (
+        "Todavía no se bajaron: ACTUALIZAR",
+        "Not downloaded yet: UPDATE",
     ),
     (
         "Todavía no tengo voz propia, pero ya sé cómo moverme cuando hable.",
@@ -1123,6 +1141,7 @@ static PT: &[(&str, &str)] = &[
     ("Animaciones", "Animações"),
     ("Animación al abrir y cerrar", "Animação ao abrir e fechar"),
     ("Anotar lo bloqueado", "Registrar o bloqueado"),
+    ("Antivirus", "Antivírus"),
     (
         "Apagada: generá un código acá o escribí el de la otra máquina",
         "Desligada: gere um código aqui ou digite o da outra máquina",
@@ -1284,6 +1303,7 @@ static PT: &[(&str, &str)] = &[
         "Cuando me conecten con Claude, voy a poder responderte de verdad.",
         "Quando me conectarem ao Claude, vou poder te responder de verdade.",
     ),
+    ("Cuarentena", "Quarentena"),
     ("Cuenta de Claude", "Conta do Claude"),
     ("Cursor grande", "Cursor grande"),
     (
@@ -1336,6 +1356,7 @@ static PT: &[(&str, &str)] = &[
     ("Documentos", "Documentos"),
     ("Duplicar", "Duplicar"),
     ("ENLACES RÁPIDOS (WIN+X)", "LINKS RÁPIDOS (WIN+X)"),
+    ("ESCANEAR", "VERIFICAR"),
     ("ESCUCHAR", "OUVIR"),
     ("ESTADO", "ESTADO"),
     ("Editor de texto", "Editor de texto"),
@@ -1409,6 +1430,7 @@ static PT: &[(&str, &str)] = &[
         "Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3).",
         "Essa rede usa uma segurança que o JARVIS-OS não suporta (WEP, WPA ou WPA3).",
     ),
+    ("Escanear todo el disco", "Verificar o disco inteiro"),
     (
         "Escribí para buscar apps o la web",
         "Digite para buscar apps ou na web",
@@ -1434,6 +1456,7 @@ static PT: &[(&str, &str)] = &[
     ("Facultad", "Faculdade"),
     ("Febrero", "Fevereiro"),
     ("Firewall", "Firewall"),
+    ("Firmas de malware", "Assinaturas de malware"),
     ("Firmware", "Firmware"),
     (
         "Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan",
@@ -1570,6 +1593,10 @@ static PT: &[(&str, &str)] = &[
     ("Letra de la terminal", "Fonte do terminal"),
     ("Letra del editor", "Fonte do editor"),
     ("Listo", "Pronto"),
+    (
+        "Lo infectado se aparta en /Cuarentena: no se borra ni se puede ejecutar",
+        "O que estiver infectado vai para /Cuarentena: não é apagado nem pode rodar",
+    ),
     ("Lo mismo que Win+L", "O mesmo que Win+L"),
     (
         "Lo primero que abre Brave",
@@ -1757,6 +1784,7 @@ static PT: &[(&str, &str)] = &[
         "Programas do Windows (winget)",
     ),
     ("Programas instalados", "Programas instalados"),
+    ("Protección en tiempo real", "Proteção em tempo real"),
     ("Proyecto", "Projeto"),
     ("Proyectos", "Projetos"),
     ("Puente de Brave", "Ponte do Brave"),
@@ -1790,6 +1818,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Revisa cada conexión que sale antes de que llegue a la red",
         "Verifica cada conexão de saída antes de chegar à rede",
+    ),
+    (
+        "Revisa lo que se baja (Brave, curl, apt, winget) y cada programa antes de ejecutarlo",
+        "Verifica o que é baixado (Brave, curl, apt, winget) e cada programa antes de rodar",
     ),
     ("Rojo", "Vermelho"),
     ("Rosa", "Rosa"),
@@ -1892,6 +1924,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Todavía no instalaste ninguno. Probá: apt install neofetch",
         "Você ainda não instalou nenhum. Tente: apt install neofetch",
+    ),
+    (
+        "Todavía no se bajaron: ACTUALIZAR",
+        "Ainda não foram baixadas: ATUALIZAR",
     ),
     (
         "Todavía no tengo voz propia, pero ya sé cómo moverme cuando hable.",
@@ -2054,6 +2090,14 @@ static EN_F: &[(&str, &str)] = &[
         "\"{}\" will be deleted forever.",
     ),
     ("Abrir {}", "Open {}"),
+    (
+        "Amenaza bloqueada en {}: {}. Quedó en cuarentena ({}).",
+        "Threat blocked in {}: {}. It was quarantined ({}).",
+    ),
+    (
+        "Amenaza en {}: {}. No se pudo mover a cuarentena: {}",
+        "Threat in {}: {}. It could not be quarantined: {}",
+    ),
     ("Archivos · {}", "Files · {}"),
     ("Buenas noches, {}.", "Good evening, {}."),
     ("Buenas tardes, {}.", "Good afternoon, {}."),
@@ -2079,6 +2123,10 @@ static EN_F: &[(&str, &str)] = &[
     (
         "ENCENDIDO HACE {} · {} FPS · {} MS POR FRAME",
         "UP {} · {} FPS · {} MS PER FRAME",
+    ),
+    (
+        "En esta sesión: {} archivos revisados, {} amenazas",
+        "This session: {} files checked, {} threats",
     ),
     ("Escritorio {} de {}", "Desktop {} of {}"),
     ("Firewall: bloqueó {} ({})", "Firewall: blocked {} ({})"),
@@ -2158,6 +2206,10 @@ static EN_F: &[(&str, &str)] = &[
     ),
     ("{} elementos se borraron.", "{} items were deleted."),
     ("{} elementos · {}", "{} items · {}"),
+    (
+        "{} firmas de MalwareBazaar, actualizadas el {}",
+        "{} MalwareBazaar signatures, updated on {}",
+    ),
     ("{} libres", "{} free"),
     ("{} min", "{} min"),
     ("{} redes a la vista", "{} networks in range"),
@@ -2189,6 +2241,14 @@ static PT_F: &[(&str, &str)] = &[
         "\"{}\" será apagado para sempre.",
     ),
     ("Abrir {}", "Abrir {}"),
+    (
+        "Amenaza bloqueada en {}: {}. Quedó en cuarentena ({}).",
+        "Ameaça bloqueada em {}: {}. Foi para a quarentena ({}).",
+    ),
+    (
+        "Amenaza en {}: {}. No se pudo mover a cuarentena: {}",
+        "Ameaça em {}: {}. Não foi possível pôr em quarentena: {}",
+    ),
     ("Archivos · {}", "Arquivos · {}"),
     ("Buenas noches, {}.", "Boa noite, {}."),
     ("Buenas tardes, {}.", "Boa tarde, {}."),
@@ -2214,6 +2274,10 @@ static PT_F: &[(&str, &str)] = &[
     (
         "ENCENDIDO HACE {} · {} FPS · {} MS POR FRAME",
         "LIGADO HÁ {} · {} FPS · {} MS POR QUADRO",
+    ),
+    (
+        "En esta sesión: {} archivos revisados, {} amenazas",
+        "Nesta sessão: {} arquivos verificados, {} ameaças",
     ),
     ("Escritorio {} de {}", "Área de trabalho {} de {}"),
     ("Firewall: bloqueó {} ({})", "Firewall: bloqueou {} ({})"),
@@ -2296,6 +2360,10 @@ static PT_F: &[(&str, &str)] = &[
     ),
     ("{} elementos se borraron.", "{} itens foram apagados."),
     ("{} elementos · {}", "{} itens · {}"),
+    (
+        "{} firmas de MalwareBazaar, actualizadas el {}",
+        "{} assinaturas do MalwareBazaar, atualizadas em {}",
+    ),
     ("{} libres", "{} livres"),
     ("{} min", "{} min"),
     ("{} redes a la vista", "{} redes ao alcance"),

@@ -55,6 +55,7 @@ fn main() -> ExitCode {
         "brave" => brave_cmd(),
         "pantallas" => build().and_then(|img| screens(&img, &fresh_disk("disco-pantallas.img")?)),
         "glibc" => build().and_then(|img| glibc(&img, &fresh_disk("disco-glibc.img")?)),
+        "antivirus" => build().and_then(|img| antivirus(&img, &fresh_disk("disco-antivirus.img")?)),
         "relay" => sincro::relay_cmd(),
         "iso" => build().and_then(|img| iso_cmd(&img)),
         "run2" => build().and_then(|img| sincro::run2(&img)),
@@ -1644,6 +1645,32 @@ fn glibc(image: &Path, disk: &Path) -> Result<()> {
     s.quit();
     fin?;
     println!("ok: apt install hello (Debian, glibc) y hello corrió");
+    Ok(())
+}
+
+/// `cargo xtask antivirus`: el antivirus baja las firmas de verdad (MalwareBazaar, por HTTPS con
+/// el TLS del kernel), muestra su estado y escanea el disco. Necesita internet.
+fn antivirus(image: &Path, disk: &Path) -> Result<()> {
+    let mut s = Session::start(image, disk)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    s.type_text("antivirus actualizar")?;
+    s.monitor("sendkey ret")?;
+    let firmas = s.wait_for("ANTIVIRUS_FIRMAS", Duration::from_secs(120));
+    if firmas.is_ok() {
+        s.type_text("antivirus escanear /")?;
+        s.monitor("sendkey ret")?;
+        let _ = s.wait_for("ANTIVIRUS_ESCANEO", Duration::from_secs(120));
+        s.type_text("antivirus")?;
+        s.monitor("sendkey ret")?;
+        thread::sleep(Duration::from_secs(2));
+    }
+    s.screenshot(&target_dir().join("jarvis-os-antivirus.png"))?;
+    s.quit();
+    firmas?;
+    println!("ok: el antivirus bajó las firmas y escaneó el disco");
     Ok(())
 }
 

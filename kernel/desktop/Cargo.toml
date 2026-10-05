@@ -19,6 +19,12 @@ jarvis-sync = { path = "../sync" }
 jarvis-wifi = { path = "../wifi" }
 # Los paquetes de Debian (`apt`): XZ sin `std` (term/debian.rs).
 xz4rust = { version = "0.2", default-features = false, features = ["alloc", "crc64"] }
+# Las firmas del antivirus son SHA-256 (antivirus.rs): las mismas versiones que tls y wifi.
+sha2 = { version = "0.10", default-features = false }
+
+# En el kernel (sin SSE), SHA-2 por software, como en jarvis-tls.
+[target.'cfg(target_os = "none")'.dependencies]
+sha2 = { version = "0.10", default-features = false, features = ["force-soft"] }
 
 [dev-dependencies]
 fatfs = "0.3.6"

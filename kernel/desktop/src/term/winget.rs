@@ -343,6 +343,10 @@ impl WingetJob {
                 db.push_str(&format!("{}|{}|{path}\n", self.id, self.version));
                 let _ = ensure_dirs(fs, "/Sistema/winget", now)
                     .and_then(|()| fs.write_file(DB, db.as_bytes(), now));
+                if let Some(msg) = crate::antivirus::guard(ctx, &path, &r.body) {
+                    out.err(&msg);
+                    return Some((1, String::new()));
+                }
                 let what = super::binfmt::describe(&r.body[..r.body.len().min(256 * 1024)]);
                 ctx.log
                     .push(format!("WINGET_DESCARGADO {} {path}", self.id));
