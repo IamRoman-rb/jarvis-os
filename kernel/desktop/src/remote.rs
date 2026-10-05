@@ -21,6 +21,10 @@ pub const PORT: u16 = 8119;
 pub const TILE: u16 = 64;
 /// Tope de un mensaje (un cuadro 1920×1080 sin comprimir son 6 MiB).
 pub const MAX_MSG: usize = 8 * 1024 * 1024;
+/// Una descarga de Brave viaja en pedazos de este tamaño.
+pub const DOWNLOAD_CHUNK: usize = 1024 * 1024;
+/// La descarga más grande que se pasa a JARVIS-OS (el archivo entra entero en memoria).
+pub const MAX_DOWNLOAD: u32 = 128 * 1024 * 1024;
 
 /// Modificadores, con los mismos bits que usa el protocolo de DevTools.
 pub const MOD_ALT: u8 = 1;
@@ -127,6 +131,14 @@ pub enum FromBrave {
     State(TabsState),
     /// Algo salió mal del lado del anfitrión (Brave no está instalado, token incorrecto…).
     Error(String),
+    /// Terminó una descarga: su nombre y tamaño. Después vienen los pedazos (`DownloadData`) y
+    /// `DownloadDone`. Una descarga más grande que [`MAX_DOWNLOAD`] llega sin pedazos.
+    Download {
+        name: String,
+        size: u32,
+    },
+    DownloadData(Vec<u8>),
+    DownloadDone,
 }
 
 // --- Codificación -------------------------------------------------------------------------------
@@ -335,6 +347,9 @@ impl FromBrave {
                     .done()
             }
             FromBrave::Error(e) => W::new(0x83).str(e).done(),
+            FromBrave::Download { name, size } => W::new(0x84).str(name).u32(*size).done(),
+            FromBrave::DownloadData(d) => W::new(0x85).bytes(d).done(),
+            FromBrave::DownloadDone => W::new(0x86).done(),
         }
     }
 
@@ -373,6 +388,12 @@ impl FromBrave {
                 })
             }
             0x83 => FromBrave::Error(r.str()?),
+            0x84 => FromBrave::Download {
+                name: r.str()?,
+                size: r.u32()?,
+            },
+            0x85 => FromBrave::DownloadData(r.bytes()?),
+            0x86 => FromBrave::DownloadDone,
             _ => return None,
         })
     }
@@ -511,10 +532,22 @@ mod tests {
         f.push(&frame.encode());
         f.push(&state.encode());
         f.push(&FromBrave::Error("sin Brave".into()).encode());
+        let download = [
+            FromBrave::Download {
+                name: "programa.exe".into(),
+                size: 3,
+            },
+            FromBrave::DownloadData(vec![b'M', b'Z', 0]),
+            FromBrave::DownloadDone,
+        ];
+        for m in &download {
+            f.push(&m.encode());
+        }
         let got: Vec<FromBrave> = core::iter::from_fn(|| f.next_message())
             .map(|b| FromBrave::decode(&b.unwrap()).unwrap())
             .collect();
-        assert_eq!(got.len(), 3);
+        assert_eq!(got.len(), 6);
+        assert_eq!(got[3..], download);
         if let FromBrave::Frame { tiles, .. } = &got[0] {
             assert_eq!(tile_pixels(&tiles[0]).unwrap(), rgb);
         } else {

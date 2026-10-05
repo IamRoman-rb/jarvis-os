@@ -696,6 +696,10 @@ static EN: &[(&str, &str)] = &[
         "No hay disco para guardar la captura.",
         "There is no disk to save the screenshot.",
     ),
+    (
+        "No hay disco para guardar la descarga",
+        "There is no disk to save the download",
+    ),
     ("No hay disco.", "No disk."),
     (
         "No hay disco: arrancá QEMU con el disco virtual",
@@ -1669,6 +1673,10 @@ static PT: &[(&str, &str)] = &[
         "No hay disco para guardar la captura.",
         "Não há disco para salvar a captura.",
     ),
+    (
+        "No hay disco para guardar la descarga",
+        "Não há disco para salvar o download",
+    ),
     ("No hay disco.", "Sem disco."),
     (
         "No hay disco: arrancá QEMU con el disco virtual",
@@ -2058,6 +2066,7 @@ static EN_F: &[(&str, &str)] = &[
     ("Conectando con Brave{}", "Connecting to Brave{}"),
     ("Configuración · {}", "Settings · {}"),
     ("Contraseña de «{}»", "Password for «{}»"),
+    ("Descarga guardada en {}", "Download saved to {}"),
     (
         "Desde {}: se copia el arranque y se crea la partición de datos",
         "From {}: the boot files are copied and the data partition is created",
@@ -2095,6 +2104,10 @@ static EN_F: &[(&str, &str)] = &[
     (
         "No se pudo guardar la configuración: {}",
         "Couldn't save the settings: {}",
+    ),
+    (
+        "No se pudo traer {}: es muy grande o llegó incompleto",
+        "Could not bring {}: it is too big or arrived incomplete",
     ),
     ("No se puede reproducir: {}", "Cannot play: {}"),
     (
@@ -2188,6 +2201,7 @@ static PT_F: &[(&str, &str)] = &[
     ("Conectando con Brave{}", "Conectando ao Brave{}"),
     ("Configuración · {}", "Configurações · {}"),
     ("Contraseña de «{}»", "Senha de «{}»"),
+    ("Descarga guardada en {}", "Download salvo em {}"),
     (
         "Desde {}: se copia el arranque y se crea la partición de datos",
         "De {}: a inicialização é copiada e a partição de dados é criada",
@@ -2225,6 +2239,10 @@ static PT_F: &[(&str, &str)] = &[
     (
         "No se pudo guardar la configuración: {}",
         "Não foi possível salvar as configurações: {}",
+    ),
+    (
+        "No se pudo traer {}: es muy grande o llegó incompleto",
+        "Não foi possível trazer {}: é muito grande ou chegou incompleto",
     ),
     (
         "No se puede reproducir: {}",

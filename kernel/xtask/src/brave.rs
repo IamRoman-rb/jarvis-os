@@ -286,6 +286,11 @@ struct Brave {
     held: Button,
     /// Dirección pedida antes de que hubiera una pestaña.
     pending_nav: Option<String>,
+    /// Dónde deja Brave lo que se baja (en el perfil), las descargas en curso (guid → nombre) y
+    /// las terminadas que falta pasarle al kernel.
+    downloads_dir: PathBuf,
+    downloads: HashMap<String, String>,
+    finished: Vec<(String, PathBuf)>,
 }
 
 impl Brave {
@@ -333,7 +338,12 @@ impl Brave {
         ws.get_ref()
             .set_read_timeout(Some(Duration::from_millis(5)))
             .map_err(|e| e.to_string())?;
+        let downloads_dir = profile.join("descargas");
+        std::fs::create_dir_all(&downloads_dir).map_err(|e| e.to_string())?;
         let mut b = Brave {
+            downloads_dir,
+            downloads: HashMap::new(),
+            finished: Vec::new(),
             child,
             ws,
             next_id: 0,
@@ -355,6 +365,15 @@ impl Brave {
             None,
             "Target.setDiscoverTargets",
             json!({"discover": true}),
+            Pending::Ignore,
+        )?;
+        // Las descargas: cada una con su guid como nombre, en la carpeta del perfil, y con
+        // eventos para saber cuándo terminó (el puente después se la pasa a JARVIS-OS).
+        let dir = b.downloads_dir.display().to_string();
+        b.call(
+            None,
+            "Browser.setDownloadBehavior",
+            json!({"behavior": "allowAndName", "downloadPath": dir, "eventsEnabled": true}),
             Pending::Ignore,
         )?;
         Ok(b)
@@ -464,6 +483,7 @@ impl Brave {
                 self.state_dirty = false;
                 send(client, &FromBrave::State(self.state()))?;
             }
+            self.send_downloads(client)?;
         }
     }
 
@@ -814,7 +834,43 @@ impl Brave {
                     )?;
                 }
             }
+            "Browser.downloadWillBegin" => {
+                let guid = p["guid"].as_str().unwrap_or("").to_string();
+                let name = p["suggestedFilename"].as_str().unwrap_or("descarga");
+                self.downloads.insert(guid, name.to_string());
+            }
+            "Browser.downloadProgress" => {
+                let guid = p["guid"].as_str().unwrap_or("");
+                match p["state"].as_str() {
+                    Some("completed") => {
+                        if let Some(name) = self.downloads.remove(guid) {
+                            self.finished.push((name, self.downloads_dir.join(guid)));
+                        }
+                    }
+                    Some("canceled") => {
+                        self.downloads.remove(guid);
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Pasa al kernel las descargas terminadas (en pedazos) y las borra del anfitrión.
+    fn send_downloads(&mut self, client: &mut TcpStream) -> Result<(), String> {
+        for (name, path) in std::mem::take(&mut self.finished) {
+            let data = std::fs::read(&path).unwrap_or_default();
+            let _ = std::fs::remove_file(&path);
+            let size = u32::try_from(data.len()).unwrap_or(u32::MAX);
+            send(client, &FromBrave::Download { name, size })?;
+            if size <= remote::MAX_DOWNLOAD {
+                for chunk in data.chunks(remote::DOWNLOAD_CHUNK) {
+                    send(client, &FromBrave::DownloadData(chunk.to_vec()))?;
+                }
+            }
+            send(client, &FromBrave::DownloadDone)?;
         }
         Ok(())
     }

@@ -170,6 +170,10 @@ fn brave_probe(url: &str, png: &Path) -> Result<()> {
                     }
                 }
                 FromBrave::Error(e) => return Err(e),
+                FromBrave::Download { name, size } => {
+                    println!("[probar] descarga: {name} ({size} bytes)");
+                }
+                FromBrave::DownloadData(_) | FromBrave::DownloadDone => {}
             }
         }
         let quiet = last_frame.elapsed() > Duration::from_millis(1500);
@@ -1210,6 +1214,16 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("BRAVE_CONECTADO 10.0.2.2:8119", STEP)?;
     let brave_ok = if brave::installed() {
         s.wait_for("BRAVE_FRAME", Duration::from_secs(40))?;
+        // Una descarga en Brave (que corre en el anfitrión: ahí el servidor es 127.0.0.1)
+        // llega a /Descargas de JARVIS-OS.
+        s.monitor("sendkey meta_l-r")?;
+        thread::sleep(Duration::from_millis(500));
+        s.type_text(&format!("ir http://127.0.0.1:{port}/descarga"))?;
+        s.monitor("sendkey ret")?;
+        s.wait_for(
+            "BRAVE_DESCARGA /Descargas/prueba-descarga.bin",
+            Duration::from_secs(40),
+        )?;
         true
     } else {
         s.wait_for("BRAVE_ERROR", STEP)?;

@@ -34,6 +34,8 @@ use crate::widgets::{draw_fit, field_bg, label, light, s16, window_bg};
 pub const TABS_H: i32 = 32;
 pub const BAR_H: i32 = 44;
 const TAB_MAX_W: i32 = 220;
+/// Dónde quedan los archivos que se bajan con Brave.
+const DOWNLOADS: &str = "/Descargas";
 const NEW_TAB_W: i32 = 30;
 /// Cada cuánto como mucho se le avisa al puente que cambió el tamaño (mientras se arrastra el
 /// borde de la ventana llegan decenas de cambios por segundo).
@@ -74,6 +76,8 @@ pub struct Brave {
     server: String,
     token: String,
     home: String,
+    /// La descarga que está llegando: su nombre, el tamaño anunciado y lo que llegó.
+    download: Option<(String, u32, Vec<u8>)>,
 }
 
 impl Brave {
@@ -96,6 +100,7 @@ impl Brave {
             frames: 0,
             retry_at: None,
             last_pos: (0, 0),
+            download: None,
             server: cfg.brave_server.clone(),
             token: cfg.brave_token.clone(),
             home: cfg.brave_home.clone(),
@@ -286,6 +291,79 @@ impl Brave {
                 }
             }
             FromBrave::Error(e) => self.fail(e, ctx),
+            FromBrave::Download { name, size } => {
+                let cap = (size.min(remote::MAX_DOWNLOAD) as usize).min(1 << 20);
+                self.download = Some((name, size, Vec::with_capacity(cap)));
+            }
+            FromBrave::DownloadData(d) => {
+                if let Some((_, size, data)) = self.download.as_mut()
+                    && data.len() + d.len() <= *size as usize
+                {
+                    data.extend_from_slice(&d);
+                }
+            }
+            FromBrave::DownloadDone => {
+                if let Some((name, size, data)) = self.download.take() {
+                    self.save_download(&name, size, &data, ctx);
+                }
+            }
+        }
+    }
+
+    /// Guarda en /Descargas lo que bajó Brave (con " (2)" si ya hay uno con ese nombre).
+    fn save_download<D: BlockDevice>(
+        &mut self,
+        name: &str,
+        size: u32,
+        data: &[u8],
+        ctx: &mut Ctx<'_, D>,
+    ) {
+        if size > remote::MAX_DOWNLOAD || data.len() != size as usize {
+            ctx.log.push(format!("BRAVE_DESCARGA_FALLO {name}"));
+            ctx.out.notify(
+                trf(
+                    "No se pudo traer {}: es muy grande o llegó incompleto",
+                    &[name],
+                ),
+                true,
+            );
+            return;
+        }
+        // Solo el nombre: nada de carpetas ni caracteres que FAT32 no acepta.
+        let clean: String = name
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .chars()
+            .map(|c| {
+                if c.is_control() || "<>:\"|?*".contains(c) {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let clean = if clean.trim().is_empty() {
+            "descarga".to_string()
+        } else {
+            clean
+        };
+        let ts = ctx.timestamp();
+        let Some(fs) = ctx.fs.as_deref_mut() else {
+            ctx.out
+                .notify(tr("No hay disco para guardar la descarga"), true);
+            return;
+        };
+        let _ = crate::term::apt::ensure_dirs(fs, DOWNLOADS, ts);
+        let file = crate::files::unique_name(fs, DOWNLOADS, &clean);
+        let path = format!("{DOWNLOADS}/{file}");
+        match fs.write_file(&path, data, ts) {
+            Ok(()) => {
+                ctx.log.push(format!("BRAVE_DESCARGA {path}"));
+                ctx.out
+                    .notify(trf("Descarga guardada en {}", &[&path]), false);
+            }
+            Err(e) => ctx.out.notify(crate::files::error_message(e), true),
         }
     }
 

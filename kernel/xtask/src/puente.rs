@@ -326,12 +326,29 @@ fn serve_repo(path: &str, want_bmp: bool) -> (u16, &'static str, Vec<u8>) {
 }
 
 /// Servidor HTTP de prueba (para los tests y las capturas): contesta siempre la misma página.
+/// Lo que baja `/descarga` del servidor de prueba.
+pub const TEST_DOWNLOAD: &[u8] = b"JARVIS-OS: descarga de prueba de Brave
+";
+
 pub fn test_server(html: &'static str) -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
-            if read_head(&mut stream).is_ok() {
+            let Ok(head) = read_head(&mut stream) else {
+                continue;
+            };
+            // `/descarga`: un archivo adjunto (para probar las descargas de Brave).
+            if head.split_whitespace().nth(1) == Some("/descarga") {
+                reply(
+                    &mut stream,
+                    200,
+                    "application/octet-stream",
+                    "Content-Disposition: attachment; filename=\"prueba-descarga.bin\"
+",
+                    TEST_DOWNLOAD,
+                );
+            } else {
                 reply(
                     &mut stream,
                     200,

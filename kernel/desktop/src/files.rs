@@ -1135,7 +1135,7 @@ fn ensure_dir<D: BlockDevice>(
 }
 
 /// `name`, o "name (2)", "name (3)"… el primero que no exista en `dir`.
-fn unique_name<D: BlockDevice>(fs: &mut FileSystem<D>, dir: &str, name: &str) -> String {
+pub(crate) fn unique_name<D: BlockDevice>(fs: &mut FileSystem<D>, dir: &str, name: &str) -> String {
     let mut target = name.to_string();
     let mut n = 2;
     while fs.exists(&join(dir, &target)) {
