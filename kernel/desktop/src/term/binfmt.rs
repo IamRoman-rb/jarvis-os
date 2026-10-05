@@ -305,10 +305,11 @@ pub fn describe(b: &[u8]) -> String {
     }
 }
 
-/// ¿Es un programa de Linux que JARVIS-OS puede correr (K11)? ELF de 64 bits para x86-64 y
-/// sin intérprete (estático o static-pie). El cargador del kernel verifica el resto.
+/// ¿Es un programa de Linux que JARVIS-OS puede correr? ELF de 64 bits para x86-64, estático o
+/// dinámico (con su intérprete, `ld.so`, que tiene que estar en el disco: si falta, el kernel
+/// lo dice). El cargador del kernel verifica el resto.
 pub fn runnable(b: &[u8]) -> bool {
-    matches!(detect(b), Kind::Elf(e) if e.bits == 64 && e.machine == "x86-64" && e.interpreter.is_none())
+    matches!(detect(b), Kind::Elf(e) if e.bits == 64 && e.machine == "x86-64")
 }
 
 /// Lo que se muestra al intentar ejecutar un programa que JARVIS-OS no puede correr.
@@ -335,13 +336,6 @@ pub fn why_not(b: &[u8]) -> Option<String> {
             describe(b),
             format!("es para {} y JARVIS-OS corre en x86-64", e.machine),
         ),
-        Kind::Elf(e) => (
-            describe(b),
-            format!(
-                "usa bibliotecas dinámicas ({}) y todavía no hay un enlazador dinámico",
-                e.interpreter.as_ref()?
-            ),
-        ),
         Kind::Deb => (
             describe(b),
             "es un paquete de Debian: habría que desarmarlo (dpkg), y sus programas suelen usar \
@@ -357,7 +351,7 @@ pub fn why_not(b: &[u8]) -> Option<String> {
     };
     Some(format!(
         "{what}\nJARVIS-OS todavía no puede ejecutarlo: {needs}. Los programas de Linux\n\
-         estáticos para x86-64 sí corren. Mientras tanto: `file`, `xxd` y `strings` para\n\
+         para x86-64 sí corren. Mientras tanto: `file`, `xxd` y `strings` para\n\
          inspeccionarlo, y `apt install` para programas de JARVIS-OS."
     ))
 }
@@ -442,6 +436,9 @@ mod tests {
         assert_eq!(detect("hola, qué tal".as_bytes()), Kind::Text);
         assert_eq!(describe(b"PK\x03\x04resto"), "archivo comprimido ZIP");
         assert!(why_not(b"texto").is_none());
+        // Estático o dinámico: los dos corren (el dinámico, con su intérprete).
+        assert!(runnable(&elf));
+        assert!(why_not(&elf).is_none());
         assert_eq!(
             strings(b"\0\0hola mundo\x01ab\x02texto", 4),
             ["hola mundo", "texto"]

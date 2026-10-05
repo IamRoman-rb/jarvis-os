@@ -113,11 +113,14 @@ pub fn resolve(base: &str, path: &str) -> String {
 
 impl Process {
     /// Carga un programa: sus segmentos, la pila con `argv`/`envp` y el vector auxiliar.
-    /// Devuelve el proceso, el punto de entrada y el `rsp` inicial.
+    /// `interp` es su intérprete (`ld.so`), si es dinámico: lo lee del disco quien lo lanza (la
+    /// carga corre en la tarea del escritorio, que es la dueña del disco). Devuelve el proceso,
+    /// el punto de entrada y el `rsp` inicial.
     #[allow(clippy::too_many_arguments)]
     pub fn load(
         pid: u32,
         file: &[u8],
+        interp: Option<&[u8]>,
         exe: &str,
         cwd: &str,
         argv: &[&[u8]],
@@ -136,6 +139,17 @@ impl Process {
             fs_base: 0,
         };
         p.load_segments(file, &program, sys)?;
+        // Un programa dinámico arranca por su intérprete (`ld.so`), que carga las bibliotecas y
+        // después salta al programa (`AT_ENTRY`).
+        let (start, interp_base) = match &program.interp {
+            Some(path) => {
+                let data = interp.ok_or(LoadError::Dynamic(path.clone()))?;
+                let ld = elf::parse_interpreter(data, mm::USER_END, elf::INTERP_BASE)?;
+                p.load_segments(data, &ld, sys)?;
+                (ld.entry, ld.base)
+            }
+            None => (program.entry, 0),
+        };
         p.mm.setup(program.end);
         let mut random = [0u8; 16];
         sys.random(&mut random);
@@ -144,7 +158,7 @@ impl Process {
             (at::PHENT, program.phent),
             (at::PHNUM, program.phnum),
             (at::PAGESZ, PAGE),
-            (at::BASE, 0),
+            (at::BASE, interp_base),
             (at::FLAGS, 0),
             (at::ENTRY, program.entry),
             (at::UID, abi::UID as u64),
@@ -170,7 +184,7 @@ impl Process {
                 cloexec: false,
             }));
         }
-        Ok((p, program.entry, rsp))
+        Ok((p, start, rsp))
     }
 
     fn load_segments(
@@ -696,6 +710,8 @@ impl Process {
             // mremap: musl lo usa para medir la pila (espera ENOMEM mientras siga creciendo);
             // sin esta llamada deja de medir enseguida.
             nr::MREMAP => Err(ENOSYS),
+            // rseq: glibc lo prueba al arrancar y sigue sin él.
+            nr::RSEQ => Err(ENOSYS),
             nr::ARCH_PRCTL => match a[0] {
                 0x1002 => {
                     // ARCH_SET_FS: el puntero al bloque de TLS del hilo.

@@ -550,7 +550,7 @@ fn programas_de_linux_en_la_terminal() {
         [(999, ProcReply::File(FileReply::Done))]
     );
 
-    // Uno dinámico no se lanza: se explica por qué.
+    // Uno dinámico también se lanza: el kernel carga su intérprete (si falta, lo dice).
     t.d.fs_mut()
         .unwrap()
         .write_file(
@@ -559,9 +559,33 @@ fn programas_de_linux_en_la_terminal() {
             jarvis_fs::Timestamp::EPOCH,
         )
         .unwrap();
+    // Sin su intérprete en el disco: se dice qué instalar y no se lanza.
     let out = run(&mut t, "/Documentos/dinamico");
-    assert!(out.contains("bibliotecas dinámicas"), "{out}");
+    assert!(out.contains("apt install libc6"), "{out}");
     assert!(t.d.take_requests().spawn.is_empty());
+    // Con el intérprete donde lo pone Debian (FAT32 no tiene el enlace /lib64/…): se lanza, y
+    // el intérprete va en el pedido.
+    let ld = tiny_elf(None);
+    run(&mut t, "mkdir -p /usr/lib/x86_64-linux-gnu");
+    t.d.fs_mut()
+        .unwrap()
+        .write_file(
+            "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+            &ld,
+            jarvis_fs::Timestamp::EPOCH,
+        )
+        .unwrap();
+    t.type_text("/Documentos/dinamico");
+    t.key(Key::Enter);
+    let spawn = t.d.take_requests().spawn;
+    assert_eq!(spawn.len(), 1);
+    assert_eq!(spawn[0].path, "/Documentos/dinamico");
+    assert_eq!(spawn[0].interp.as_deref(), Some(&ld[..]));
+    t.d.proc_event(ProcEvent::Exited {
+        pid: spawn[0].pid,
+        code: 0,
+        why: None,
+    });
     assert!(fatfs_exists(t.d, "/Papelera/k11.txt"));
 }
 

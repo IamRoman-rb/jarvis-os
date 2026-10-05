@@ -54,6 +54,7 @@ fn main() -> ExitCode {
         }
         "brave" => brave_cmd(),
         "pantallas" => build().and_then(|img| screens(&img, &fresh_disk("disco-pantallas.img")?)),
+        "glibc" => build().and_then(|img| glibc(&img, &fresh_disk("disco-glibc.img")?)),
         "relay" => sincro::relay_cmd(),
         "iso" => build().and_then(|img| iso_cmd(&img)),
         "run2" => build().and_then(|img| sincro::run2(&img)),
@@ -1619,6 +1620,41 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
 }
 
 /// `cargo xtask pantallas`: dos monitores (virtio-gpu con dos salidas). Extender: el Monitor pasa
+/// `cargo xtask glibc`: un programa de Linux dinámico de verdad (`hello` de Debian, con glibc).
+/// Los archivos los deja en `target/usuario/glibc/` un script del anfitrión; la Terminal los
+/// baja del puente al disco y ejecuta `hello`, que arranca por `ld-linux-x86-64.so.2`.
+fn glibc(image: &Path, disk: &Path) -> Result<()> {
+    puente::start();
+    let mut s = Session::start(image, disk)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    let lib = "/usr/lib/x86_64-linux-gnu";
+    s.type_text(&format!("mkdir -p {lib} /usr/bin"))?;
+    s.monitor("sendkey ret")?;
+    for (file, to) in [
+        ("ld-linux-x86-64.so.2", lib),
+        ("libc.so.6", lib),
+        ("hello", "/usr/bin"),
+    ] {
+        s.type_text(&format!(
+            "curl -o {to}/{file} http://paquetes.jarvis/usuario/glibc/{file}"
+        ))?;
+        s.monitor("sendkey ret")?;
+        s.wait_for(&format!("DESCARGA {to}/{file}"), Duration::from_secs(60))?;
+    }
+    s.type_text("/usr/bin/hello")?;
+    s.monitor("sendkey ret")?;
+    let fin = s.wait_for("PROCESO_FIN", Duration::from_secs(30));
+    thread::sleep(Duration::from_secs(1));
+    s.screenshot(&target_dir().join("jarvis-os-glibc.png"))?;
+    s.quit();
+    fin?;
+    println!("ok: hello (glibc) termino");
+    Ok(())
+}
+
 /// a la segunda pantalla (Win+Shift+→) y se captura cada una; después Win+P → Duplicar.
 fn screens(image: &Path, disk: &Path) -> Result<()> {
     MONITORS.store(2, std::sync::atomic::Ordering::Relaxed);

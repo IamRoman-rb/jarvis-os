@@ -34,6 +34,9 @@ pub struct SpawnRequest {
     pub path: String,
     /// El archivo entero.
     pub image: Vec<u8>,
+    /// Su intérprete (`ld.so`), si es un programa dinámico: el kernel no puede leer el disco
+    /// mientras carga (lo hace desde la tarea del escritorio, que es la dueña del disco).
+    pub interp: Option<Vec<u8>>,
     pub argv: Vec<String>,
     pub envp: Vec<String>,
     pub cwd: String,

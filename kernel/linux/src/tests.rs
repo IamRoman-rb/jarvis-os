@@ -204,6 +204,7 @@ fn start() -> (Fake, Process) {
     let (p, entry, rsp) = Process::load(
         42,
         &elf,
+        None,
         "/bin/juguete",
         "/Documentos",
         &[b"juguete", b"hola"],
@@ -488,4 +489,53 @@ fn dup_comparte_la_posicion_y_close_all_guarda() {
     );
     p.close_all(&mut sys);
     assert_eq!(sys.files["/Documentos/log.txt"], b"uno dos");
+}
+
+#[test]
+fn un_programa_dinamico_arranca_por_su_interprete() {
+    use crate::elf::{INTERP_BASE, PIE_BASE};
+    let mut sys = Fake::default();
+    sys.dirs.push("/".into());
+    let prog = crate::elf::tests::tiny(3, true);
+    // Sin el intérprete en el disco: el error dice qué instalar.
+    let e = Process::load(7, &prog, None, "/bin/dyn", "/", &[b"dyn"], &[], &mut sys)
+        .err()
+        .unwrap();
+    assert!(e.to_string().contains("libc6"), "{e}");
+    // Quien lo lanza busca el intérprete (Debian lo pone en /usr/lib/x86_64-linux-gnu;
+    // /lib64/ld-linux-x86-64.so.2 es un enlace, que FAT32 no tiene).
+    let paths = crate::elf::interpreter_paths("/lib64/ld-linux-x86-64.so.2");
+    assert_eq!(paths[2], "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2");
+    let ld = crate::elf::tests::tiny(3, false);
+    let (mut p, entry, rsp) = Process::load(
+        7,
+        &prog,
+        Some(&ld),
+        "/bin/dyn",
+        "/",
+        &[b"dyn"],
+        &[],
+        &mut sys,
+    )
+    .unwrap();
+    assert_eq!(entry, INTERP_BASE + 0x1000, "arranca por el intérprete");
+    assert!(
+        sys.pages.contains_key(&(PIE_BASE + 0x1000)),
+        "y el programa está cargado"
+    );
+    // El vector auxiliar (después de argc, argv[0], el fin de argv y el de envp) le dice al
+    // intérprete dónde quedó él (AT_BASE) y dónde empieza el programa (AT_ENTRY).
+    let mut aux = Vec::new();
+    let mut at = rsp + 8 * 4;
+    loop {
+        let k = u64::from_le_bytes(p.copy_in(at, 8, &mut sys).unwrap().try_into().unwrap());
+        let v = u64::from_le_bytes(p.copy_in(at + 8, 8, &mut sys).unwrap().try_into().unwrap());
+        if k == 0 {
+            break;
+        }
+        aux.push((k, v));
+        at += 16;
+    }
+    assert!(aux.contains(&(7, INTERP_BASE)), "{aux:x?}");
+    assert!(aux.contains(&(9, PIE_BASE + 0x1000)), "{aux:x?}");
 }

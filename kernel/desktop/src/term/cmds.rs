@@ -2080,6 +2080,27 @@ impl Shell {
                 return Res::Code(126);
             }
         };
+        // Un programa dinámico (glibc) necesita su intérprete: va en el pedido.
+        let interp = match binfmt::detect(&image) {
+            binfmt::Kind::Elf(info) => match info.interpreter {
+                Some(want) => {
+                    let found = jarvis_linux::elf::interpreter_paths(&want)
+                        .into_iter()
+                        .find_map(|p| fs.read_file(&p).ok().filter(|d| !d.is_empty()));
+                    if found.is_none() {
+                        e.push_str(&format!(
+                            "{}: usa bibliotecas dinámicas y falta su intérprete ({want}).\n\
+                             Instalá glibc con: apt install libc6\n",
+                            argv[0]
+                        ));
+                        return Res::Code(127);
+                    }
+                    found
+                }
+                None => None,
+            },
+            _ => None,
+        };
         let envp = [
             "HOME", "USER", "LOGNAME", "HOSTNAME", "PATH", "SHELL", "TERM", "LANG", "PWD",
         ]
@@ -2090,6 +2111,7 @@ impl Shell {
             pid: 0,
             path: path.to_string(),
             image,
+            interp,
             argv: argv.to_vec(),
             envp,
             cwd: self.cwd.clone(),

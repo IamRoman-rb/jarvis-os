@@ -5,19 +5,36 @@
 //! `.bss`) y dale estos permisos". Dos tipos nos sirven:
 //!
 //! - `ET_EXEC`: direcciones fijas (típicamente desde 0x400000).
-//! - `ET_DYN` sin intérprete: un *static-pie*. Se puede cargar en cualquier lado (el programa
-//!   se reubica solo al arrancar: `rcrt1.o` de musl); lo ponemos en [`PIE_BASE`].
+//! - `ET_DYN`: un *PIE*. Se puede cargar en cualquier lado; lo ponemos en [`PIE_BASE`].
 //!
 //! Si el ELF pide un intérprete (`PT_INTERP`, normalmente `/lib64/ld-linux-x86-64.so.2`), usa
-//! bibliotecas dinámicas: eso no entra en K11 (ADR 0010) y se dice claramente.
+//! bibliotecas dinámicas (glibc): el kernel carga también el intérprete ([`parse_interpreter`],
+//! en [`INTERP_BASE`]) y arranca por él; el intérprete carga las bibliotecas (`libc.so.6`…) con
+//! `open`/`mmap` y salta al programa (`AT_ENTRY`). Así lo hace Linux.
 //! Referencia: la especificación "System V ABI, AMD64 Architecture Processor Supplement".
 
 use alloc::vec::Vec;
 
 use crate::abi::prot;
 
+/// Dónde buscar el intérprete `path` de un programa dinámico. FAT32 no tiene enlaces simbólicos:
+/// `/lib64/ld-linux-x86-64.so.2` es un enlace en Debian, así que también se busca con el mismo
+/// nombre en las carpetas de bibliotecas.
+pub fn interpreter_paths(path: &str) -> [alloc::string::String; 4] {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    [
+        path.into(),
+        alloc::format!("/lib/x86_64-linux-gnu/{name}"),
+        alloc::format!("/usr/lib/x86_64-linux-gnu/{name}"),
+        alloc::format!("/usr/lib64/{name}"),
+    ]
+}
+
 /// Dónde se carga un static-pie (como `ELF_ET_DYN_BASE` en Linux, pero más abajo).
 pub const PIE_BASE: u64 = 0x40_0000;
+/// Dónde se carga el intérprete de un programa dinámico (`ld-linux-x86-64.so.2`): bien arriba,
+/// lejos del heap del programa y debajo de los `mmap`.
+pub const INTERP_BASE: u64 = 0x7e_0000_0000;
 
 const PT_LOAD: u32 = 1;
 const PT_INTERP: u32 = 3;
@@ -48,6 +65,8 @@ pub struct Program {
     pub base: u64,
     /// La dirección más alta que ocupa (el `brk` empieza en la página siguiente).
     pub end: u64,
+    /// El intérprete que pide (`PT_INTERP`), si usa bibliotecas dinámicas.
+    pub interp: Option<alloc::string::String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,7 +74,7 @@ pub enum LoadError {
     NotElf,
     /// ELF de 32 bits, big endian, de otra arquitectura o que no es ejecutable.
     WrongKind(&'static str),
-    /// Pide bibliotecas dinámicas (el intérprete que nombra).
+    /// Pide bibliotecas dinámicas y su intérprete no está en el disco (el que nombra).
     Dynamic(alloc::string::String),
     Broken(&'static str),
 }
@@ -67,7 +86,7 @@ impl core::fmt::Display for LoadError {
             LoadError::WrongKind(s) => write!(f, "no es un programa para este sistema: {s}"),
             LoadError::Dynamic(i) => write!(
                 f,
-                "usa bibliotecas dinamicas ({i}); por ahora solo corren programas estaticos"
+                "usa bibliotecas dinamicas y falta su interprete ({i}): instala libc6 (apt install libc6)"
             ),
             LoadError::Broken(s) => write!(f, "el programa esta danado: {s}"),
         }
@@ -94,6 +113,20 @@ fn u64_at(b: &[u8], o: usize) -> Result<u64, LoadError> {
 
 /// Lee el ELF y decide dónde va cada cosa. No toca memoria: eso lo hace quien carga.
 pub fn parse(file: &[u8], user_end: u64) -> Result<Program, LoadError> {
+    parse_at(file, user_end, None)
+}
+
+/// El intérprete de un programa dinámico (`ld.so`): un `ET_DYN` sin intérprete propio, cargado
+/// en `base`.
+pub fn parse_interpreter(file: &[u8], user_end: u64, base: u64) -> Result<Program, LoadError> {
+    let p = parse_at(file, user_end, Some(base))?;
+    if p.interp.is_some() {
+        return Err(LoadError::WrongKind("el intérprete pide otro intérprete"));
+    }
+    Ok(p)
+}
+
+fn parse_at(file: &[u8], user_end: u64, at: Option<u64>) -> Result<Program, LoadError> {
     if !file.starts_with(b"\x7fELF") {
         return Err(LoadError::NotElf);
     }
@@ -107,9 +140,11 @@ pub fn parse(file: &[u8], user_end: u64) -> Result<Program, LoadError> {
     if u16_at(file, 18)? != 62 {
         return Err(LoadError::WrongKind("de otra arquitectura (no x86_64)"));
     }
-    let base = match kind {
-        2 => 0,
-        3 => PIE_BASE,
+    let base = match (kind, at) {
+        (3, Some(b)) => b,
+        (_, Some(_)) => return Err(LoadError::WrongKind("el intérprete no es reubicable")),
+        (2, None) => 0,
+        (3, None) => PIE_BASE,
         _ => {
             return Err(LoadError::WrongKind(
                 "no es un ejecutable (¿una biblioteca u objeto?)",
@@ -125,6 +160,7 @@ pub fn parse(file: &[u8], user_end: u64) -> Result<Program, LoadError> {
     }
     let mut segments = Vec::new();
     let mut phdr = None;
+    let mut interp = None;
     for i in 0..phnum {
         let h = phoff
             .checked_add(i * phent)
@@ -143,7 +179,10 @@ pub fn parse(file: &[u8], user_end: u64) -> Result<Program, LoadError> {
                     .map(|s| s.split(|&b| b == 0).next().unwrap_or(s))
                     .map(|s| alloc::string::String::from_utf8_lossy(s).into_owned())
                     .unwrap_or_default();
-                return Err(LoadError::Dynamic(name));
+                if name.is_empty() {
+                    return Err(LoadError::Broken("intérprete sin nombre"));
+                }
+                interp = Some(name);
             }
             PT_PHDR => phdr = Some(base + vaddr),
             PT_LOAD if memsz > 0 => {
@@ -229,6 +268,7 @@ pub fn parse(file: &[u8], user_end: u64) -> Result<Program, LoadError> {
         phent: phent as u64,
         base,
         end,
+        interp,
     })
 }
 
@@ -299,12 +339,30 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn dinamico_con_su_interprete() {
+        let p = parse(&tiny(3, true), 1 << 39).unwrap();
+        assert_eq!(p.interp.as_deref(), Some("/lib64/ld-linux-x86-64.so.2"));
+        assert_eq!(p.base, PIE_BASE);
+        // El intérprete (otro ET_DYN) va en su propia base.
+        let i = parse_interpreter(&tiny(3, false), 1 << 39, INTERP_BASE).unwrap();
+        assert_eq!(i.base, INTERP_BASE);
+        assert_eq!(i.entry, INTERP_BASE + 0x1000);
+        assert!(i.interp.is_none());
+        assert!(parse(&tiny(2, false), 1 << 39).unwrap().interp.is_none());
+    }
+
+    #[test]
     fn rechaza_lo_que_no_puede_correr() {
         assert_eq!(parse(b"MZ\x90\x00", 1 << 39), Err(LoadError::NotElf));
-        assert_eq!(
-            parse(&tiny(3, true), 1 << 39),
-            Err(LoadError::Dynamic("/lib64/ld-linux-x86-64.so.2".into()))
-        );
+        // El intérprete no puede pedir otro, y tiene que ser reubicable.
+        assert!(matches!(
+            parse_interpreter(&tiny(3, true), 1 << 39, INTERP_BASE),
+            Err(LoadError::WrongKind(_))
+        ));
+        assert!(matches!(
+            parse_interpreter(&tiny(2, false), 1 << 39, INTERP_BASE),
+            Err(LoadError::WrongKind(_))
+        ));
         let mut f = tiny(2, false);
         f[18] = 40; // ARM
         assert!(matches!(parse(&f, 1 << 39), Err(LoadError::WrongKind(_))));

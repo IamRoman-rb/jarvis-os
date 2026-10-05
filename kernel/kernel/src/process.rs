@@ -102,7 +102,14 @@ pub fn spawn(req: SpawnRequest) -> Result<(), String> {
     let argv: Vec<&[u8]> = req.argv.iter().map(|a| a.as_bytes()).collect();
     let envp: Vec<&[u8]> = req.envp.iter().map(|e| e.as_bytes()).collect();
     let loaded = Process::load(
-        req.pid, &req.image, &req.path, &req.cwd, &argv, &envp, &mut sys,
+        req.pid,
+        &req.image,
+        req.interp.as_deref(),
+        &req.path,
+        &req.cwd,
+        &argv,
+        &envp,
+        &mut sys,
     );
     let (process, entry, rsp) = match loaded {
         Ok(l) => l,
