@@ -441,3 +441,63 @@ fn vincular_gemini_chatgpt_y_deepseek_desde_configuracion() {
             .any(|l| l == "CEREBRO_AGENTE chatgpt si Listo: clave guardada en el anfitrión.")
     );
 }
+
+#[test]
+fn al_arrancar_saluda_segun_la_hora_y_el_cerebro_lo_completa() {
+    // CLOCK es a las 23:05: de noche.
+    let mut b = Brain::new();
+    b.second();
+    let logs = b.t.logs();
+    assert!(logs.iter().any(|l| l == "SALUDO noche"), "{logs:?}");
+    assert!(
+        logs.iter()
+            .any(|l| l == "JARVIS_HABLA: Buenas noches, Roman.")
+    );
+    // En cuanto el cerebro está listo, le pide el saludo (con el id 0).
+    b.reply(r#"{"t":"listo"}"#);
+    assert!(
+        b.sent
+            .contains(r#"{"t":"saludo","id":0,"momento":"noche","nombre":"Roman"}"#),
+        "{}",
+        b.sent
+    );
+    b.reply(r#"{"t":"texto","id":0,"delta":"Buenas noches, Roman."}"#);
+    b.reply(r#"{"t":"fin","id":0}"#);
+    let logs = b.t.logs();
+    assert!(logs.iter().any(|l| l == "CEREBRO_SALUDO noche"), "{logs:?}");
+    assert!(
+        logs.iter()
+            .any(|l| l == "JARVIS_HABLA: Buenas noches, Roman."),
+        "la respuesta del cerebro se muestra (y él la dice en voz alta)"
+    );
+    // Una sola vez: si se reconecta, no vuelve a saludar.
+    let id = b.stream.unwrap();
+    b.t.d.stream_event(id, StreamEvent::Closed(None));
+    b.sent.clear();
+    b.t.now += 60_000;
+    b.second();
+    b.reply(r#"{"t":"listo"}"#);
+    assert!(!b.sent.contains("saludo"), "{}", b.sent);
+    // Y los pedidos de Roman siguen numerándose desde 1.
+    b.t.d.open(Launch::App(AppKind::Console), b.t.now, CLOCK);
+    b.sent.clear();
+    b.ask("hola");
+    assert!(b.sent.contains(r#""id":1,"#), "{}", b.sent);
+}
+
+#[test]
+fn a_la_manana_dice_buenos_dias() {
+    let morning = Some(jarvis_gfx::clock::DateTime {
+        hour: 8,
+        ..CLOCK.unwrap()
+    });
+    // El primer momento en que se sabe la hora es el que vale.
+    let mut d = common::desktop();
+    d.handle(Event::Mods(Mods::NONE), 1000, morning);
+    let logs = d.take_logs();
+    assert!(logs.iter().any(|l| l == "SALUDO manana"), "{logs:?}");
+    assert!(
+        logs.iter()
+            .any(|l| l == "JARVIS_HABLA: Buenos días, Roman.")
+    );
+}

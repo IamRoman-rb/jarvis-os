@@ -357,6 +357,10 @@ pub struct Desktop<D: BlockDevice> {
     requests: Requests,
     /// Ya se le dijo al Wi-Fi qué hacer al arrancar (conectarse a la red guardada o buscar).
     wifi_started: bool,
+    /// Ya saludó al arrancar; y hasta cuándo se le pide el saludo al cerebro (si tarda más en
+    /// conectarse, ya no tiene sentido).
+    greeted: bool,
+    greeting_until: u64,
     phrase: usize,
     screenshot: bool,
     format: Option<(PixelFormat, usize)>,
@@ -498,6 +502,8 @@ impl<D: BlockDevice> Desktop<D> {
             out: Outbox::default(),
             requests: Requests::default(),
             wifi_started: false,
+            greeted: false,
+            greeting_until: 0,
             phrase: 0,
             screenshot: false,
             format: None,
@@ -593,7 +599,8 @@ impl<D: BlockDevice> Desktop<D> {
         self.config.latam_keyboard
     }
 
-    /// JARVIS saluda al arrancar.
+    /// JARVIS saluda al arrancar. En cuanto se sabe la hora, lo reemplaza el saludo de
+    /// [`Self::greet`] ("Buenos días, Roman."); este queda si la máquina no tiene reloj.
     pub fn start(&mut self, now_ms: u64) {
         self.assistant.say(GREETING, now_ms);
     }
@@ -920,6 +927,9 @@ impl<D: BlockDevice> Desktop<D> {
 
     /// El kernel mide la máquina una vez por segundo.
     pub fn set_stats(&mut self, stats: SystemStats) {
+        if self.last_now > self.greeting_until {
+            self.brain.greeting = None;
+        }
         self.brain.tick(self.last_now, &mut self.out);
         self.logs.append(&mut self.brain.logs);
         if let Some(fs) = self.fs.as_mut() {
@@ -1026,6 +1036,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.last_input = now_ms;
         self.last_now = now_ms;
         self.last_clock = clock;
+        self.greet(now_ms, clock);
         let before = self.geometry();
         match event {
             Event::Key(key) => self.on_key(key, now_ms, clock),
@@ -2231,6 +2242,29 @@ impl<D: BlockDevice> Desktop<D> {
         self.logs.append(&mut self.brain.logs);
     }
 
+    /// Al arrancar (en cuanto se sabe la hora): "Buenos días/tardes/noches" en pantalla, y
+    /// el cerebro, cuando se conecta, lo dice en voz alta (a la mañana, con el clima).
+    fn greet(&mut self, now_ms: u64, clock: Option<DateTime>) {
+        let Some(t) = clock.filter(|_| !self.greeted) else {
+            return;
+        };
+        self.greeted = true;
+        let (moment, template) = match t.hour {
+            5..=11 => ("manana", "Buenos días, {}."),
+            12..=19 => ("tarde", "Buenas tardes, {}."),
+            _ => ("noche", "Buenas noches, {}."),
+        };
+        let mut name = self.config.user.clone();
+        if let Some(first) = name.get(..1) {
+            name = first.to_uppercase() + &name[1..];
+        }
+        let text = trf(template, &[&name]);
+        self.say(&text, now_ms);
+        self.logs.push(format!("SALUDO {moment}"));
+        self.brain.greeting = Some((moment, name));
+        self.greeting_until = now_ms + 120_000;
+    }
+
     fn say(&mut self, text: &str, now_ms: u64) {
         self.assistant.say(text, now_ms);
         self.logs.push(format!("JARVIS_HABLA: {text}"));
@@ -3235,6 +3269,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.format = Some((frame.format(), frame.bytes_per_pixel()));
         self.last_now = now_ms;
         self.last_clock = clock;
+        self.greet(now_ms, clock);
         if self.is_sleeping() {
             let mut dirty = Dirty::default();
             if core::mem::take(&mut self.full_redraw) | core::mem::take(&mut self.overlay_dirty) {

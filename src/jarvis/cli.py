@@ -73,6 +73,10 @@ def serve(
 
         host.account_status = account.status
         host.account_login = account.login
+        from jarvis import weather
+
+        place = weather.Place(*config.clima) if config.clima else None
+        host.weather = lambda: weather.today(place)
         host.agents = AgentHub(
             modelos=config.agentes,
             claude=lambda system, prompt: ask_claude(config.modelo, system, prompt),

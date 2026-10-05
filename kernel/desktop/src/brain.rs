@@ -160,6 +160,9 @@ pub struct BrainService {
     /// elige Roman en Configuración y viajan en `hola` y en `agentes_modo`.
     pub lead: usize,
     pub council: bool,
+    /// El saludo del arranque que falta pedirle al cerebro: (momento, nombre). Se manda en
+    /// cuanto se conecta (con el id 0, que no usan los pedidos).
+    pub greeting: Option<(&'static str, String)>,
     /// La respuesta en curso (para la esfera y el mensaje del escritorio).
     pub answer: String,
     pub status: Status,
@@ -192,6 +195,7 @@ impl Default for BrainService {
                 .collect(),
             lead: 0,
             council: false,
+            greeting: None,
             answer: String::new(),
             status: Status::Off,
             logs: Vec::new(),
@@ -409,6 +413,21 @@ impl BrainService {
                 if self.buf.len() > MAX_LINE {
                     self.buf.clear();
                     out.close_stream(id);
+                }
+                if self.ready
+                    && let Some((moment, name)) = self.greeting.take()
+                {
+                    // El saludo del arranque (ver [`Self::greeting`]): llega como una respuesta.
+                    self.current = Some(0);
+                    self.answer.clear();
+                    self.logs.push(format!("CEREBRO_SALUDO {moment}"));
+                    self.send(
+                        out,
+                        format!(
+                            "{{\"t\":\"saludo\",\"id\":0,\"momento\":\"{moment}\",\"nombre\":{}}}",
+                            quote(&name)
+                        ),
+                    );
                 }
             }
             StreamEvent::Closed(why) => {

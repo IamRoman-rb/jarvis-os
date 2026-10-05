@@ -10,6 +10,11 @@ Ejemplo (todo es opcional):
     gemini = "gemini-2.5-pro"
     chatgpt = "gpt-5"
     deepseek = "deepseek-reasoner"
+
+    [clima]  # dónde estás, para el clima del saludo (sin esto, se usa la ubicación de la IP)
+    latitud = -34.6
+    longitud = -58.4
+    lugar = "Buenos Aires"
 """
 
 from __future__ import annotations
@@ -37,6 +42,8 @@ class Config:
     voz: str = "jarvis"
     #: El modelo de Gemini, ChatGPT o DeepSeek (vacío = el de `agent/providers.py`).
     agentes: dict[str, str] = field(default_factory=dict)
+    #: (latitud, longitud, lugar) para el clima; None = la ubicación aproximada de la IP.
+    clima: tuple[float, float, str] | None = None
 
     @staticmethod
     def path() -> Path:
@@ -60,9 +67,21 @@ class Config:
             proyectos=Path(proyectos) if isinstance(proyectos, str) else _default_projects(),
             puerto=puerto if isinstance(puerto, int) and 0 < puerto < 65536 else DEFAULT_PORT,
             voz=str(data.get("voz", "jarvis")),
+            clima=_clima(data.get("clima")),
             agentes={
                 str(k): v
                 for k, v in (data.get("agentes") or {}).items()
                 if isinstance(v, str) and v
             },
         )
+
+
+def _clima(data: object) -> tuple[float, float, str] | None:
+    if not isinstance(data, dict):
+        return None
+    lat, lon = data.get("latitud"), data.get("longitud")
+    if not isinstance(lat, int | float) or not isinstance(lon, int | float):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return float(lat), float(lon), str(data.get("lugar", ""))
