@@ -45,3 +45,6 @@ Thumbs.db
 
 # Config local de Claude Code (la compartida es .claude/settings.json)
 .claude/settings.local.json
+
+# Salida local de graphify (no va al repo)
+graphify-out/
