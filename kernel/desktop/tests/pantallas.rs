@@ -125,3 +125,28 @@ fn render_por_partes_con_dos_monitores() {
         .any(|x| frame.get(x, clock.y + 40) != bgc.get(x, clock.y + 40));
     assert!(differs, "el reloj se dibujó en el principal");
 }
+
+#[test]
+fn configuracion_cambia_la_resolucion_y_la_guarda() {
+    let mut t = Driver::new();
+    t.d.set_outputs(vec![(1280, 800)]);
+    t.d.take_display();
+    // Win+I y AvPág: Pantallas. La segunda fila es la resolución: → pasa a la siguiente.
+    t.combo(Mods::WIN, Key::Char('i'));
+    t.key(Key::PageDown);
+    t.key(Key::Down);
+    t.key(Key::Right);
+    assert_eq!(t.d.config().resolution, (800, 600));
+    let l = t.d.take_display().expect("pide armar la imagen de nuevo");
+    assert_eq!(l.size, (800, 600));
+    assert_eq!(t.d.full_size(), (800, 600));
+    // ← vuelve a la automática; ← otra vez da la vuelta a la más grande.
+    t.key(Key::Left);
+    assert_eq!(t.d.take_display().map(|l| l.size), Some((1280, 800)));
+    t.key(Key::Left);
+    assert_eq!(t.d.config().resolution, (4096, 2160));
+    t.frame();
+    let cfg = fatfs_read(t.d, "/Sistema/config.ini").expect("se guardó la configuración");
+    let cfg = String::from_utf8(cfg).unwrap();
+    assert!(cfg.contains("resolucion=4096x2160"), "{cfg}");
+}

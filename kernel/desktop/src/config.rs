@@ -218,6 +218,8 @@ pub struct Config {
     pub display_vertical: bool,
     /// Qué salida es la principal (0 o 1).
     pub display_primary: u8,
+    /// La resolución elegida (`display::AUTO`: la del monitor).
+    pub resolution: (u32, u32),
     // Fecha y hora
     /// Diferencia con UTC en horas (Argentina: -3).
     pub utc_offset: i8,
@@ -303,6 +305,7 @@ impl Default for Config {
             display_mode: crate::display::Mode::Extend,
             display_vertical: false,
             display_primary: 0,
+            resolution: crate::display::AUTO,
             utc_offset: -3,
             clock_24h: true,
             sounds: true,
@@ -421,6 +424,7 @@ impl Config {
                 }
                 "pantallas_vertical" => c.display_vertical = yes(v),
                 "pantalla_principal" => c.display_primary = if v.trim() == "2" { 1 } else { 0 },
+                "resolucion" => c.resolution = crate::display::parse_resolution(v),
                 "zona_utc" => c.utc_offset = v.parse::<i8>().unwrap_or(-3).clamp(-12, 14),
                 "reloj_24h" => c.clock_24h = yes(v),
                 "sonidos" => c.sounds = yes(v),
@@ -517,6 +521,10 @@ impl Config {
             format!("pantallas_modo={}", self.display_mode.code()),
             format!("pantallas_vertical={}", yn(self.display_vertical)),
             format!("pantalla_principal={}", self.display_primary + 1),
+            format!(
+                "resolucion={}",
+                crate::display::resolution_code(self.resolution)
+            ),
             format!("zona_utc={}", self.utc_offset),
             format!("reloj_24h={}", yn(self.clock_24h)),
             format!("sonidos={}", yn(self.sounds)),
@@ -690,6 +698,7 @@ mod tests {
             display_mode: crate::display::Mode::Duplicate,
             display_vertical: true,
             display_primary: 1,
+            resolution: (2560, 1440),
             ai_lead: 3,
             ai_council: true,
             ..Config::default()

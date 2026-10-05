@@ -179,6 +179,7 @@ pub enum Opt {
     DisplayMode,
     DisplayVertical,
     DisplayPrimary,
+    Resolution,
     Identify,
     Language,
     Zone,
@@ -571,6 +572,22 @@ impl Settings {
                     detail,
                     Value(n.max(1).to_string())
                 )];
+                rows.push(if n == 0 {
+                    let (w, h) = self.screen;
+                    Row::new(
+                        Opt::Info,
+                        tr("Resolución"),
+                        tr("La del firmware: para cambiarla hace falta una placa virtio-gpu"),
+                        Value(format!("{w} × {h}")),
+                    )
+                } else {
+                    Row::new(
+                        Opt::Resolution,
+                        tr("Resolución"),
+                        tr("La del monitor principal"),
+                        Choice(resolution_name(c.resolution, stats)),
+                    )
+                });
                 if n >= 2 {
                     rows.push(Row::new(
                         Opt::DisplayMode,
@@ -2010,6 +2027,20 @@ impl Settings {
             }
             Opt::DisplayVertical => c.display_vertical = !c.display_vertical,
             Opt::DisplayPrimary => c.display_primary = 1 - c.display_primary.min(1),
+            Opt::Resolution => {
+                // Salteando las que no entran en la memoria reservada (la automática siempre).
+                let s = ctx.stats;
+                let mut r = c.resolution;
+                loop {
+                    r = crate::display::cycle_resolution(r, delta >= 0);
+                    let p = c.display_primary as usize;
+                    let (m, v) = (c.display_mode, c.display_vertical);
+                    if crate::display::fits(&s.displays, r, m, v, p, s.display_capacity) {
+                        break;
+                    }
+                }
+                c.resolution = r;
+            }
             Opt::Identify => {
                 ctx.out.identify = true;
                 return;
@@ -2438,6 +2469,19 @@ fn app_rule(name: &str) -> Rule {
         port: None,
         app: Some(name.to_string()),
     }
+}
+
+/// "1920 × 1080 (16:9)", o la automática con la del monitor: "Automática (1280 × 800)".
+fn resolution_name(r: (u32, u32), stats: &crate::system::SystemStats) -> String {
+    if r == crate::display::AUTO {
+        let (w, h) = stats.displays.first().copied().unwrap_or((0, 0));
+        return format!("{} ({w} × {h})", tr("Automática"));
+    }
+    let aspect = crate::display::RESOLUTIONS
+        .iter()
+        .find(|x| (x.0, x.1) == r)
+        .map_or("", |x| x.2);
+    format!("{} × {} ({aspect})", r.0, r.1)
 }
 
 fn wallpaper_name(w: &Wallpaper) -> String {

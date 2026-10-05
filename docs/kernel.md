@@ -74,6 +74,9 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
   PC), extender, duplicar o usar uno solo (Win+P o Configuración → Pantallas); el segundo a la
   derecha o abajo, y cuál es el principal. Win+Shift+←/→ lleva una ventana al otro monitor;
   maximizar, acoplar y las distribuciones usan el monitor de la ventana.
+- **Resolución**: Configuración → Pantallas → Resolución cambia la del monitor principal en
+  vivo, de 800×600 a 4096×2160 (4:3, 5:4, 16:9, 16:10 y 21:9), o la automática del monitor.
+  Se ofrecen las que entran en la memoria que el kernel reservó al arrancar.
 - **Selección como en Windows**: en Archivos, varios a la vez (Shift+flechas, Ctrl+clic,
   Shift+clic, Ctrl+E) para mover a la Papelera, copiar o cortar; en el Editor, Shift+flechas,
   arrastrar con el mouse, doble clic en una palabra y Ctrl+E, con un portapapeles del sistema.
@@ -144,7 +147,7 @@ cargo xtask relay        # el relé de la sincronización (--publico para abrirl
 cargo xtask run2         # dos JARVIS (PC1 y PC2, cada uno con su disco) unidos por el relé
 cargo xtask sincronizar  # prueba: dos QEMU se emparejan, se mandan archivos, renombre → Papelera
 cargo xtask iso          # target/jarvis-os.iso (--probar: la arranca sin ventana; --abrir: con ventana)
-cargo xtask pantallas    # dos monitores: extender, mover una ventana, Win+P, duplicar (capturas)
+cargo xtask pantallas    # dos monitores: extender, mover una ventana, Win+P, duplicar, resoluciones
 cargo xtask brave --instalar           # instala Brave en el anfitrión (winget)
 cargo xtask brave --probar https://…   # prueba el puente de Brave sin QEMU (target/brave-prueba.png)
 cargo test               # tests en el host: FAT32, red, escritorio, terminal y gráficos

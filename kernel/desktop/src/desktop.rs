@@ -339,6 +339,8 @@ pub struct Desktop<D: BlockDevice> {
     full_h: usize,
     /// Los monitores que tiene la placa (tamaño de cada uno) y cómo están repartidos.
     outputs: Vec<(u32, u32)>,
+    /// Los píxeles que el kernel reservó para el escritorio (0: sin tope).
+    display_capacity: usize,
     display_layout: Option<crate::display::Layout>,
     /// Hasta cuándo se muestra el número de cada monitor.
     identify_until: Option<u64>,
@@ -490,6 +492,7 @@ impl<D: BlockDevice> Desktop<D> {
             full_w: width,
             full_h: height,
             outputs: Vec::new(),
+            display_capacity: 0,
             display_layout: None,
             identify_until: None,
             session_closed: false,
@@ -959,6 +962,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats = stats;
         self.stats.mic = mic;
         self.stats.displays = self.outputs.clone();
+        self.stats.display_capacity = self.display_capacity;
         // K14: la primera vez que aparece la placa Wi-Fi, a la red guardada (o a buscar redes).
         if !self.wifi_started && self.stats.net.wifi.is_some() {
             self.wifi_started = true;
@@ -1682,6 +1686,12 @@ impl<D: BlockDevice> Desktop<D> {
         self.apply_display();
     }
 
+    /// Los píxeles que reservó el kernel: Configuración ofrece solo las resoluciones que entran.
+    pub fn set_display_capacity(&mut self, px: usize) {
+        self.display_capacity = px;
+        self.stats.display_capacity = px;
+    }
+
     pub fn outputs(&self) -> &[(u32, u32)] {
         &self.outputs
     }
@@ -1709,8 +1719,14 @@ impl<D: BlockDevice> Desktop<D> {
             return;
         }
         let c = &self.config;
-        let l = crate::display::layout(
+        let outputs = crate::display::with_resolution(
             &self.outputs,
+            c.resolution,
+            c.display_mode,
+            c.display_primary as usize,
+        );
+        let l = crate::display::layout(
+            &outputs,
             c.display_mode,
             c.display_vertical,
             c.display_primary as usize,
@@ -1790,13 +1806,17 @@ impl<D: BlockDevice> Desktop<D> {
         self.brain.set_gestures(self.config.gestures, &mut self.out);
         crate::look::apply(&self.config);
         self.wm.set_topbar(self.config.topbar);
-        if (old.display_mode, old.display_vertical, old.display_primary)
-            != (
-                self.config.display_mode,
-                self.config.display_vertical,
-                self.config.display_primary,
-            )
-        {
+        if (
+            old.display_mode,
+            old.display_vertical,
+            old.display_primary,
+            old.resolution,
+        ) != (
+            self.config.display_mode,
+            self.config.display_vertical,
+            self.config.display_primary,
+            self.config.resolution,
+        ) {
             self.apply_display();
         }
         let look_changed = old.theme != self.config.theme

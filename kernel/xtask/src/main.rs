@@ -1634,8 +1634,28 @@ fn screens(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("PANTALLAS_MODO duplicar", STEP)?;
     thread::sleep(Duration::from_secs(1));
     s.screenshot_head(&dir.join("jarvis-os-duplicar2.png"), Some(1))?;
+    // Configuración → Pantallas → Resolución: → la primera de la lista (800×600) y doce más
+    // hasta 1920×1080; después ← hasta la automática (así queda como estaba en el disco).
+    s.monitor("sendkey meta_l-i")?;
+    s.wait_for("VENTANA_ABIERTA Configuración", STEP)?;
+    for k in ["pgdn", "down", "right"] {
+        s.monitor(&format!("sendkey {k}"))?;
+    }
+    s.wait_for("PANTALLAS_LISTAS 800x600", STEP)?;
+    for _ in 0..12 {
+        s.monitor("sendkey right")?;
+        thread::sleep(Duration::from_millis(150));
+    }
+    s.wait_for("PANTALLAS_LISTAS 1920x1080", STEP)?;
+    thread::sleep(Duration::from_secs(1));
+    s.screenshot_head(&dir.join("jarvis-os-1920x1080.png"), Some(0))?;
+    for _ in 0..13 {
+        s.monitor("sendkey left")?;
+        thread::sleep(Duration::from_millis(150));
+    }
+    s.wait_for("PANTALLAS_LISTAS 1280x800", STEP)?;
     s.quit();
-    println!("ok: dos monitores (extender, mover una ventana, Win+P y duplicar)");
+    println!("ok: dos monitores (extender, mover una ventana, Win+P, duplicar y resoluciones)");
     Ok(())
 }
 

@@ -123,6 +123,147 @@ pub fn layout(outputs: &[(u32, u32)], mode: Mode, vertical: bool, primary: usize
     }
 }
 
+/// Las resoluciones para elegir en Configuración → Pantallas (ancho, alto y proporción). Además
+/// está la automática ([`AUTO`]): la que informa el monitor.
+pub const RESOLUTIONS: [(u32, u32, &str); 20] = [
+    (800, 600, "4:3"),
+    (1024, 768, "4:3"),
+    (1152, 864, "4:3"),
+    (1280, 720, "16:9"),
+    (1280, 800, "16:10"),
+    (1280, 960, "4:3"),
+    (1280, 1024, "5:4"),
+    (1366, 768, "16:9"),
+    (1440, 900, "16:10"),
+    (1600, 900, "16:9"),
+    (1600, 1200, "4:3"),
+    (1680, 1050, "16:10"),
+    (1920, 1080, "16:9"),
+    (1920, 1200, "16:10"),
+    (2560, 1080, "21:9"),
+    (2560, 1440, "16:9"),
+    (2560, 1600, "16:10"),
+    (3440, 1440, "21:9"),
+    (3840, 2160, "16:9"),
+    (4096, 2160, "17:9"),
+];
+
+/// La resolución que informa el monitor.
+pub const AUTO: (u32, u32) = (0, 0);
+
+/// La más grande de la lista (para reservar la memoria).
+pub const MAX_RESOLUTION: (u32, u32) = (4096, 2160);
+
+/// `auto` o `ANCHOxALTO` de la lista (otra cosa: automática).
+pub fn parse_resolution(v: &str) -> (u32, u32) {
+    let Some((w, h)) = v.trim().split_once('x') else {
+        return AUTO;
+    };
+    let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>()) else {
+        return AUTO;
+    };
+    if RESOLUTIONS.iter().any(|r| (r.0, r.1) == (w, h)) {
+        (w, h)
+    } else {
+        AUTO
+    }
+}
+
+pub fn resolution_code(r: (u32, u32)) -> alloc::string::String {
+    if r == AUTO {
+        "auto".into()
+    } else {
+        alloc::format!("{}x{}", r.0, r.1)
+    }
+}
+
+/// La resolución siguiente (`forward`) o la anterior: automática, después la lista.
+pub fn cycle_resolution(r: (u32, u32), forward: bool) -> (u32, u32) {
+    let n = RESOLUTIONS.len() as i32 + 1;
+    let pos = RESOLUTIONS
+        .iter()
+        .position(|x| (x.0, x.1) == r)
+        .map_or(0, |i| i as i32 + 1);
+    let next = (pos + if forward { 1 } else { -1 }).rem_euclid(n);
+    if next == 0 {
+        AUTO
+    } else {
+        let x = RESOLUTIONS[next as usize - 1];
+        (x.0, x.1)
+    }
+}
+
+/// Los monitores con la resolución elegida: la del principal (o la del único que se ve; al
+/// duplicar, la de los dos). Automática: como los informa la placa.
+pub fn with_resolution(
+    outputs: &[(u32, u32)],
+    res: (u32, u32),
+    mode: Mode,
+    primary: usize,
+) -> Vec<(u32, u32)> {
+    let mut v = outputs.to_vec();
+    if res == AUTO || v.is_empty() {
+        return v;
+    }
+    let k = if v.len() < 2 {
+        0
+    } else {
+        match mode {
+            Mode::OnlyFirst => 0,
+            Mode::OnlySecond => 1,
+            Mode::Duplicate => {
+                v.fill(res);
+                return v;
+            }
+            Mode::Extend => primary.min(1),
+        }
+    };
+    v[k] = res;
+    v
+}
+
+/// Los píxeles a reservar al arrancar: para la resolución más grande de la lista que entre en
+/// `budget` bytes (las tres imágenes del escritorio, en cualquier modo); si no entra ninguna,
+/// solo para las de los monitores.
+pub fn capacity(outputs: &[(u32, u32)], budget: usize) -> usize {
+    let native = max_pixels(outputs);
+    RESOLUTIONS
+        .iter()
+        .rev()
+        .map(|&(rw, rh, _)| {
+            let big: Vec<(u32, u32)> = outputs
+                .iter()
+                .map(|&(w, h)| (w.max(rw), h.max(rh)))
+                .collect();
+            max_pixels(&big)
+        })
+        .find(|px| px * 4 * 3 <= budget)
+        .unwrap_or(native)
+        .max(native)
+}
+
+/// ¿Entra la resolución `res` en `capacity` píxeles con estos monitores y este modo? (0: sin
+/// tope, como en los tests).
+pub fn fits(
+    outputs: &[(u32, u32)],
+    res: (u32, u32),
+    mode: Mode,
+    vertical: bool,
+    primary: usize,
+    capacity: usize,
+) -> bool {
+    if capacity == 0 || res == AUTO {
+        return true;
+    }
+    let l = layout(
+        &with_resolution(outputs, res, mode, primary),
+        mode,
+        vertical,
+        primary,
+    );
+    (l.size.0 as usize) * (l.size.1 as usize) <= capacity
+}
+
 /// El tamaño más grande que puede llegar a pedir `layout` (para reservar la memoria una vez).
 pub fn max_pixels(outputs: &[(u32, u32)]) -> usize {
     let sum_w: u64 = outputs.iter().map(|o| o.0 as u64).sum();
@@ -169,5 +310,48 @@ mod tests {
         let l = layout(&[(800, 600)], Mode::Extend, false, 0);
         assert_eq!((l.size, l.screens.len()), ((800, 600), 1));
         assert!(max_pixels(&TWO) >= 2304 * 800);
+    }
+
+    #[test]
+    fn resoluciones() {
+        assert_eq!(parse_resolution("1920x1080"), (1920, 1080));
+        assert_eq!(parse_resolution("auto"), AUTO);
+        assert_eq!(parse_resolution("1234x567"), AUTO, "solo las de la lista");
+        assert_eq!(resolution_code((2560, 1440)), "2560x1440");
+        assert_eq!(cycle_resolution(AUTO, true), (800, 600));
+        assert_eq!(cycle_resolution(AUTO, false), MAX_RESOLUTION);
+        assert_eq!(cycle_resolution(MAX_RESOLUTION, true), AUTO);
+        assert_eq!(cycle_resolution((1280, 800), true), (1280, 960));
+        let mut r = AUTO;
+        for _ in 0..=RESOLUTIONS.len() {
+            r = cycle_resolution(r, true);
+        }
+        assert_eq!(r, AUTO, "da la vuelta entera");
+        // Un monitor solo, el principal, los dos al duplicar, el que se ve.
+        assert_eq!(
+            with_resolution(&[(1280, 800)], AUTO, Mode::Extend, 0),
+            [(1280, 800)]
+        );
+        assert_eq!(
+            with_resolution(&[(1280, 800)], (1920, 1080), Mode::Extend, 0),
+            [(1920, 1080)]
+        );
+        let r = (1600, 900);
+        assert_eq!(with_resolution(&TWO, r, Mode::Extend, 1), [(1280, 800), r]);
+        assert_eq!(with_resolution(&TWO, r, Mode::Duplicate, 0), [r, r]);
+        assert_eq!(
+            with_resolution(&TWO, r, Mode::OnlySecond, 0),
+            [(1280, 800), r]
+        );
+        // La memoria: con lugar, hasta la más grande; sin lugar, la de los monitores.
+        assert!(capacity(&[(1280, 800)], usize::MAX) >= 4096 * 2160);
+        assert_eq!(capacity(&[(1280, 800)], 1024), 1280 * 800);
+        // Con 64 MiB: hasta 3440×1440 (las tres imágenes), no 4K.
+        let px = capacity(&[(1280, 800)], 64 << 20);
+        assert_eq!(px, 3440 * 1440);
+        let one = [(1280, 800)];
+        assert!(fits(&one, (3440, 1440), Mode::Extend, false, 0, px));
+        assert!(!fits(&one, (3840, 2160), Mode::Extend, false, 0, px));
+        assert!(fits(&one, AUTO, Mode::Extend, false, 0, 1));
     }
 }

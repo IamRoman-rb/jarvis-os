@@ -205,6 +205,7 @@ static EN: &[(&str, &str)] = &[
     ("Arrastrar solo el contorno", "Drag only the outline"),
     ("Asistente (IA)", "Assistant (AI)"),
     ("Audio (.wav)", "Audio (.wav)"),
+    ("Automática", "Automatic"),
     ("Azul", "Blue"),
     ("BLOQUEAR", "LOCK"),
     ("BORRAR", "DELETE"),
@@ -562,6 +563,11 @@ static EN: &[(&str, &str)] = &[
         "A WPA2 network password has 8 to 63 characters.",
     ),
     (
+        "La del firmware: para cambiarla hace falta una placa virtio-gpu",
+        "The firmware's: changing it needs a virtio-gpu card",
+    ),
+    ("La del monitor principal", "The main monitor's"),
+    (
         "La esfera de JARVIS gira (apagarlo ahorra CPU)",
         "JARVIS's sphere spins (turning it off saves CPU)",
     ),
@@ -787,6 +793,7 @@ static EN: &[(&str, &str)] = &[
     ("Reiniciar", "Restart"),
     ("Reloj 24 h", "24 h clock"),
     ("Relé", "Relay"),
+    ("Resolución", "Resolution"),
     (
         "Resolución que eligió el firmware (UEFI GOP)",
         "Resolution chosen by the firmware (UEFI GOP)",
@@ -1147,6 +1154,7 @@ static PT: &[(&str, &str)] = &[
     ("Arrastrar solo el contorno", "Arrastar só o contorno"),
     ("Asistente (IA)", "Assistente (IA)"),
     ("Audio (.wav)", "Áudio (.wav)"),
+    ("Automática", "Automática"),
     ("Azul", "Azul"),
     ("BLOQUEAR", "BLOQUEAR"),
     ("BORRAR", "APAGAR"),
@@ -1522,6 +1530,11 @@ static PT: &[(&str, &str)] = &[
         "A senha de uma rede WPA2 tem de 8 a 63 caracteres.",
     ),
     (
+        "La del firmware: para cambiarla hace falta una placa virtio-gpu",
+        "A do firmware: para mudá-la é preciso uma placa virtio-gpu",
+    ),
+    ("La del monitor principal", "A do monitor principal"),
+    (
         "La esfera de JARVIS gira (apagarlo ahorra CPU)",
         "A esfera do JARVIS gira (desligar economiza CPU)",
     ),
@@ -1759,6 +1772,7 @@ static PT: &[(&str, &str)] = &[
     ("Reiniciar", "Reiniciar"),
     ("Reloj 24 h", "Relógio 24 h"),
     ("Relé", "Relé"),
+    ("Resolución", "Resolução"),
     (
         "Resolución que eligió el firmware (UEFI GOP)",
         "Resolução escolhida pelo firmware (UEFI GOP)",

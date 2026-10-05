@@ -35,8 +35,9 @@ unsafe impl GlobalAlloc for IrqSafeHeap {
 #[global_allocator]
 static ALLOCATOR: IrqSafeHeap = IrqSafeHeap(LockedHeap::empty());
 
-/// Tope del heap: los buffers de pantalla, uno por ventana, las páginas web y la pila de red.
-const MAX_HEAP: u64 = 256 * 1024 * 1024;
+/// Tope del heap: los buffers de pantalla (el escritorio hasta 4K, ver `display::capacity`), uno
+/// por ventana, y la pila de red.
+const MAX_HEAP: u64 = 512 * 1024 * 1024;
 
 /// Devuelve dónde quedó el heap en la memoria física (inicio, tamaño en bytes), o `None` si no
 /// hay una región usable. La paginación (paging.rs) no entrega esos marcos.

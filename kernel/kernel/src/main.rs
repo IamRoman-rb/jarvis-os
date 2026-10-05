@@ -524,7 +524,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         bpp: info.bytes_per_pixel,
         format,
     };
-    let capacity = jarvis_desktop::display::max_pixels(&outputs);
+    // Para poder elegir otra resolución en Configuración → Pantallas: la más grande que entre
+    // con las tres imágenes en hasta la mitad del heap.
+    let capacity = jarvis_desktop::display::capacity(&outputs, (heap / 2) as usize);
     let mut surfaces = display::Surfaces::new(&firmware, gpu, capacity);
 
     if let Some(fs) = disk.as_mut() {
@@ -540,6 +542,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         desktop.set_brain(port, &token);
     }
     if surfaces.has_gpu() {
+        desktop.set_display_capacity(capacity);
         desktop.set_outputs(outputs);
         if let Some(l) = desktop.take_display()
             && !surfaces.apply(&l)
