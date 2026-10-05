@@ -979,6 +979,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.brain_voice = self.brain.voice;
         self.stats.brain_account = self.brain.account.clone();
         self.stats.brain_agents = self.brain.agents.clone();
+        self.stats.brain_camera = self.brain.camera.clone();
         self.stats_version += 1;
         // Las apps que muestran estadísticas: el Monitor y Configuración (Sistema, Hardware y
         // el resultado del instalador salen de acá).
@@ -1786,6 +1787,7 @@ impl<D: BlockDevice> Desktop<D> {
             self.config.ai_council,
             &mut self.out,
         );
+        self.brain.set_gestures(self.config.gestures, &mut self.out);
         crate::look::apply(&self.config);
         self.wm.set_topbar(self.config.topbar);
         if (old.display_mode, old.display_vertical, old.display_primary)
@@ -2145,6 +2147,7 @@ impl<D: BlockDevice> Desktop<D> {
         // El principal y el consejo viajan en `hola`.
         self.brain.lead = self.config.ai_lead as usize;
         self.brain.council = self.config.ai_council;
+        self.brain.gestures = self.config.gestures;
     }
 
     /// Lo que llegó del cerebro: a la consola, y la esfera "habla" mientras llega.
@@ -2154,6 +2157,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.brain_voice = self.brain.voice;
         self.stats.brain_account = self.brain.account.clone();
         self.stats.brain_agents = self.brain.agents.clone();
+        self.stats.brain_camera = self.brain.camera.clone();
         self.logs.append(&mut self.brain.logs);
         for ev in events {
             match &ev {
@@ -2166,6 +2170,7 @@ impl<D: BlockDevice> Desktop<D> {
                     self.say(&first, now_ms);
                 }
                 BrainEvent::Error(_) | BrainEvent::Confirm { .. } => {}
+                BrainEvent::Gesture(g) => self.gesture(*g, now_ms),
                 BrainEvent::Restart => {
                     // Unos segundos, así se lee (y se oye) la respuesta de JARVIS.
                     self.restart_at = Some(now_ms + 4000);
@@ -2280,6 +2285,75 @@ impl<D: BlockDevice> Desktop<D> {
         self.logs.push(format!("SALUDO {moment}"));
         self.brain.greeting = Some((moment, name));
         self.greeting_until = now_ms + 120_000;
+    }
+
+    /// Un gesto de la mano (la cámara del anfitrión): como el mouse, la rueda o un atajo.
+    fn gesture(&mut self, g: crate::brain::Gesture, now_ms: u64) {
+        use crate::brain::Gesture;
+        let clock = self.last_clock;
+        let still = MousePacket {
+            left: self.left_down,
+            ..MousePacket::default()
+        };
+        match g {
+            Gesture::Move { x, y } => {
+                let w = self.full_w as i32 - 1;
+                let h = self.full_h as i32 - 1;
+                self.cursor = (i32::from(x) * w / 1000, i32::from(y) * h / 1000);
+                self.cursor_visible = true;
+                let (cx, cy) = self.cursor;
+                self.update_hover(cx, cy);
+                self.send_pointer(PointerKind::Move, now_ms, clock);
+            }
+            Gesture::Click => {
+                self.logs.push("GESTO clic".into());
+                for left in [true, false] {
+                    self.on_mouse(MousePacket { left, ..still }, now_ms, clock);
+                }
+            }
+            Gesture::Scroll(d) => self.on_mouse(MousePacket { wheel: d, ..still }, now_ms, clock),
+            Gesture::Swipe(right) => {
+                self.logs.push(format!(
+                    "GESTO deslizar {}",
+                    if right { "derecha" } else { "izquierda" }
+                ));
+                let (cur, n) = self.wm.desktops();
+                if n > 1 {
+                    // Con varios escritorios virtuales, el siguiente o el anterior.
+                    let next = if right {
+                        (cur + 1) % n
+                    } else {
+                        (cur + n - 1) % n
+                    };
+                    self.wm.switch_desktop(next);
+                    self.desktop_changed(now_ms);
+                } else {
+                    // Con uno solo, la ventana siguiente (como Alt+Tab).
+                    let ids: Vec<WinId> = self
+                        .wm
+                        .windows()
+                        .iter()
+                        .filter(|w| w.visible())
+                        .map(|w| w.id)
+                        .collect();
+                    if ids.len() > 1 {
+                        let i = self
+                            .wm
+                            .focused()
+                            .and_then(|f| ids.iter().position(|&id| id == f))
+                            .unwrap_or(0);
+                        let n = ids.len();
+                        let id = ids[if right { (i + 1) % n } else { (i + n - 1) % n }];
+                        self.wm.activate(id);
+                        self.log_focus(id);
+                    }
+                }
+            }
+            Gesture::Start => {
+                self.logs.push("GESTO inicio".into());
+                self.toggle_start();
+            }
+        }
     }
 
     fn say(&mut self, text: &str, now_ms: u64) {

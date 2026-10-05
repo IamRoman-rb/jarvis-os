@@ -68,12 +68,29 @@ pub enum BrainEvent {
         ev: String,
         text: String,
     },
+    /// Un gesto de la mano frente a la cámara del anfitrión (Configuración → Gestos).
+    Gesture(Gesture),
     /// El cerebro compiló los cambios que JARVIS le hizo al sistema: hay que apagar para que
     /// `cargo xtask run` arranque la versión nueva.
     Restart,
     /// Cambió la cuenta de Claude del anfitrión, un agente vinculado o el estado de un inicio
     /// de sesión (Configuración → Asistente se redibuja).
     Account,
+}
+
+/// Lo que hizo la mano frente a la cámara (lo reconoce el anfitrión: src/jarvis/gestures/).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gesture {
+    /// El índice señala: el puntero va ahí (0..=1000 de la pantalla, en cada eje).
+    Move { x: u16, y: u16 },
+    /// Pulgar e índice se juntaron.
+    Click,
+    /// Dos dedos arriba y la mano se movió: pasos de la rueda (positivo = hacia abajo).
+    Scroll(i32),
+    /// La palma abierta pasó rápido hacia un costado (`true` = a la derecha).
+    Swipe(bool),
+    /// La palma abierta quieta: el menú de inicio.
+    Start,
 }
 
 /// Los agentes que pueden ser el cerebro de JARVIS: (código del protocolo, nombre). Claude es
@@ -166,6 +183,10 @@ pub struct BrainService {
     /// El saludo del arranque que falta pedirle al cerebro: (momento, nombre). Se manda en
     /// cuanto se conecta (con el id 0, que no usan los pedidos).
     pub greeting: Option<(&'static str, String)>,
+    /// Gestos con la cámara activados (Configuración): viaja en `hola` y en `gestos`.
+    pub gestures: bool,
+    /// Qué dice el anfitrión de la cámara ("" = nada todavía).
+    pub camera: String,
     /// La respuesta en curso (para la esfera y el mensaje del escritorio).
     pub answer: String,
     pub status: Status,
@@ -199,6 +220,8 @@ impl Default for BrainService {
             lead: 0,
             council: false,
             greeting: None,
+            gestures: false,
+            camera: String::new(),
             answer: String::new(),
             status: Status::Off,
             logs: Vec::new(),
@@ -250,6 +273,18 @@ impl BrainService {
 
     pub fn busy(&self) -> bool {
         self.current.is_some()
+    }
+
+    /// Se prendieron o apagaron los gestos: el anfitrión abre o cierra la cámara.
+    pub fn set_gestures(&mut self, on: bool, out: &mut Outbox) {
+        if on == self.gestures {
+            return;
+        }
+        self.gestures = on;
+        self.logs.push(format!("CEREBRO_GESTOS {on}"));
+        if self.ready {
+            self.send(out, format!("{{\"t\":\"gestos\",\"activo\":{on}}}"));
+        }
     }
 
     /// Cambió el agente principal o el consejo (Configuración): se le avisa al cerebro.
@@ -394,12 +429,13 @@ impl BrainService {
                 self.send(
                     out,
                     format!(
-                        "{{\"t\":\"hola\",\"token\":{},\"equipo\":{},\"parlantes\":{},\"principal\":\"{}\",\"consejo\":{}}}",
+                        "{{\"t\":\"hola\",\"token\":{},\"equipo\":{},\"parlantes\":{},\"principal\":\"{}\",\"consejo\":{},\"gestos\":{}}}",
                         quote(&self.token),
                         quote(&self.equipo),
                         self.speakers,
                         AGENTS[self.lead].0,
-                        self.council
+                        self.council,
+                        self.gestures
                     ),
                 );
             }
@@ -566,6 +602,40 @@ impl BrainService {
                 events.push(BrainEvent::Audio { rate, pcm, end });
             }
             "callar" => events.push(BrainEvent::Hush),
+            "camara" => {
+                self.camera = msg
+                    .get("estado")
+                    .and_then(Json::str)
+                    .unwrap_or("")
+                    .to_string();
+                self.logs.push(format!("CEREBRO_CAMARA {}", self.camera));
+                events.push(BrainEvent::Account);
+            }
+            "gesto" => {
+                let n = |k: &str| num(msg.get(k)).unwrap_or(0);
+                let g = match msg.get("tipo").and_then(Json::str).unwrap_or("") {
+                    "mover" => Gesture::Move {
+                        x: n("x").min(1000) as u16,
+                        y: n("y").min(1000) as u16,
+                    },
+                    "clic" => Gesture::Click,
+                    "desplazar" => {
+                        // Los números del parser de JSON son enteros sin signo: el sentido va aparte.
+                        let d = n("pasos").min(20) as i32;
+                        Gesture::Scroll(if matches!(msg.get("arriba"), Some(Json::Bool(true))) {
+                            -d
+                        } else {
+                            d
+                        })
+                    }
+                    "deslizar" => {
+                        Gesture::Swipe(msg.get("dir").and_then(Json::str) == Some("derecha"))
+                    }
+                    "inicio" => Gesture::Start,
+                    _ => return,
+                };
+                events.push(BrainEvent::Gesture(g));
+            }
             "reiniciar" => {
                 self.logs.push("CEREBRO_REINICIAR".into());
                 events.push(BrainEvent::Restart);

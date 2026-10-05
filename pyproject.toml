@@ -24,6 +24,12 @@ voice = [
     "piper-tts",
 ]
 
+# Gestos con la cámara. Se instalan con: uv sync --extra gestures
+gestures = [
+    "mediapipe",
+    "opencv-python",
+]
+
 [project.scripts]
 jarvis = "jarvis.cli:app"
 
@@ -70,9 +76,13 @@ strict = true
 mypy_path = "src"
 packages = ["jarvis"]
 
-# La voz es un extra (`uv sync --extra voice`): sin él, estos módulos no están instalados.
+# La voz y los gestos son extras (`uv sync --extra voice`, `--extra gestures`): sin ellos, estos
+# módulos no están instalados.
 [[tool.mypy.overrides]]
-module = ["numpy", "sounddevice", "openwakeword", "openwakeword.*", "faster_whisper", "piper"]
+module = [
+    "numpy", "sounddevice", "openwakeword", "openwakeword.*", "faster_whisper", "piper",
+    "cv2", "mediapipe",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -379,7 +379,7 @@ fn vincular_gemini_chatgpt_y_deepseek_desde_configuracion() {
     b.second();
     // El principal y el consejo viajan en `hola` (por defecto, Claude y sin consejo).
     assert!(
-        b.sent.contains(r#""principal":"claude","consejo":false}"#),
+        b.sent.contains(r#""principal":"claude","consejo":false,"#),
         "{}",
         b.sent
     );
@@ -518,4 +518,55 @@ fn jarvis_aplica_sus_cambios_y_el_sistema_se_apaga_para_arrancar_la_version_nuev
         off(&mut b),
         "apaga (no reinicia): xtask arranca la imagen nueva"
     );
+}
+
+#[test]
+fn gestos_de_la_mano_mueven_el_puntero_hacen_clic_y_abren_el_inicio() {
+    let mut b = Brain::new();
+    b.second();
+    // Apagados de fábrica: viaja en `hola`.
+    assert!(b.sent.contains(r#""gestos":false}"#), "{}", b.sent);
+    b.reply(r#"{"t":"listo"}"#);
+    b.second();
+    b.sent.clear();
+    // Win+A → "Gestos" (cuarto interruptor): el anfitrión abre la cámara.
+    b.t.combo(Mods::WIN, Key::Char('a'));
+    b.t.keys(&[Key::Right, Key::Right, Key::Right]);
+    b.t.key(Key::Enter);
+    b.collect();
+    assert!(b.t.d.config().gestures);
+    assert!(
+        b.sent.contains(r#"{"t":"gestos","activo":true}"#),
+        "{}",
+        b.sent
+    );
+    b.t.key(Key::Escape);
+    b.reply(r#"{"t":"camara","estado":"Cámara encendida: HD Webcam"}"#);
+    assert!(
+        b.t.logs()
+            .iter()
+            .any(|l| l == "CEREBRO_CAMARA Cámara encendida: HD Webcam")
+    );
+    // El índice señala el centro de la pantalla: el puntero va ahí.
+    b.reply(r#"{"t":"gesto","tipo":"mover","x":500,"y":250}"#);
+    let (w, h) = (W as i32 - 1, H as i32 - 1);
+    assert_eq!(b.t.d.cursor(), (w / 2, h / 4));
+    // Pinza: un clic (ahí hay escritorio: no rompe nada).
+    b.reply(r#"{"t":"gesto","tipo":"clic"}"#);
+    assert!(b.t.logs().iter().any(|l| l == "GESTO clic"));
+    // Rueda hacia arriba y abajo: no rompe (la ventana de abajo la recibe).
+    b.reply(r#"{"t":"gesto","tipo":"desplazar","pasos":3,"arriba":true}"#);
+    b.reply(r#"{"t":"gesto","tipo":"desplazar","pasos":2}"#);
+    // Palma quieta: el menú de inicio.
+    b.reply(r#"{"t":"gesto","tipo":"inicio"}"#);
+    assert_eq!(b.t.d.overlay_name(), "inicio");
+    b.t.key(Key::Escape);
+    // Deslizar con dos ventanas: pasa a la otra.
+    b.t.d.open(Launch::App(AppKind::Terminal), b.t.now, CLOCK);
+    b.t.d.open(Launch::App(AppKind::Monitor), b.t.now, CLOCK);
+    assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
+    b.reply(r#"{"t":"gesto","tipo":"deslizar","dir":"izquierda"}"#);
+    assert_eq!(b.t.d.focused_app(), Some(AppKind::Terminal));
+    b.reply(r#"{"t":"gesto","tipo":"deslizar","dir":"derecha"}"#);
+    assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
 }

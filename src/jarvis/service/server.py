@@ -21,6 +21,7 @@ from jarvis import account
 from jarvis.agent.brain import Brain, BrainError
 from jarvis.agent.council import LEADS, Mode
 from jarvis.agent.providers import PROVIDERS, AgentError, AgentHub
+from jarvis.gestures import GestureHub
 from jarvis.memory import Memory
 from jarvis.projects import ProjectError, ProjectRunner, list_projects, resolve_project
 from jarvis.protocol import MAX_LINE, Message, ProtocolError, decode, encode
@@ -84,6 +85,8 @@ class Host:
     updater: Updater | None = None
     #: La memoria de JARVIS (conversaciones y recuerdos). None = no recuerda (tests).
     memory: Memory | None = None
+    #: Los gestos con la cámara del anfitrión. None = sin gestos (tests, simulado).
+    gestures: GestureHub | None = None
 
 
 class Session:
@@ -433,6 +436,12 @@ class Session:
                     'Seguí en el navegador de la PC: elegí "Continuar con Google".',
                 )
             )
+        elif t == "gestos":
+            cam = self.host.gestures if self.host else None
+            if cam is not None:
+                cam.set(msg.get("activo") is True, self)
+            elif msg.get("activo") is True:
+                await self.send({"t": "camara", "estado": "Este cerebro no maneja la cámara."})
         elif t == "saludo":
             req_id = msg.get("id")
             if not isinstance(req_id, int):
@@ -499,6 +508,8 @@ async def serve_connection(
             return
         log.info("kernel conectado desde %s (%s)", peer, hello.get("equipo", "?"))
         session.set_mode(hello)
+        if host is not None and host.gestures is not None:
+            host.gestures.set(hello.get("gestos") is True, session)
         if host is not None and host.voice is not None:
             host.voice.session = session
             parlantes = hello.get("parlantes")
@@ -519,6 +530,8 @@ async def serve_connection(
     except (ConnectionError, asyncio.IncompleteReadError):
         pass
     finally:
+        if host is not None and host.gestures is not None:
+            host.gestures.disconnected(session)
         await session.cancel()
         await session.stop_project()
         await brain.close()

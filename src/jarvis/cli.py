@@ -109,6 +109,11 @@ def serve(
             asyncio.get_running_loop().create_task(watch_parent(int(parent)))
         if not simulado and not sin_voz:
             host.voice = await start_voice()
+        if not simulado:
+            from jarvis.gestures import GestureHub
+
+            # La cámara se abre solo cuando JARVIS-OS activa los gestos.
+            host.gestures = GestureHub(asyncio.get_running_loop())
         await run_server(puerto or config.puerto, token, make_brain, host)
 
     with contextlib.suppress(KeyboardInterrupt):

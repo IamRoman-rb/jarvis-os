@@ -8,13 +8,15 @@ Un mensaje JSON por renglón, sobre una conexión TCP. Cada mensaje tiene `t` (e
   `confirmacion{llamada, ok}`, `agentes`, `agentes_modo{principal, consejo}`,
   `vincular{agente, metodo, clave?}` (metodo: google o clave), `desvincular{agente}`,
   `saludo{id, momento, nombre}` (al arrancar; momento: manana, tarde o noche; se contesta
-  con `texto` y `fin`, como un pedido).
+  con `texto` y `fin`, como un pedido), `gestos{activo}` (prender o apagar la cámara; también
+  viaja en `hola`).
 - cerebro → kernel: `listo`, `texto{id, delta}`, `fin{id}`, `error{id, msg}`,
   `accion{llamada, tool, args}`, `confirmar{llamada, nivel, descripcion}`, `oido{texto}`,
   `voz{nivel}`, `agente{id, nombre, vinculado, metodo, detalle, estado}` (detalle: la
   cuenta o los últimos 4 caracteres de la clave, nunca la clave), `audio{tasa, pcm}` /
   `audio{fin}` (la voz para los parlantes del kernel, PCM mono de 16 bits en base64),
-  `callar`, `proyecto{...}`.
+  `callar`, `proyecto{...}`, `camara{estado}`, `gesto{tipo: mover{x, y} (0..1000) | clic |
+  desplazar{pasos, arriba?} | deslizar{dir} | inicio}`.
 
 El kernel solo entiende JSON simple: objetos, textos, números enteros y booleanos.
 """

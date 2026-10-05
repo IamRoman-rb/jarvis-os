@@ -454,7 +454,8 @@ impl Console {
             | BrainEvent::VoiceLevel(_)
             | BrainEvent::Audio { .. }
             | BrainEvent::Hush
-            | BrainEvent::Restart => {}
+            | BrainEvent::Restart
+            | BrainEvent::Gesture(_) => {}
             BrainEvent::End => {
                 self.waiting = false;
                 self.streaming = None;
