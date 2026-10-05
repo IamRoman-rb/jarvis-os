@@ -60,10 +60,11 @@ pub enum Section {
     Sync,
     Microphone,
     Hardware,
+    DefaultApps,
     Assistant,
 }
 
-pub const SECTIONS: [Section; 20] = [
+pub const SECTIONS: [Section; 21] = [
     Section::System,
     Section::Displays,
     Section::Personalization,
@@ -83,6 +84,7 @@ pub const SECTIONS: [Section; 20] = [
     Section::Sync,
     Section::Microphone,
     Section::Hardware,
+    Section::DefaultApps,
     Section::Assistant,
 ];
 
@@ -104,7 +106,8 @@ impl Section {
             Section::Taskbar => tr("Barra y cursor"),
             Section::DateTime => tr("Hora e idioma"),
             Section::Network => tr("Red e Internet"),
-            Section::Browser => tr("Navegador"),
+            Section::Browser => tr("Navegador (Brave)"),
+            Section::DefaultApps => tr("Aplicaciones predeterminadas"),
             Section::Sound => tr("Sonido"),
             Section::Devices => tr("Mouse y teclado"),
             Section::Apps => tr("Aplicaciones"),
@@ -130,6 +133,7 @@ impl Section {
             Section::DateTime => Icon::Gauge,
             Section::Network => Icon::Globe,
             Section::Browser => Icon::Globe,
+            Section::DefaultApps => Icon::Package,
             Section::Sound => Icon::Music,
             Section::Devices => Icon::Gear,
             Section::Apps => Icon::Package,
@@ -180,7 +184,6 @@ pub enum Opt {
     Zone,
     Clock24,
     TestNet,
-    BraveDefault,
     BraveServer,
     SyncNewCode,
     MicListen,
@@ -199,12 +202,7 @@ pub enum Opt {
     SyncRelay,
     BraveToken,
     BraveHome,
-    Homepage,
-    Search,
-    LightPages,
-    Images,
     HttpsBridge,
-    Reader,
     Sounds,
     Volume,
     TestSound,
@@ -234,6 +232,12 @@ pub enum Opt {
     WifiNet(usize),
     WifiPassword,
     WifiDisconnect,
+    /// El buscador (lo que no es una dirección se busca en Brave con él).
+    Search,
+    /// La app de un tipo de archivo (índice en `defaults::FileType::ALL`).
+    DefaultApp(usize),
+    /// Mover el sistema con gestos de la mano (la cámara del anfitrión).
+    Gestures,
     Info,
 }
 
@@ -999,14 +1003,10 @@ impl Settings {
             }
             Section::Browser => alloc::vec![
                 Row::new(
-                    Opt::BraveDefault,
-                    tr("Navegador principal"),
-                    tr("El que abre la barra: Brave (en el anfitrión) o el simple de JARVIS"),
-                    Choice(if c.brave_default {
-                        "Brave".into()
-                    } else {
-                        tr("Navegador simple").into()
-                    })
+                    Opt::Info,
+                    tr("Navegador"),
+                    tr("Brave corre en el anfitrión y JARVIS-OS muestra la página"),
+                    Value("Brave".into())
                 ),
                 Row::new(
                     Opt::BraveServer,
@@ -1035,40 +1035,38 @@ impl Settings {
                         secret: false
                     }
                 ),
-                Row::new(
-                    Opt::Homepage,
-                    tr("Página de inicio (navegador simple)"),
-                    tr("Lo que abre el navegador (about:inicio = la de JARVIS)"),
-                    Text {
-                        value: c.homepage.clone(),
-                        secret: false
-                    }
-                ),
-                Row::new(
-                    Opt::Search,
-                    tr("Buscador"),
-                    tr("Lo que escribís en la barra que no es una dirección"),
-                    Choice(c.search.name().into())
-                ),
-                Row::new(
-                    Opt::LightPages,
-                    tr("Páginas claras"),
-                    tr("Fondo blanco como en otros navegadores (si no, oscuro)"),
-                    on(c.light_pages)
-                ),
-                Row::new(
-                    Opt::Images,
-                    tr("Mostrar imágenes"),
-                    tr("Se convierten a BMP en el puente del anfitrión"),
-                    on(c.load_images)
-                ),
-                Row::new(
-                    Opt::Reader,
-                    tr("Modo lectura"),
-                    tr("Solo el contenido: sin menús, formularios ni estilos"),
-                    on(c.reader_mode)
-                ),
             ],
+            Section::DefaultApps => {
+                use crate::defaults::FileType;
+                let mut rows = alloc::vec![
+                    Row::new(
+                        Opt::Info,
+                        tr("Navegador web"),
+                        tr("Los enlaces y las búsquedas se abren en Brave"),
+                        Value("Brave".into())
+                    ),
+                    Row::new(
+                        Opt::Search,
+                        tr("Buscador"),
+                        tr("Para lo que no es una dirección (\"buscá...\", open ?...)"),
+                        Choice(c.search.name().into())
+                    ),
+                ];
+                for (i, t) in FileType::ALL.into_iter().enumerate() {
+                    let detail = if t.handlers().len() > 1 {
+                        tr("< > para elegir otra app")
+                    } else {
+                        ""
+                    };
+                    rows.push(Row::new(
+                        Opt::DefaultApp(i),
+                        t.name(),
+                        detail,
+                        Choice(c.default_apps.get(t).name().into()),
+                    ));
+                }
+                rows
+            }
             Section::Sound => alloc::vec![
                 Row::new(
                     Opt::Volume,
@@ -1123,6 +1121,16 @@ impl Settings {
                     } else {
                         tr("Inglés (EE. UU.)").into()
                     })
+                ),
+                Row::new(
+                    Opt::Gestures,
+                    tr("Gestos con la cámara"),
+                    if stats.brain_camera.is_empty() {
+                        tr("Mover el puntero, hacer clic y desplazarse con la mano")
+                    } else {
+                        stats.brain_camera.as_str()
+                    },
+                    on(c.gestures)
                 ),
             ],
             Section::Apps => {
@@ -1873,7 +1881,6 @@ impl Settings {
         match opt {
             Opt::Hostname
             | Opt::User
-            | Opt::Homepage
             | Opt::Pin
             | Opt::FwAddSite
             | Opt::BraveServer
@@ -1885,7 +1892,6 @@ impl Settings {
                     let (value, max) = match opt {
                         Opt::Hostname => (c.hostname.clone(), 24),
                         Opt::User => (c.user.clone(), 24),
-                        Opt::Homepage => (c.homepage.clone(), 200),
                         Opt::BraveServer => (c.brave_server.clone(), 100),
                         Opt::SyncCode => (c.sync_code.clone(), 29),
                         Opt::SyncRelay => (c.sync_relay.clone(), 100),
@@ -2067,16 +2073,17 @@ impl Settings {
                 self.net_test = Some((id, tr("Probando...").into()));
                 return;
             }
-            Opt::BraveDefault => c.brave_default = !c.brave_default,
             Opt::Search => {
                 let all = SearchEngine::ALL;
                 let pos = all.iter().position(|s| *s == c.search).unwrap_or(0) as i32;
                 c.search = all[step(pos, all.len() as i32) as usize];
             }
-            Opt::LightPages => c.light_pages = !c.light_pages,
-            Opt::Images => c.load_images = !c.load_images,
             Opt::HttpsBridge => c.https_bridge = !c.https_bridge,
-            Opt::Reader => c.reader_mode = !c.reader_mode,
+            Opt::DefaultApp(i) => {
+                let t = crate::defaults::FileType::ALL[i.min(6)];
+                c.default_apps.cycle(t, if delta == 0 { 1 } else { delta });
+            }
+            Opt::Gestures => c.gestures = !c.gestures,
             Opt::Sounds => c.sounds = !c.sounds,
             // Como en Windows: las flechas de a 1 (con Ctrl, de a 10); Enter no lo cambia.
             Opt::Volume if delta == 0 => return,
@@ -2243,10 +2250,6 @@ impl Settings {
             }
             Opt::User if valid_name(&v) => {
                 self.cfg.user = v;
-                true
-            }
-            Opt::Homepage if !v.is_empty() => {
-                self.cfg.homepage = v;
                 true
             }
             Opt::SyncCode if v.trim().is_empty() => {

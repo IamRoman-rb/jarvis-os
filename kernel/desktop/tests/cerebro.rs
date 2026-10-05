@@ -174,10 +174,7 @@ fn una_accion_la_ejecuta_el_escritorio_y_contesta() {
     b.ask("abrí el navegador y buscá rust");
     b.reply(r#"{"t":"accion","llamada":1,"tool":"buscar_web","args":{"consulta":"rust"}}"#);
     assert!(
-        matches!(
-            b.t.d.focused_app(),
-            Some(AppKind::Brave) | Some(AppKind::Browser)
-        ),
+        matches!(b.t.d.focused_app(), Some(AppKind::Brave)),
         "se abrió el navegador"
     );
     assert_eq!(
@@ -320,7 +317,7 @@ fn abrir_un_archivo_y_leer_la_terminal() {
     );
     assert_eq!(b.t.d.focused_app(), Some(AppKind::Editor));
     assert!(
-        last_line(&b).contains("en el editor de texto"),
+        last_line(&b).contains("en Editor de texto"),
         "{}",
         last_line(&b)
     );

@@ -120,6 +120,7 @@ static EN: &[(&str, &str)] = &[
         "1 = lento · 3 = normal · 5 = rápido",
         "1 = slow · 3 = normal · 5 = fast",
     ),
+    ("< > para elegir otra app", "< > to choose another app"),
     ("A la derecha", "On the right"),
     ("A la derecha del principal", "Right of the main one"),
     ("A la izquierda", "On the left"),
@@ -182,6 +183,7 @@ static EN: &[(&str, &str)] = &[
     ("Apariencia", "Appearance"),
     ("Aplicaciones", "Apps"),
     ("Aplicaciones instaladas", "Installed apps"),
+    ("Aplicaciones predeterminadas", "Default apps"),
     (
         "Archivo binario: sin vista previa",
         "Binary file: no preview",
@@ -202,6 +204,7 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Arrastrar solo el contorno", "Drag only the outline"),
     ("Asistente (IA)", "Assistant (AI)"),
+    ("Audio (.wav)", "Audio (.wav)"),
     ("Azul", "Blue"),
     ("BLOQUEAR", "LOCK"),
     ("BORRAR", "DELETE"),
@@ -210,6 +213,7 @@ static EN: &[(&str, &str)] = &[
     ("BRAVE NO ESTÁ DISPONIBLE", "BRAVE IS NOT AVAILABLE"),
     ("BUSCAR", "CHECK"),
     ("Barra de arriba al maximizar", "Top bar when maximized"),
+    ("Barra superior", "Top bar"),
     ("Barra y cursor", "Bar and cursor"),
     ("Bloqueadas", "Blocked"),
     ("Bloquear", "Lock"),
@@ -233,6 +237,10 @@ static EN: &[(&str, &str)] = &[
     ("Botones a la izquierda", "Buttons on the left"),
     ("Botones de la barra de título", "Title bar buttons"),
     ("Brave cerró la conexión", "Brave closed the connection"),
+    (
+        "Brave corre en el anfitrión y JARVIS-OS muestra la página",
+        "Brave runs on the host and JARVIS-OS shows the page",
+    ),
     ("Buscador", "Search engine"),
     ("Buscando redes...", "Searching for networks..."),
     ("Buscar", "Search"),
@@ -242,7 +250,6 @@ static EN: &[(&str, &str)] = &[
         "Buscá con Brave o escribí una dirección",
         "Search with Brave or type an address",
     ),
-    ("Buscá o escribí una dirección", "Search or type an address"),
     ("CAMBIAR DE VENTANA", "SWITCH WINDOW"),
     ("CANCELAR", "CANCEL"),
     ("CANCIONES · PARLANTE DE LA PC", "SONGS · PC SPEAKER"),
@@ -263,10 +270,10 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Canal 2 del PIT (8254)", "PIT channel 2 (8254)"),
     ("Captura (Impr Pant)", "Screenshot (PrtSc)"),
-    ("Carga cancelada.", "Loading canceled."),
     ("Cargando el video...", "Loading the video..."),
     ("Carpeta", "Folder"),
     ("Carpeta vacía", "Empty folder"),
+    ("Carpetas", "Folders"),
     ("Cerebro", "Brain"),
     ("Cerrar", "Close"),
     ("Cerrar sesión", "Sign out"),
@@ -316,6 +323,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Cuánto se mueve la página con cada paso",
         "How far the page moves with each step",
+    ),
+    (
+        "Código (.rs, .py, .js, .json...)",
+        "Code (.rs, .py, .js, .json...)",
     ),
     ("Código de emparejado", "Pairing code"),
     ("Código nuevo", "New code"),
@@ -404,10 +415,6 @@ static EN: &[(&str, &str)] = &[
         "The bridge sent something unreadable",
     ),
     (
-        "El que abre la barra: Brave (en el anfitrión) o el simple de JARVIS",
-        "The one the bar opens: Brave (on the host) or JARVIS's simple one",
-    ),
-    (
         "El que contesta y actúa sobre JARVIS-OS (si falla, contesta otro)",
         "The one that answers and acts on JARVIS-OS (if it fails, another answers)",
     ),
@@ -443,28 +450,12 @@ static EN: &[(&str, &str)] = &[
         "Listens to the PC microphone: say \"JARVIS, ...\" or Win+J",
     ),
     (
-        "Ese botón necesita JavaScript.",
-        "That button needs JavaScript.",
-    ),
-    (
-        "Ese enlace necesita JavaScript.",
-        "That link needs JavaScript.",
-    ),
-    (
         "Ese valor no sirve (usuario y equipo: letras, números y guiones; PIN: solo números).",
         "That value won't work (user and computer: letters, digits and dashes; PIN: digits only).",
     ),
     ("Español (Latinoamérica)", "Spanish (Latin America)"),
-    (
-        "Esta página se arma con JavaScript, que JARVIS-OS todavía no ejecuta: puede verse incompleta.",
-        "This page is built with JavaScript, which JARVIS-OS can't run yet: it may look incomplete.",
-    ),
     ("Estado", "Status"),
     ("Estado de la cuenta", "Account status"),
-    (
-        "Este formulario manda datos con POST: el puente solo acepta GET (ver ADR 0004).",
-        "This form sends data with POST: the bridge only accepts GET (see ADR 0004).",
-    ),
     ("Extender", "Extend"),
     (
         "Extender, duplicar o usar uno solo (también Win+P)",
@@ -479,10 +470,6 @@ static EN: &[(&str, &str)] = &[
         "Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan",
         "Arrows or mouse: the zone for this window · Enter places it · the others fill in",
     ),
-    (
-        "Fondo blanco como en otros navegadores (si no, oscuro)",
-        "White background like other browsers (otherwise dark)",
-    ),
     ("Fondo de escritorio", "Desktop background"),
     ("Formato de 24 horas", "24-hour format"),
     (
@@ -496,6 +483,8 @@ static EN: &[(&str, &str)] = &[
         "Generalo en una máquina y escribilo en la otra",
         "Generate it on one machine and type it on the other",
     ),
+    ("Gestos", "Gestures"),
+    ("Gestos con la cámara", "Camera gestures"),
     (
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "CPU, memory, disk and network charts at the bottom left",
@@ -523,6 +512,10 @@ static EN: &[(&str, &str)] = &[
     ("Identificar", "Identify"),
     ("Idioma", "Language"),
     ("Imágenes", "Pictures"),
+    (
+        "Imágenes (.png, .jpg, .bmp...)",
+        "Images (.png, .jpg, .bmp...)",
+    ),
     ("Inglés (EE. UU.)", "English (US)"),
     ("Iniciar sesión con Google", "Sign in with Google"),
     ("Inicio", "Home"),
@@ -600,17 +593,8 @@ static EN: &[(&str, &str)] = &[
     ("Letra de la terminal", "Terminal font"),
     ("Letra del editor", "Editor font"),
     ("Listo", "Done"),
-    ("Listo · modo lectura (F9)", "Done · reader mode (F9)"),
     ("Lo mismo que Win+L", "Same as Win+L"),
     ("Lo primero que abre Brave", "The first thing Brave opens"),
-    (
-        "Lo que abre el navegador (about:inicio = la de JARVIS)",
-        "What the browser opens (about:inicio = JARVIS's)",
-    ),
-    (
-        "Lo que escribís en la barra que no es una dirección",
-        "What you type in the bar that isn't an address",
-    ),
     ("Lo que no dice ninguna regla", "What no rule mentions"),
     (
         "Lo que pongas acá aparece en las otras máquinas",
@@ -620,6 +604,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Los demás agentes vinculados opinan y el principal decide",
         "The other linked agents give their opinion and the main one decides",
+    ),
+    (
+        "Los enlaces y las búsquedas se abren en Brave",
+        "Links and searches open in Brave",
     ),
     ("MEMORIA", "MEMORY"),
     ("MEMORIA (HEAP DEL NÚCLEO)", "MEMORY (KERNEL HEAP)"),
@@ -645,14 +633,16 @@ static EN: &[(&str, &str)] = &[
         "Minimizar, maximizar y cerrar",
         "Minimize, maximize and close",
     ),
-    ("Modo lectura", "Reader mode"),
     ("Monitor (Ctrl+Shift+Esc)", "Monitor (Ctrl+Shift+Esc)"),
     ("Monitor del sistema", "System monitor"),
     ("Monitor principal", "Main monitor"),
     ("Monitores", "Monitors"),
     ("Mostrar el escritorio", "Show desktop"),
-    ("Mostrar imágenes", "Show images"),
     ("Mouse y teclado", "Mouse & keyboard"),
+    (
+        "Mover el puntero, hacer clic y desplazarse con la mano",
+        "Move the pointer, click and scroll with your hand",
+    ),
     (
         "Muestra el número de cada monitor",
         "Shows each monitor's number",
@@ -662,7 +652,6 @@ static EN: &[(&str, &str)] = &[
         "Música, videos y la voz de JARVIS",
         "Music, videos and the JARVIS voice",
     ),
-    ("NO SE PUDO CARGAR", "COULDN'T LOAD"),
     ("NOMBRE", "NAME"),
     ("NOMBRE 8.3", "8.3 NAME"),
     ("NOTIFICACIONES", "NOTIFICATIONS"),
@@ -672,8 +661,7 @@ static EN: &[(&str, &str)] = &[
     ("Nada seleccionado", "Nothing selected"),
     ("Naranja", "Orange"),
     ("Navegador", "Browser"),
-    ("Navegador principal", "Main browser"),
-    ("Navegador simple", "Simple browser"),
+    ("Navegador (Brave)", "Browser (Brave)"),
     ("Navegador web", "Web browser"),
     (
         "Necesita \"Animaciones\" encendido (Personalización)",
@@ -702,10 +690,6 @@ static EN: &[(&str, &str)] = &[
         "No hay disco para guardar la captura.",
         "There is no disk to save the screenshot.",
     ),
-    (
-        "No hay disco para guardar la descarga.",
-        "There's no disk to save the download.",
-    ),
     ("No hay disco.", "No disk."),
     (
         "No hay disco: arrancá QEMU con el disco virtual",
@@ -726,7 +710,6 @@ static EN: &[(&str, &str)] = &[
         "No se cerró la sesión: hay cambios sin guardar.",
         "Did not sign out: there are unsaved changes.",
     ),
-    ("No se pudo leer la imagen.", "Couldn't read the image."),
     ("No soportada", "Not supported"),
     ("Nombre del equipo", "Computer name"),
     ("Nombre:", "Name:"),
@@ -757,6 +740,10 @@ static EN: &[(&str, &str)] = &[
         "JARVIS-OS packages (apt, dpkg)",
     ),
     (
+        "Para lo que no es una dirección (\"buscá...\", open ?...)",
+        "For what is not an address (\"search...\", open ?...)",
+    ),
+    (
         "Para pasar el mouse de uno al otro",
         "To move the mouse from one to the other",
     ),
@@ -784,14 +771,8 @@ static EN: &[(&str, &str)] = &[
     ("Proyectos", "Projects"),
     ("Puente de Brave", "Brave bridge"),
     ("Puerta de enlace y DNS", "Gateway and DNS"),
-    ("Página completa", "Full page"),
-    ("Página de inicio", "Home page"),
-    (
-        "Página de inicio (navegador simple)",
-        "Home page (simple browser)",
-    ),
     ("Página de inicio de Brave", "Brave home page"),
-    ("Páginas claras", "Light pages"),
+    ("Páginas web guardadas (.html)", "Saved web pages (.html)"),
     ("Qué hace con la ventana", "What it does to the window"),
     ("RAM libre", "Free RAM"),
     ("RECHAZAR", "REJECT"),
@@ -838,10 +819,6 @@ static EN: &[(&str, &str)] = &[
         "It connects when you start JARVIS with cargo xtask run",
     ),
     (
-        "Se convierten a BMP en el puente del anfitrión",
-        "They're converted to BMP by the host bridge",
-    ),
-    (
         "Se cortó la conexión con el cerebro.",
         "The connection to the brain was lost.",
     ),
@@ -877,10 +854,6 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Sincronización", "Sync"),
     ("Sistema", "System"),
-    (
-        "Solo el contenido: sin menús, formularios ni estilos",
-        "Just the content: no menus, forms or styles",
-    ),
     ("Solo la pantalla 1", "Display 1 only"),
     ("Solo la pantalla 2", "Display 2 only"),
     (
@@ -914,6 +887,10 @@ static EN: &[(&str, &str)] = &[
     ("Temperatura", "Temperature"),
     ("Terminal (Ctrl+Alt+T)", "Terminal (Ctrl+Alt+T)"),
     ("Terminal (wget, curl)", "Terminal (wget, curl)"),
+    (
+        "Texto (.txt, .md, .log, .csv)",
+        "Text (.txt, .md, .log, .csv)",
+    ),
     ("Texto grande", "Large text"),
     ("Tiempo encendido", "Uptime"),
     ("Tienda de snaps", "Snap store"),
@@ -960,7 +937,6 @@ static EN: &[(&str, &str)] = &[
     ("VENTANA (ALT+ESPACIO)", "WINDOW (ALT+SPACE)"),
     ("VER", "VIEW"),
     ("VISTA PREVIA", "PREVIEW"),
-    ("VOLUMEN", "VOLUME"),
     ("Vaciar la Papelera", "Empty the Trash"),
     ("Velocidad de las animaciones", "Animation speed"),
     ("Velocidad del puntero", "Pointer speed"),
@@ -972,11 +948,13 @@ static EN: &[(&str, &str)] = &[
     ("Ver lo bloqueado", "View what's blocked"),
     ("Verde", "Green"),
     ("Versión", "Version"),
+    ("Videos (.avi)", "Videos (.avi)"),
     (
         "Vinculalo con Google o con el formulario",
         "Link it with Google or with the form",
     ),
     ("Violeta", "Violet"),
+    ("Visor", "Viewer"),
     ("Visor de imágenes", "Image viewer"),
     ("Volumen", "Volume"),
     ("Volver a preguntarle al anfitrión", "Ask the host again"),
@@ -1084,6 +1062,7 @@ static PT: &[(&str, &str)] = &[
         "1 = lento · 3 = normal · 5 = rápido",
         "1 = lento · 3 = normal · 5 = rápido",
     ),
+    ("< > para elegir otra app", "< > para escolher outro app"),
     ("A la derecha", "À direita"),
     ("A la derecha del principal", "À direita do principal"),
     ("A la izquierda", "À esquerda"),
@@ -1146,6 +1125,7 @@ static PT: &[(&str, &str)] = &[
     ("Apariencia", "Aparência"),
     ("Aplicaciones", "Aplicativos"),
     ("Aplicaciones instaladas", "Aplicativos instalados"),
+    ("Aplicaciones predeterminadas", "Aplicativos padrão"),
     (
         "Archivo binario: sin vista previa",
         "Arquivo binário: sem prévia",
@@ -1166,6 +1146,7 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Arrastrar solo el contorno", "Arrastar só o contorno"),
     ("Asistente (IA)", "Assistente (IA)"),
+    ("Audio (.wav)", "Áudio (.wav)"),
     ("Azul", "Azul"),
     ("BLOQUEAR", "BLOQUEAR"),
     ("BORRAR", "APAGAR"),
@@ -1177,6 +1158,7 @@ static PT: &[(&str, &str)] = &[
         "Barra de arriba al maximizar",
         "Barra superior ao maximizar",
     ),
+    ("Barra superior", "Barra superior"),
     ("Barra y cursor", "Barra e cursor"),
     ("Bloqueadas", "Bloqueadas"),
     ("Bloquear", "Bloquear"),
@@ -1203,6 +1185,10 @@ static PT: &[(&str, &str)] = &[
     ("Botones a la izquierda", "Botões à esquerda"),
     ("Botones de la barra de título", "Botões da barra de título"),
     ("Brave cerró la conexión", "O Brave fechou a conexão"),
+    (
+        "Brave corre en el anfitrión y JARVIS-OS muestra la página",
+        "O Brave roda no anfitrião e o JARVIS-OS mostra a página",
+    ),
     ("Buscador", "Buscador"),
     ("Buscando redes...", "Procurando redes..."),
     ("Buscar", "Buscar"),
@@ -1211,10 +1197,6 @@ static PT: &[(&str, &str)] = &[
     (
         "Buscá con Brave o escribí una dirección",
         "Pesquise com o Brave ou digite um endereço",
-    ),
-    (
-        "Buscá o escribí una dirección",
-        "Busque ou digite um endereço",
     ),
     ("CAMBIAR DE VENTANA", "TROCAR DE JANELA"),
     ("CANCELAR", "CANCELAR"),
@@ -1239,10 +1221,10 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Canal 2 del PIT (8254)", "Canal 2 do PIT (8254)"),
     ("Captura (Impr Pant)", "Captura (PrtSc)"),
-    ("Carga cancelada.", "Carregamento cancelado."),
     ("Cargando el video...", "Carregando o vídeo..."),
     ("Carpeta", "Pasta"),
     ("Carpeta vacía", "Pasta vazia"),
+    ("Carpetas", "Pastas"),
     ("Cerebro", "Cérebro"),
     ("Cerrar", "Fechar"),
     ("Cerrar sesión", "Sair"),
@@ -1295,6 +1277,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Cuánto se mueve la página con cada paso",
         "Quanto a página se move a cada passo",
+    ),
+    (
+        "Código (.rs, .py, .js, .json...)",
+        "Código (.rs, .py, .js, .json...)",
     ),
     ("Código de emparejado", "Código de pareamento"),
     ("Código nuevo", "Código novo"),
@@ -1386,10 +1372,6 @@ static PT: &[(&str, &str)] = &[
         "A ponte mandou algo que não se entende",
     ),
     (
-        "El que abre la barra: Brave (en el anfitrión) o el simple de JARVIS",
-        "O que a barra abre: Brave (no anfitrião) ou o simples do JARVIS",
-    ),
-    (
         "El que contesta y actúa sobre JARVIS-OS (si falla, contesta otro)",
         "O que responde e age no JARVIS-OS (se falhar, outro responde)",
     ),
@@ -1425,28 +1407,12 @@ static PT: &[(&str, &str)] = &[
         "Ouve o microfone do PC: diga \"JARVIS, ...\" ou Win+J",
     ),
     (
-        "Ese botón necesita JavaScript.",
-        "Esse botão precisa de JavaScript.",
-    ),
-    (
-        "Ese enlace necesita JavaScript.",
-        "Esse link precisa de JavaScript.",
-    ),
-    (
         "Ese valor no sirve (usuario y equipo: letras, números y guiones; PIN: solo números).",
         "Esse valor não serve (usuário e computador: letras, números e hifens; PIN: só números).",
     ),
     ("Español (Latinoamérica)", "Espanhol (América Latina)"),
-    (
-        "Esta página se arma con JavaScript, que JARVIS-OS todavía no ejecuta: puede verse incompleta.",
-        "Esta página é montada com JavaScript, que o JARVIS-OS ainda não executa: pode parecer incompleta.",
-    ),
     ("Estado", "Status"),
     ("Estado de la cuenta", "Estado da conta"),
-    (
-        "Este formulario manda datos con POST: el puente solo acepta GET (ver ADR 0004).",
-        "Este formulário envia dados com POST: a ponte só aceita GET (veja ADR 0004).",
-    ),
     ("Extender", "Estender"),
     (
         "Extender, duplicar o usar uno solo (también Win+P)",
@@ -1461,10 +1427,6 @@ static PT: &[(&str, &str)] = &[
         "Flechas o mouse: la zona para esta ventana · Enter la acomoda · las demás completan",
         "Setas ou mouse: a zona para esta janela · Enter a posiciona · as outras completam",
     ),
-    (
-        "Fondo blanco como en otros navegadores (si no, oscuro)",
-        "Fundo branco como em outros navegadores (se não, escuro)",
-    ),
     ("Fondo de escritorio", "Papel de parede"),
     ("Formato de 24 horas", "Formato de 24 horas"),
     (
@@ -1478,6 +1440,8 @@ static PT: &[(&str, &str)] = &[
         "Generalo en una máquina y escribilo en la otra",
         "Gere em uma máquina e digite na outra",
     ),
+    ("Gestos", "Gestos"),
+    ("Gestos con la cámara", "Gestos com a câmera"),
     (
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "Gráficos de CPU, memória, disco e rede no canto inferior esquerdo",
@@ -1505,6 +1469,10 @@ static PT: &[(&str, &str)] = &[
     ("Identificar", "Identificar"),
     ("Idioma", "Idioma"),
     ("Imágenes", "Imagens"),
+    (
+        "Imágenes (.png, .jpg, .bmp...)",
+        "Imagens (.png, .jpg, .bmp...)",
+    ),
     ("Inglés (EE. UU.)", "Inglês (EUA)"),
     ("Iniciar sesión con Google", "Entrar com o Google"),
     ("Inicio", "Início"),
@@ -1585,19 +1553,10 @@ static PT: &[(&str, &str)] = &[
     ("Letra de la terminal", "Fonte do terminal"),
     ("Letra del editor", "Fonte do editor"),
     ("Listo", "Pronto"),
-    ("Listo · modo lectura (F9)", "Pronto · modo leitura (F9)"),
     ("Lo mismo que Win+L", "O mesmo que Win+L"),
     (
         "Lo primero que abre Brave",
         "A primeira coisa que o Brave abre",
-    ),
-    (
-        "Lo que abre el navegador (about:inicio = la de JARVIS)",
-        "O que o navegador abre (about:inicio = a do JARVIS)",
-    ),
-    (
-        "Lo que escribís en la barra que no es una dirección",
-        "O que você digita na barra que não é um endereço",
     ),
     (
         "Lo que no dice ninguna regla",
@@ -1611,6 +1570,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Los demás agentes vinculados opinan y el principal decide",
         "Os outros agentes vinculados opinam e o principal decide",
+    ),
+    (
+        "Los enlaces y las búsquedas se abren en Brave",
+        "Links e buscas abrem no Brave",
     ),
     ("MEMORIA", "MEMÓRIA"),
     ("MEMORIA (HEAP DEL NÚCLEO)", "MEMÓRIA (HEAP DO NÚCLEO)"),
@@ -1636,14 +1599,16 @@ static PT: &[(&str, &str)] = &[
         "Minimizar, maximizar y cerrar",
         "Minimizar, maximizar e fechar",
     ),
-    ("Modo lectura", "Modo leitura"),
     ("Monitor (Ctrl+Shift+Esc)", "Monitor (Ctrl+Shift+Esc)"),
     ("Monitor del sistema", "Monitor do sistema"),
     ("Monitor principal", "Monitor principal"),
     ("Monitores", "Monitores"),
     ("Mostrar el escritorio", "Mostrar a área de trabalho"),
-    ("Mostrar imágenes", "Mostrar imagens"),
     ("Mouse y teclado", "Mouse e teclado"),
+    (
+        "Mover el puntero, hacer clic y desplazarse con la mano",
+        "Mover o ponteiro, clicar e rolar com a mão",
+    ),
     (
         "Muestra el número de cada monitor",
         "Mostra o número de cada monitor",
@@ -1653,7 +1618,6 @@ static PT: &[(&str, &str)] = &[
         "Música, videos y la voz de JARVIS",
         "Música, vídeos e a voz do JARVIS",
     ),
-    ("NO SE PUDO CARGAR", "NÃO FOI POSSÍVEL CARREGAR"),
     ("NOMBRE", "NOME"),
     ("NOMBRE 8.3", "NOME 8.3"),
     ("NOTIFICACIONES", "NOTIFICAÇÕES"),
@@ -1663,8 +1627,7 @@ static PT: &[(&str, &str)] = &[
     ("Nada seleccionado", "Nada selecionado"),
     ("Naranja", "Laranja"),
     ("Navegador", "Navegador"),
-    ("Navegador principal", "Navegador principal"),
-    ("Navegador simple", "Navegador simples"),
+    ("Navegador (Brave)", "Navegador (Brave)"),
     ("Navegador web", "Navegador web"),
     (
         "Necesita \"Animaciones\" encendido (Personalización)",
@@ -1693,10 +1656,6 @@ static PT: &[(&str, &str)] = &[
         "No hay disco para guardar la captura.",
         "Não há disco para salvar a captura.",
     ),
-    (
-        "No hay disco para guardar la descarga.",
-        "Não há disco para salvar o download.",
-    ),
     ("No hay disco.", "Sem disco."),
     (
         "No hay disco: arrancá QEMU con el disco virtual",
@@ -1716,10 +1675,6 @@ static PT: &[(&str, &str)] = &[
     (
         "No se cerró la sesión: hay cambios sin guardar.",
         "A sessão não foi encerrada: há alterações não salvas.",
-    ),
-    (
-        "No se pudo leer la imagen.",
-        "Não foi possível ler a imagem.",
     ),
     ("No soportada", "Não suportada"),
     ("Nombre del equipo", "Nome do computador"),
@@ -1754,6 +1709,10 @@ static PT: &[(&str, &str)] = &[
         "Pacotes do JARVIS-OS (apt, dpkg)",
     ),
     (
+        "Para lo que no es una dirección (\"buscá...\", open ?...)",
+        "Para o que não é um endereço (\"busque...\", open ?...)",
+    ),
+    (
         "Para pasar el mouse de uno al otro",
         "Para passar o mouse de um para o outro",
     ),
@@ -1781,14 +1740,11 @@ static PT: &[(&str, &str)] = &[
     ("Proyectos", "Projetos"),
     ("Puente de Brave", "Ponte do Brave"),
     ("Puerta de enlace y DNS", "Gateway e DNS"),
-    ("Página completa", "Página completa"),
-    ("Página de inicio", "Página inicial"),
-    (
-        "Página de inicio (navegador simple)",
-        "Página inicial (navegador simples)",
-    ),
     ("Página de inicio de Brave", "Página inicial do Brave"),
-    ("Páginas claras", "Páginas claras"),
+    (
+        "Páginas web guardadas (.html)",
+        "Páginas web salvas (.html)",
+    ),
     ("Qué hace con la ventana", "O que faz com a janela"),
     ("RAM libre", "RAM livre"),
     ("RECHAZAR", "RECUSAR"),
@@ -1835,10 +1791,6 @@ static PT: &[(&str, &str)] = &[
         "Conecta quando você inicia o JARVIS com cargo xtask run",
     ),
     (
-        "Se convierten a BMP en el puente del anfitrión",
-        "São convertidas para BMP na ponte do anfitrião",
-    ),
-    (
         "Se cortó la conexión con el cerebro.",
         "A conexão com o cérebro caiu.",
     ),
@@ -1874,10 +1826,6 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Sincronización", "Sincronização"),
     ("Sistema", "Sistema"),
-    (
-        "Solo el contenido: sin menús, formularios ni estilos",
-        "Só o conteúdo: sem menus, formulários nem estilos",
-    ),
     ("Solo la pantalla 1", "Só a tela 1"),
     ("Solo la pantalla 2", "Só a tela 2"),
     (
@@ -1911,6 +1859,10 @@ static PT: &[(&str, &str)] = &[
     ("Temperatura", "Temperatura"),
     ("Terminal (Ctrl+Alt+T)", "Terminal (Ctrl+Alt+T)"),
     ("Terminal (wget, curl)", "Terminal (wget, curl)"),
+    (
+        "Texto (.txt, .md, .log, .csv)",
+        "Texto (.txt, .md, .log, .csv)",
+    ),
     ("Texto grande", "Texto grande"),
     ("Tiempo encendido", "Tempo ligado"),
     ("Tienda de snaps", "Loja de snaps"),
@@ -1957,7 +1909,6 @@ static PT: &[(&str, &str)] = &[
     ("VENTANA (ALT+ESPACIO)", "JANELA (ALT+ESPAÇO)"),
     ("VER", "VER"),
     ("VISTA PREVIA", "PRÉ-VISUALIZAÇÃO"),
-    ("VOLUMEN", "VOLUME"),
     ("Vaciar la Papelera", "Esvaziar a Lixeira"),
     ("Velocidad de las animaciones", "Velocidade das animações"),
     ("Velocidad del puntero", "Velocidade do ponteiro"),
@@ -1969,11 +1920,13 @@ static PT: &[(&str, &str)] = &[
     ("Ver lo bloqueado", "Ver o bloqueado"),
     ("Verde", "Verde"),
     ("Versión", "Versão"),
+    ("Videos (.avi)", "Vídeos (.avi)"),
     (
         "Vinculalo con Google o con el formulario",
         "Vincule com o Google ou com o formulário",
     ),
     ("Violeta", "Violeta"),
+    ("Visor", "Visualizador"),
     ("Visor de imágenes", "Visualizador de imagens"),
     ("Volumen", "Volume"),
     (
@@ -2080,21 +2033,15 @@ static EN_F: &[(&str, &str)] = &[
     ),
     ("Abrir {}", "Open {}"),
     ("Archivos · {}", "Files · {}"),
-    (
-        "Bajando {} imágenes y estilos...",
-        "Downloading {} images and styles...",
-    ),
     ("Buenas noches, {}.", "Good evening, {}."),
     ("Buenas tardes, {}.", "Good afternoon, {}."),
     ("Buenos días, {}.", "Good morning, {}."),
     ("Buscar en la web: {}", "Search the web: {}"),
     ("Captura guardada en {}", "Screenshot saved to {}"),
-    ("Cargando {}{}", "Loading {}{}"),
     ("Conectado a «{}» · {} dBm", "Connected to «{}» · {} dBm"),
     ("Conectado · {}", "Connected · {}"),
     ("Conectando a «{}»...", "Connecting to «{}»..."),
     ("Conectando con Brave{}", "Connecting to Brave{}"),
-    ("Conectando con {}...", "Connecting to {}..."),
     ("Configuración · {}", "Settings · {}"),
     ("Contraseña de «{}»", "Password for «{}»"),
     (
@@ -2117,17 +2064,12 @@ static EN_F: &[(&str, &str)] = &[
         "It works: response {} with {} bytes",
     ),
     ("Gráfico: {}", "Graph: {}"),
-    ("Hace {} s. Esc cancela.", "{} s ago. Esc cancels."),
     (
         "LÍN {} · COL {} · CTRL+S GUARDAR",
         "LN {} · COL {} · CTRL+S SAVE",
     ),
     ("Música · {}", "Music · {}"),
     ("No anduvo: {}", "It failed: {}"),
-    (
-        "No se pudo abrir la página: {}",
-        "Couldn't open the page: {}",
-    ),
     (
         "No se pudo conectar con el puente de Brave en {} ({}). Se abre con cargo xtask run.",
         "Could not connect to the Brave bridge at {} ({}). It starts with cargo xtask run.",
@@ -2198,7 +2140,6 @@ static EN_F: &[(&str, &str)] = &[
         "{} lines above · PgDn goes back",
     ),
     ("{} seleccionados de {} · {}", "{} selected of {} · {}"),
-    ("{} · Navegador", "{} · Browser"),
     ("{} · medio de arranque", "{} · boot media"),
     (
         "{} · tiene particiones: no se toca",
@@ -2222,21 +2163,15 @@ static PT_F: &[(&str, &str)] = &[
     ),
     ("Abrir {}", "Abrir {}"),
     ("Archivos · {}", "Arquivos · {}"),
-    (
-        "Bajando {} imágenes y estilos...",
-        "Baixando {} imagens e estilos...",
-    ),
     ("Buenas noches, {}.", "Boa noite, {}."),
     ("Buenas tardes, {}.", "Boa tarde, {}."),
     ("Buenos días, {}.", "Bom dia, {}."),
     ("Buscar en la web: {}", "Buscar na web: {}"),
     ("Captura guardada en {}", "Captura salva em {}"),
-    ("Cargando {}{}", "Carregando {}{}"),
     ("Conectado a «{}» · {} dBm", "Conectado a «{}» · {} dBm"),
     ("Conectado · {}", "Conectado · {}"),
     ("Conectando a «{}»...", "Conectando a «{}»..."),
     ("Conectando con Brave{}", "Conectando ao Brave{}"),
-    ("Conectando con {}...", "Conectando com {}..."),
     ("Configuración · {}", "Configurações · {}"),
     ("Contraseña de «{}»", "Senha de «{}»"),
     (
@@ -2259,17 +2194,12 @@ static PT_F: &[(&str, &str)] = &[
         "Funciona: resposta {} com {} bytes",
     ),
     ("Gráfico: {}", "Gráfico: {}"),
-    ("Hace {} s. Esc cancela.", "Há {} s. Esc cancela."),
     (
         "LÍN {} · COL {} · CTRL+S GUARDAR",
         "LIN {} · COL {} · CTRL+S SALVAR",
     ),
     ("Música · {}", "Música · {}"),
     ("No anduvo: {}", "Não funcionou: {}"),
-    (
-        "No se pudo abrir la página: {}",
-        "Não foi possível abrir a página: {}",
-    ),
     (
         "No se pudo conectar con el puente de Brave en {} ({}). Se abre con cargo xtask run.",
         "Não foi possível conectar à ponte do Brave em {} ({}). Ela abre com cargo xtask run.",
@@ -2343,7 +2273,6 @@ static PT_F: &[(&str, &str)] = &[
         "{} linhas acima · PgDn volta",
     ),
     ("{} seleccionados de {} · {}", "{} selecionados de {} · {}"),
-    ("{} · Navegador", "{} · Navegador"),
     ("{} · medio de arranque", "{} · mídia de inicialização"),
     (
         "{} · tiene particiones: no se toca",

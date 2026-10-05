@@ -195,6 +195,8 @@ pub struct SystemStats {
     pub brain_voice: bool,
     /// La cuenta de Claude del anfitrión (Configuración → Asistente).
     pub brain_account: crate::brain::Account,
+    /// La cámara de los gestos, según el anfitrión ("" = no se sabe todavía).
+    pub brain_camera: String,
     /// Gemini, ChatGPT y DeepSeek: si están vinculados (Configuración → Asistente).
     pub brain_agents: alloc::vec::Vec<crate::brain::AiAgent>,
     /// El micrófono de JARVIS-OS (virtio-sound), si el kernel encontró uno.
@@ -317,7 +319,6 @@ pub enum AppKind {
     Monitor,
     Files,
     Music,
-    Browser,
     Editor,
     Viewer,
     /// Terminal tipo Linux (shell `jsh`).
@@ -338,7 +339,7 @@ pub enum Launch {
     Folder(String),
     /// Editor de texto con un archivo.
     Edit(String),
-    /// Navegador en una dirección.
+    /// Brave en una dirección, o una búsqueda si empieza con "? " (con el buscador elegido).
     Browse(String),
     /// Visor de imágenes (y de videos, K12).
     View(String),

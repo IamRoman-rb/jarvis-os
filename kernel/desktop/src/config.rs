@@ -235,24 +235,20 @@ pub struct Config {
     pub invert_wheel: bool,
     /// Teclado latinoamericano (si no, el de EE. UU.).
     pub latam_keyboard: bool,
-    // Navegador
-    pub homepage: String,
+    /// El buscador de lo que no es una dirección ("buscá X", `open ?X`): se abre en Brave.
     pub search: SearchEngine,
-    /// Páginas con fondo claro (como un navegador común) u oscuro (el estilo del HUD).
-    pub light_pages: bool,
-    pub load_images: bool,
+    /// Con qué app se abre cada tipo de archivo (Configuración → Aplicaciones predeterminadas).
+    pub default_apps: crate::defaults::DefaultApps,
+    /// Mover el sistema con gestos de la mano frente a la cámara (en el anfitrión).
+    pub gestures: bool,
     /// HTTPS por el puente del anfitrión en vez del TLS del kernel (ADR 0009, punto 6).
     pub https_bridge: bool,
-    /// Modo lectura: sin menús ni formularios, solo el contenido.
-    pub reader_mode: bool,
     // Brave (ADR 0007)
     /// Dónde está el puente de Brave: `host:puerto` (QEMU ve al anfitrión en 10.0.2.2).
     pub brave_server: String,
     /// Token del puente, si corre en otra máquina con `--red` (vacío = local).
     pub brave_token: String,
     pub brave_home: String,
-    /// El navegador principal es Brave (si no, el navegador simple de JARVIS).
-    pub brave_default: bool,
     // Wi-Fi (K14, ADR 0012)
     /// La red a la que se conecta al arrancar (vacío = ninguna).
     pub wifi_ssid: String,
@@ -315,16 +311,13 @@ impl Default for Config {
             wheel_lines: 3,
             invert_wheel: false,
             latam_keyboard: true,
-            homepage: "about:inicio".into(),
             search: SearchEngine::DuckDuckGo,
-            light_pages: true,
-            load_images: true,
+            default_apps: crate::defaults::DefaultApps::default(),
+            gestures: false,
             https_bridge: false,
-            reader_mode: false,
             brave_server: "10.0.2.2:8119".into(),
             brave_token: String::new(),
             brave_home: "https://search.brave.com/".into(),
-            brave_default: true,
             wifi_ssid: String::new(),
             wifi_pmk: None,
             sync_code: String::new(),
@@ -436,23 +429,19 @@ impl Config {
                 "rueda_renglones" => c.wheel_lines = v.parse::<u8>().unwrap_or(3).clamp(1, 5),
                 "rueda_invertida" => c.invert_wheel = yes(v),
                 "teclado" => c.latam_keyboard = v != "us",
-                "pagina_inicio" if !v.is_empty() => c.homepage = v.into(),
                 "buscador" => {
                     c.search = SearchEngine::ALL
                         .into_iter()
                         .find(|s| s.name().eq_ignore_ascii_case(v))
                         .unwrap_or(SearchEngine::DuckDuckGo)
                 }
-                "paginas_claras" => c.light_pages = yes(v),
-                "imagenes" => c.load_images = yes(v),
                 "https_puente" => c.https_bridge = yes(v),
-                "modo_lectura" => c.reader_mode = yes(v),
+                "gestos" => c.gestures = yes(v),
                 "brave_servidor" if parse_server(v).is_some() => c.brave_server = v.into(),
                 "brave_token" if v.len() <= 64 && !v.contains(char::is_whitespace) => {
                     c.brave_token = v.into()
                 }
                 "brave_inicio" if !v.is_empty() => c.brave_home = v.into(),
-                "navegador_principal" => c.brave_default = v != "simple",
                 "sync_codigo" if v.is_empty() || jarvis_sync::pair::normalize(v).is_some() => {
                     c.sync_code = v.into()
                 }
@@ -478,6 +467,7 @@ impl Config {
                 }
                 "bloquear_minutos" => c.lock_minutes = v.parse::<u32>().unwrap_or(0).min(240),
                 "idioma" => c.language = Lang::from_code(v),
+                k if c.default_apps.parse_key(k, v) => {}
                 k => {
                     c.firewall.parse_key(k, v);
                 }
@@ -538,12 +528,9 @@ impl Config {
                 "teclado={}",
                 if self.latam_keyboard { "latam" } else { "us" }
             ),
-            format!("pagina_inicio={}", self.homepage),
             format!("buscador={}", self.search.name()),
-            format!("paginas_claras={}", yn(self.light_pages)),
-            format!("imagenes={}", yn(self.load_images)),
             format!("https_puente={}", yn(self.https_bridge)),
-            format!("modo_lectura={}", yn(self.reader_mode)),
+            format!("gestos={}", yn(self.gestures)),
             format!("wifi_red={}", hex(self.wifi_ssid.as_bytes())),
             format!(
                 "wifi_clave={}",
@@ -552,14 +539,6 @@ impl Config {
             format!("brave_servidor={}", self.brave_server),
             format!("brave_token={}", self.brave_token),
             format!("brave_inicio={}", self.brave_home),
-            format!(
-                "navegador_principal={}",
-                if self.brave_default {
-                    "brave"
-                } else {
-                    "simple"
-                }
-            ),
             format!("sync_codigo={}", self.sync_code),
             format!("sync_rele={}", self.sync_relay),
             format!(
@@ -574,6 +553,7 @@ impl Config {
             format!("idioma={}", self.language.code()),
         ];
         let mut lines = lines;
+        lines.extend(self.default_apps.serialize());
         lines.extend(self.firewall.serialize());
         let mut s = lines.join("\n");
         s.push('\n');
@@ -691,7 +671,7 @@ mod tests {
             language: Lang::Pt,
             brave_server: "brave.casa.lan:9000".into(),
             brave_token: "secreto123".into(),
-            brave_default: false,
+            gestures: true,
             sync_code: "ABCDE-FGHJK-LMNPQ-RSTUV".into(),
             sync_relay: "rele.ejemplo.com:443".into(),
             theme: ThemeKind::Light,

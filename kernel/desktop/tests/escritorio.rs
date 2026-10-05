@@ -7,9 +7,7 @@ use jarvis_desktop::apps::App;
 use jarvis_desktop::desktop::ANIM_MS;
 use jarvis_desktop::shell::{self, LAUNCHERS, StartMenu};
 use jarvis_desktop::wm::{BUTTON_W, TITLE_H};
-use jarvis_desktop::{
-    AppKind, Desktop, Event, HttpResponse, Key, Launch, Mods, Power, SystemStats,
-};
+use jarvis_desktop::{AppKind, Desktop, Event, Key, Launch, Mods, Power, SystemStats};
 use jarvis_fs::MemDisk;
 use jarvis_gfx::Rect;
 
@@ -214,10 +212,25 @@ fn escribir_una_direccion_en_el_menu_abre_el_navegador() {
     t.mods(Mods::NONE);
     t.type_text("example.com");
     t.key(Key::Enter);
-    assert_eq!(t.d.focused_app(), Some(AppKind::Browser));
-    let req = t.d.take_requests();
-    assert_eq!(req.net.len(), 1);
-    assert_eq!(req.net[0].url, "https://example.com/");
+    // Brave (el navegador propio ya no está): arranca en esa dirección.
+    assert_eq!(t.d.focused_app(), Some(AppKind::Brave));
+    match t.d.app(AppKind::Brave) {
+        Some(App::Brave(b)) => assert_eq!(b.address(), "https://example.com"),
+        _ => panic!("no se abrió Brave"),
+    }
+}
+
+#[test]
+fn buscar_abre_brave_con_el_buscador_elegido() {
+    let mut t = Driver::new();
+    t.d.open(Launch::Browse("? clima en córdoba".into()), t.now, CLOCK);
+    match t.d.app(AppKind::Brave) {
+        Some(App::Brave(b)) => assert_eq!(
+            b.address(),
+            "https://html.duckduckgo.com/html/?q=clima+en+c%C3%B3rdoba"
+        ),
+        _ => panic!("no se abrió Brave"),
+    }
 }
 
 #[test]
@@ -292,52 +305,6 @@ fn captura_de_pantalla_queda_en_imagenes() {
     let data = fatfs_read(t.d, &path).unwrap();
     assert_eq!(&data[..2], b"BM");
     assert_eq!(data.len(), 54 + W * H * 3);
-}
-
-#[test]
-fn navegador_con_respuesta_de_la_red() {
-    let mut t = Driver::new();
-    t.d.open(Launch::Browse("http://example.com".into()), t.now, CLOCK);
-    let req = t.d.take_requests();
-    assert_eq!(req.net[0].url, "http://example.com/");
-    let html = "<html><head><title>Ejemplo</title></head><body><h1>Example Domain</h1>\
-                <p>Texto. <a href=\"/mas\">Más información</a></p></body></html>";
-    t.d.net_response(
-        req.net[0].id,
-        Ok(HttpResponse {
-            status: 200,
-            content_type: "text/html; charset=UTF-8".into(),
-            url: "http://example.com/".into(),
-            body: html.as_bytes().to_vec(),
-        }),
-    );
-    match t.d.app(AppKind::Browser) {
-        Some(App::Browser(b)) => {
-            assert!(b.page_text().contains("Example Domain"));
-            assert_eq!(b.title(), "Ejemplo · Navegador");
-        }
-        _ => panic!(),
-    }
-    t.frame();
-    // Tab va al enlace y Enter lo abre.
-    t.key(Key::Tab);
-    t.key(Key::Enter);
-    let req = t.d.take_requests();
-    assert!(!req.net.is_empty(), "{:?}", t.logs());
-    assert_eq!(req.net[0].url, "http://example.com/mas");
-    // Ctrl+L, una búsqueda, Enter: va al buscador.
-    t.combo(Mods::CTRL, Key::Char('l'));
-    t.type_text("rust osdev");
-    t.key(Key::Enter);
-    let req = t.d.take_requests();
-    assert!(
-        req.net[0]
-            .url
-            .starts_with("https://html.duckduckgo.com/html/?q=rust+osdev")
-    );
-    // Un error de red se muestra en la página.
-    t.d.net_response(req.net[0].id, Err("sin conexión".into()));
-    t.frame();
 }
 
 #[test]

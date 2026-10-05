@@ -8,10 +8,9 @@ use jarvis_fs::BlockDevice;
 use jarvis_gfx::{Canvas, Rect};
 
 use super::{Click, Ctx, SysView};
-use crate::files::{FilesApp, Kind, SHORTCUTS, join};
+use crate::files::{FilesApp, SHORTCUTS, join};
 use crate::files_view::{self, Action, Hit, Layout};
 use crate::input::{Key, Mods};
-use crate::system::Launch;
 
 pub struct FilesWindow {
     pub app: FilesApp,
@@ -59,32 +58,12 @@ impl FilesWindow {
         else {
             return;
         };
-        let lower = entry.name.to_ascii_lowercase();
-        let launch = match Kind::of(entry, &path) {
-            _ if lower.ends_with(".html") || lower.ends_with(".htm") => {
-                Launch::Browse(format!("file://{path}"))
-            }
-            // Un script: se ejecuta en la terminal.
-            _ if lower.ends_with(".sh") => Launch::Terminal(Some(format!("sh '{path}'"))),
-            // Programas de Windows: la terminal muestra qué son y por qué no corren (todavía).
-            _ if [".exe", ".msi", ".dll", ".com"]
-                .iter()
-                .any(|e| lower.ends_with(e)) =>
-            {
-                Launch::Terminal(Some(format!("file '{path}' && wine '{path}'")))
-            }
-            Kind::Text | Kind::Code => Launch::Edit(path),
-            Kind::Image | Kind::Video => Launch::View(path),
-            Kind::Audio => Launch::Play(path),
-            Kind::Binary | Kind::Archive => Launch::Terminal(Some(format!("file '{path}'"))),
-            _ => {
-                ctx.out.notify(
-                    format!("No hay una app para abrir \"{}\".", entry.name),
-                    true,
-                );
-                return;
-            }
-        };
+        if entry.is_dir {
+            // Las carpetas se recorren acá mismo (no llegan como pedido de abrir).
+            return;
+        }
+        // Con la app elegida en Configuración → Aplicaciones predeterminadas.
+        let (launch, _) = crate::defaults::launch_for(&ctx.config.default_apps, &path, false);
         ctx.log.push(format!("ARCHIVOS_ABRIR {launch:?}"));
         ctx.out.launch.push(launch);
     }

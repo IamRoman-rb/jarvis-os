@@ -15,6 +15,7 @@ pub mod brain;
 pub mod chrome;
 pub mod config;
 pub mod cursor;
+pub mod defaults;
 pub mod desktop;
 pub mod display;
 pub mod files;

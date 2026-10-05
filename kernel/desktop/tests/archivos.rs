@@ -307,21 +307,37 @@ fn cerrar_el_editor_con_cambios_avisa_primero() {
 }
 
 #[test]
-fn una_pagina_html_del_disco_se_abre_en_el_navegador() {
+fn cada_tipo_se_abre_con_la_app_predeterminada_que_se_elija() {
     let mut t = Driver::new();
-    t.key(Key::Tab);
-    t.select_named("Documentos");
-    t.key(Key::Enter);
-    t.select_named("pagina.html");
-    t.key(Key::Enter);
-    assert_eq!(t.d.focused_app(), Some(AppKind::Browser));
-    match t.d.app(AppKind::Browser) {
-        Some(App::Browser(b)) => {
-            assert!(b.page_text().contains("Hola disco"));
-            assert_eq!(b.title(), "Local · Navegador");
-        }
-        _ => panic!(),
-    }
+    let open_page = |t: &mut Driver| {
+        t.d.open(Launch::Folder("/Documentos".into()), t.now, CLOCK);
+        t.key(Key::Tab);
+        t.select_named("pagina.html");
+        t.key(Key::Enter);
+    };
+    // De fábrica, una página guardada se abre en el editor (Brave no ve el disco de JARVIS-OS).
+    open_page(&mut t);
+    assert_eq!(t.d.focused_app(), Some(AppKind::Editor));
+    t.combo(Mods::ALT, Key::F(4));
+    // Configuración → Aplicaciones predeterminadas: Navegador web, Buscador, Carpetas, Texto,
+    // Código y Páginas web guardadas (la sexta fila): → elige la terminal.
+    t.d.open(Launch::Settings(19), t.now, CLOCK);
+    let Some(App::Settings(st)) = t.d.app(AppKind::Settings) else {
+        panic!("no se abrió Configuración");
+    };
+    assert_eq!(st.section.name(), "Aplicaciones predeterminadas");
+    t.keys(&[Key::Down; 5]);
+    t.key(Key::Right);
+    assert_eq!(
+        t.d.config()
+            .default_apps
+            .get(jarvis_desktop::defaults::FileType::Html),
+        jarvis_desktop::defaults::Handler::Terminal
+    );
+    assert!(t.d.config().serialize().contains("app_html=terminal"));
+    t.combo(Mods::ALT, Key::F(4));
+    open_page(&mut t);
+    assert_eq!(t.d.focused_app(), Some(AppKind::Terminal));
 }
 
 /// Un PNG (con transparencia) y un JPEG en el disco los abre el visor: los decodifica

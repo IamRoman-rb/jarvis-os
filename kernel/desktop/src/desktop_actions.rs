@@ -221,19 +221,9 @@ Todavía está corriendo (usá leer_terminal para ver cómo termina). Por ahora:
             Ok(st) => st,
             Err(e) => return (false, format!("No pude abrir {p}: {e}")),
         };
-        let lower = p.to_lowercase();
-        let image = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg"]
-            .iter()
-            .any(|e| lower.ends_with(e));
-        let (launch, app) = if st.is_dir || p == "/" {
-            (Launch::Folder(p.clone()), "Archivos")
-        } else if image {
-            (Launch::View(p.clone()), "el visor de imágenes")
-        } else if lower.ends_with(".html") || lower.ends_with(".htm") {
-            (Launch::Browse(format!("file://{p}")), "el navegador")
-        } else {
-            (Launch::Edit(p.clone()), "el editor de texto")
-        };
+        // Con la app elegida en Configuración → Aplicaciones predeterminadas.
+        let is_dir = st.is_dir || p == "/";
+        let (launch, app) = crate::defaults::launch_for(&self.config.default_apps, &p, is_dir);
         self.open(launch, now_ms, clock);
         (true, format!("Abrí {p} en {app}."))
     }

@@ -13,7 +13,7 @@
 //! Las reglas se evalúan en orden y gana la primera que coincide, como en `ufw` de Ubuntu (el
 //! comando `ufw` de la terminal usa la misma sintaxis). Cada regla puede pedir un sitio
 //! (`ejemplo.com` vale también para sus subdominios; `*.ejemplo.com` solo para los
-//! subdominios; o una IP), un puerto y una app (`navegador`, `terminal`, `apt`, `snap`…).
+//! subdominios; o una IP), un puerto y una app (`brave`, `terminal`, `apt`, `snap`…).
 //!
 //! Se guarda en `/Sistema/config.ini`, con el resto de la configuración:
 //!
@@ -28,8 +28,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 /// Las apps que se pueden nombrar en una regla.
-pub const APPS: [(&str, &str); 11] = [
-    ("navegador", "Navegador web"),
+pub const APPS: [(&str, &str); 10] = [
     ("brave", "Brave"),
     ("sync", "Sincronización"),
     ("terminal", "Terminal (wget, curl)"),
@@ -144,7 +143,7 @@ impl Rule {
                 .is_none_or(|a| a.eq_ignore_ascii_case(app))
     }
 
-    /// Como se guarda: `denegar salida a facebook.com puerto 443 app navegador`.
+    /// Como se guarda: `denegar salida a facebook.com puerto 443 app brave`.
     pub fn to_line(&self) -> String {
         let mut s = format!(
             "{} {}",
@@ -536,7 +535,7 @@ const HELP: &str = "Uso: ufw COMANDO
 Ejemplos:
   ufw deny out to facebook.com
   ufw deny out to *.doubleclick.net
-  ufw deny out port 80 app navegador
+  ufw deny out port 80 app brave
   ufw default deny outgoing && ufw allow out to wikipedia.org
 ";
 
@@ -547,16 +546,16 @@ mod tests {
     #[test]
     fn reglas_en_orden_y_sitios() {
         let mut fw = Firewall::default();
-        assert!(fw.check_out("facebook.com", 443, "navegador").is_ok());
+        assert!(fw.check_out("facebook.com", 443, "brave").is_ok());
         fw.ufw(&["deny", "out", "to", "facebook.com"]).unwrap();
-        fw.ufw(&["deny", "out", "port", "80", "app", "navegador"])
+        fw.ufw(&["deny", "out", "port", "80", "app", "brave"])
             .unwrap();
         fw.ufw(&["deny", "to", "*.ads.net"]).unwrap();
         let e = fw
             .check_out("www.facebook.com", 443, "terminal")
             .unwrap_err();
         assert!(e.contains("regla 1"), "{e}");
-        assert!(fw.check_out("example.com", 80, "navegador").is_err());
+        assert!(fw.check_out("example.com", 80, "brave").is_err());
         assert!(fw.check_out("example.com", 80, "terminal").is_ok());
         assert!(fw.check_out("x.ads.net", 443, "apt").is_err());
         assert!(
@@ -566,12 +565,12 @@ mod tests {
         // Una regla de permitir antes gana.
         fw.ufw(&["insert", "1", "allow", "out", "to", "m.facebook.com"])
             .unwrap();
-        assert!(fw.check_out("m.facebook.com", 443, "navegador").is_ok());
+        assert!(fw.check_out("m.facebook.com", 443, "brave").is_ok());
         // Política por defecto.
         fw.ufw(&["default", "deny", "outgoing"]).unwrap();
-        assert!(fw.check_out("wikipedia.org", 443, "navegador").is_err());
+        assert!(fw.check_out("wikipedia.org", 443, "brave").is_err());
         fw.ufw(&["disable"]).unwrap();
-        assert!(fw.check_out("wikipedia.org", 443, "navegador").is_ok());
+        assert!(fw.check_out("wikipedia.org", 443, "brave").is_ok());
         // Redes.
         let mut fw = Firewall::default();
         fw.ufw(&["deny", "out", "to", "10.0.0.0/8"]).unwrap();

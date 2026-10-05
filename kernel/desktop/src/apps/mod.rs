@@ -6,7 +6,6 @@
 //! hora, pedidos al kernel) y lo que quiere pedir lo deja en el [`Outbox`].
 
 pub mod brave;
-pub mod browser;
 pub mod console;
 pub mod editor;
 pub mod files;
@@ -124,7 +123,6 @@ pub enum App {
     Editor(editor::Editor),
     Music(music::Music),
     Viewer(viewer::Viewer),
-    Browser(browser::Browser),
     Terminal(terminal::Terminal),
     Settings(settings::Settings),
     Brave(brave::Brave),
@@ -140,7 +138,6 @@ macro_rules! each {
             App::Editor($a) => $e,
             App::Music($a) => $e,
             App::Viewer($a) => $e,
-            App::Browser($a) => $e,
             App::Terminal($a) => $e,
             App::Settings($a) => $e,
             App::Brave($a) => $e,
@@ -158,7 +155,6 @@ impl App {
             App::Editor(_) => AppKind::Editor,
             App::Music(_) => AppKind::Music,
             App::Viewer(_) => AppKind::Viewer,
-            App::Browser(_) => AppKind::Browser,
             App::Terminal(_) => AppKind::Terminal,
             App::Settings(_) => AppKind::Settings,
             App::Brave(_) => AppKind::Brave,
@@ -179,7 +175,6 @@ impl App {
             App::Editor(_) => (820, 560),
             App::Music(_) => (640, 560),
             App::Viewer(_) => (760, 560),
-            App::Browser(_) => (1060, 620),
             App::Terminal(_) => (860, 520),
             App::Settings(_) => (1000, 660),
             App::Brave(_) => (1180, 720),
@@ -204,7 +199,6 @@ impl App {
             App::Editor(a) => a.draw(c, content, sys.now_ms),
             App::Music(a) => a.draw(c, content, sys.now_ms),
             App::Viewer(a) => a.draw(c, content),
-            App::Browser(a) => a.draw(c, content, sys.now_ms),
             App::Terminal(a) => a.draw(c, content),
             App::Settings(a) => a.draw(c, content, sys),
             App::Brave(a) => a.draw(c, content, sys.now_ms),
@@ -227,7 +221,6 @@ impl App {
             App::Editor(a) => a.key(key, mods, content, ctx),
             App::Music(a) => a.key(key, ctx),
             App::Viewer(a) => a.key(key, ctx),
-            App::Browser(a) => a.key(key, mods, content, ctx),
             App::Terminal(a) => a.key(key, mods, ctx),
             App::Settings(a) => a.key(key, mods, ctx),
             App::Brave(a) => a.key(key, mods, ctx),
@@ -242,7 +235,6 @@ impl App {
             App::Editor(a) => a.click(click, content),
             App::Music(a) => a.click(click, content, ctx),
             App::Viewer(_) => {}
-            App::Browser(a) => a.click(click, content, ctx),
             App::Terminal(_) => {}
             App::Settings(a) => a.click(click, content, ctx),
             App::Brave(a) => a.click(click, content, ctx),
@@ -254,7 +246,6 @@ impl App {
         match self {
             App::Files(a) => a.wheel(delta, content, ctx),
             App::Editor(a) => a.wheel(delta, content),
-            App::Browser(a) => a.wheel(delta, content),
             App::Console(a) => a.wheel(delta),
             App::Project(a) => a.wheel(delta),
             App::Terminal(a) => a.wheel(delta),
@@ -270,7 +261,6 @@ impl App {
             App::Files(a) => a.tick(ctx.now_ms),
             App::Music(a) => a.tick(ctx),
             App::Editor(a) => a.tick(ctx.now_ms),
-            App::Browser(a) => a.tick(ctx),
             App::Terminal(a) => a.tick(ctx),
             App::Settings(a) => a.tick(ctx),
             App::Brave(a) => a.tick(ctx),
@@ -286,7 +276,6 @@ impl App {
         ctx: &mut Ctx<'_, D>,
     ) {
         match self {
-            App::Browser(b) => b.net_response(id, result, ctx),
             App::Terminal(t) => t.net_response(id, result, ctx),
             App::Settings(s) => s.net_response(id, result),
             _ => {}
@@ -363,7 +352,6 @@ pub fn icon_of(kind: AppKind) -> Icon {
         AppKind::Monitor => Icon::Gauge,
         AppKind::Files => Icon::Folder,
         AppKind::Music => Icon::Music,
-        AppKind::Browser => Icon::Globe,
         AppKind::Editor => Icon::Document,
         AppKind::Viewer => Icon::Image,
         AppKind::Terminal => Icon::Terminal,
@@ -384,7 +372,6 @@ pub fn app_by_name(name: &str) -> Option<AppKind> {
         "monitor" | "estado" | "administrador" | "administrador de tareas" => AppKind::Monitor,
         "musica" | "música" | "music" => AppKind::Music,
         "navegador" | "web" | "brave" | "internet" | "browser" => AppKind::Brave,
-        "navegador-simple" | "navegador simple" => AppKind::Browser,
         "editor" | "notas" | "bloc" | "bloc de notas" => AppKind::Editor,
         "consola" | "console" => AppKind::Console,
         "proyecto" => AppKind::Project,
@@ -403,7 +390,6 @@ pub fn name_of(kind: AppKind) -> &'static str {
         AppKind::Monitor => tr("Monitor del sistema"),
         AppKind::Files => tr("Archivos"),
         AppKind::Music => tr("Música"),
-        AppKind::Browser => tr("Navegador simple"),
         AppKind::Editor => tr("Editor de texto"),
         AppKind::Viewer => tr("Visor de imágenes"),
         AppKind::Terminal => "Terminal",

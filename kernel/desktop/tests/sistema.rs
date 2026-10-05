@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use jarvis_desktop::apps::App;
-use jarvis_desktop::{AppKind, HttpResponse, Key, Launch, Mods};
+use jarvis_desktop::{AppKind, Key, Launch, Mods};
 
 fn win_ctrl() -> Mods {
     Mods {
@@ -77,9 +77,12 @@ fn pin_de_bloqueo() {
     let mut t = Driver::new();
     t.combo(Mods::WIN, Key::Char('i'));
     // Asistente (IA) es la última sección (RePág desde Sistema da la vuelta); antes están
-    // Hardware (K13), Micrófono, Sincronización, Firewall y Privacidad y seguridad.
+    // Aplicaciones predeterminadas, Hardware (K13), Micrófono, Sincronización, Firewall y
+    // Privacidad y seguridad.
     t.key(Key::PageUp);
     assert_eq!(settings_section(&t), "Asistente (IA)");
+    t.key(Key::PageUp);
+    assert_eq!(settings_section(&t), "Aplicaciones predeterminadas");
     t.key(Key::PageUp);
     assert_eq!(settings_section(&t), "Hardware");
     t.key(Key::PageUp);
@@ -138,12 +141,13 @@ fn win_x_win_a_win_n_y_alt_espacio() {
     assert_eq!(t.d.overlay_name(), "notificaciones");
     t.frame();
     t.key(Key::Escape);
-    // F1: la ayuda de atajos en el navegador.
+    // F1: la ayuda (los comandos y atajos) en la terminal.
     t.key(Key::F(1));
-    match t.d.app(AppKind::Browser) {
-        Some(App::Browser(b)) => assert!(b.page_text().contains("Atajos de teclado")),
-        _ => panic!("F1 abre la ayuda"),
-    }
+    assert_eq!(
+        t.d.focused_app(),
+        Some(AppKind::Terminal),
+        "F1 abre la ayuda"
+    );
 }
 
 #[test]
@@ -231,165 +235,29 @@ fn escritorios_virtuales_con_win_ctrl() {
     t.frame();
 }
 
-fn page(status: u16, ct: &str, url: &str, body: &str) -> Result<HttpResponse, String> {
-    Ok(HttpResponse {
-        status,
-        content_type: ct.into(),
-        url: url.into(),
-        body: body.as_bytes().to_vec(),
-    })
-}
-
-#[test]
-fn navegador_con_estilos_formularios_e_imagenes() {
-    let mut t = Driver::new();
-    t.d.open(
-        Launch::Browse("https://www.google.com/".into()),
-        t.now,
-        CLOCK,
-    );
-    let req = t.d.take_requests();
-    let html = "<html><head><title>Google</title><style>body{background:#fff}\
-                .logo{text-align:center} a{color:#1a0dab}</style>\
-                <link rel=stylesheet href=/estilo.css></head><body>\
-                <div class=logo><img src=/logo.png alt=Google width=272 height=92></div>\
-                <form action=/search><input type=hidden name=hl value=es><input name=q size=40>\
-                <input type=submit name=btnG value='Buscar con Google'></form></body></html>";
-    t.d.net_response(
-        req.net[0].id,
-        page(200, "text/html", "https://www.google.com/", html),
-    );
-    // Después de la página se piden la hoja de estilo y la imagen (convertida a BMP).
-    let req = t.d.take_requests();
-    let urls: Vec<(&str, jarvis_desktop::FetchKind)> =
-        req.net.iter().map(|r| (r.url.as_str(), r.kind)).collect();
-    assert!(
-        urls.contains(&(
-            "https://www.google.com/estilo.css",
-            jarvis_desktop::FetchKind::Page
-        )),
-        "{urls:?}"
-    );
-    assert!(
-        urls.contains(&(
-            "https://www.google.com/logo.png",
-            jarvis_desktop::FetchKind::Image
-        )),
-        "{urls:?}"
-    );
-    for r in &req.net {
-        if r.url.ends_with(".css") {
-            t.d.net_response(
-                r.id,
-                page(200, "text/css", &r.url, ".logo{background:#eee}"),
-            );
-        } else {
-            // Una imagen BMP de 2×2.
-            let mut buf = vec![0u8; 16];
-            let c = jarvis_gfx::Canvas::new(&mut buf, 2, 2, 2, 4, jarvis_gfx::PixelFormat::Bgr)
-                .unwrap();
-            let bmp = jarvis_desktop::bmp::encode(&c);
-            t.d.net_response(
-                r.id,
-                Ok(HttpResponse {
-                    status: 200,
-                    content_type: "image/bmp".into(),
-                    url: r.url.clone(),
-                    body: bmp,
-                }),
-            );
-        }
-    }
-    t.frame();
-    match t.d.app(AppKind::Browser) {
-        Some(App::Browser(b)) => {
-            let d = b.document();
-            let p = b.prepared().unwrap();
-            assert_eq!(
-                jarvis_desktop::web::html::canvas_color(p),
-                Some(jarvis_gfx::Color::WHITE)
-            );
-            assert_eq!(d.fields.len(), 3);
-            let logo = (0..p.dom.nodes.len())
-                .find(|&i| p.dom.nodes[i].attr("class") == Some("logo"))
-                .unwrap();
-            assert_eq!(
-                p.styled.get(logo).and_then(|s| s.bg).map(|c| c.c),
-                Some(jarvis_gfx::Color::hex(0xeeeeee)),
-                "se aplicó la hoja externa"
-            );
-        }
-        _ => panic!(),
-    }
-    // Tab va al campo de búsqueda, se escribe y Enter manda el formulario. Google pide
-    // JavaScript para buscar: se busca con el buscador elegido (DuckDuckGo).
-    t.key(Key::Tab);
-    t.type_text("rust osdev");
-    t.key(Key::Enter);
-    let req = t.d.take_requests();
-    assert!(
-        req.net[0]
-            .url
-            .starts_with("https://html.duckduckgo.com/html/?q=rust+osdev"),
-        "{}",
-        req.net[0].url
-    );
-    assert!(t.logs().iter().any(|l| {
-        l.contains("NAVEGADOR_FORMULARIO https://www.google.com/search?hl=es&q=rust+osdev")
-    }));
-}
-
-#[test]
-fn el_navegador_guarda_descargas_en_descargas() {
-    let mut t = Driver::new();
-    t.d.open(
-        Launch::Browse("http://ejemplo.com/instalador.exe".into()),
-        t.now,
-        CLOCK,
-    );
-    let req = t.d.take_requests();
-    assert_eq!(req.net[0].kind, jarvis_desktop::FetchKind::Download);
-    let mut exe = vec![0u8; 0x200];
-    exe[0..2].copy_from_slice(b"MZ");
-    t.d.net_response(
-        req.net[0].id,
-        Ok(HttpResponse {
-            status: 200,
-            content_type: "application/x-msdownload".into(),
-            url: "http://ejemplo.com/instalador.exe".into(),
-            body: exe,
-        }),
-    );
-    assert!(
-        t.logs()
-            .iter()
-            .any(|l| l.starts_with("DESCARGA /Descargas/instalador.exe"))
-    );
-    assert!(fatfs_exists(t.d, "/Descargas/instalador.exe"));
-}
-
 #[test]
 fn firewall_desde_la_configuracion_bloquea_una_app() {
     let mut t = Driver::new();
     t.d.open(Launch::Settings(15), t.now, CLOCK);
     assert_eq!(settings_section(&t), "Firewall");
-    // Fila 5: "Permitir: Navegador web" (se apaga = regla que bloquea al navegador).
+    // Fila 5: "Permitir: Brave" (se apaga = regla que bloquea a Brave).
     t.keys(&[Key::Down; 5]);
     t.key(Key::Enter);
     assert_eq!(
         t.d.config().firewall.rules[0].to_line(),
-        "denegar salida app navegador"
+        "denegar salida app brave"
     );
+    // Brave quiere conectarse a su puente: no sale.
     t.d.open(Launch::Browse("http://example.com/".into()), t.now, CLOCK);
     let req = t.d.take_requests();
-    assert!(req.net.is_empty(), "no sale nada a la red");
-    // El error llega en el próximo pedido (como una respuesta).
-    let _ = t.d.take_requests();
+    assert!(req.streams.is_empty(), "no sale nada a la red");
     t.frame();
     assert!(
         t.logs()
             .iter()
-            .any(|l| l.contains("FIREWALL_BLOQUEO navegador example.com"))
+            .any(|l| l.contains("FIREWALL_BLOQUEO brave")),
+        "{:?}",
+        t.logs()
     );
 }
 

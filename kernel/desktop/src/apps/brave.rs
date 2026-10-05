@@ -139,6 +139,11 @@ impl Brave {
         }
     }
 
+    /// Lo que dice la barra de direcciones (antes de conectarse: a dónde va a ir).
+    pub fn address(&self) -> &str {
+        &self.address.text
+    }
+
     pub fn current_url(&self) -> String {
         self.active_tab().map(|t| t.url.clone()).unwrap_or_default()
     }
@@ -343,7 +348,8 @@ impl Brave {
 
     // --- entrada --------------------------------------------------------------------------------
 
-    fn go<D: BlockDevice>(&mut self, input: &str, ctx: &mut Ctx<'_, D>) {
+    /// Ir a una dirección (o buscar en Brave Search lo que no lo es).
+    pub fn go<D: BlockDevice>(&mut self, input: &str, ctx: &mut Ctx<'_, D>) {
         let url = to_url(input.trim());
         self.editing = false;
         self.address.text = url.clone();

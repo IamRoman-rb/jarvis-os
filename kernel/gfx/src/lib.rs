@@ -20,6 +20,5 @@ pub mod text;
 pub mod theme;
 pub mod trig;
 pub mod vfont;
-pub mod webfont;
 
 pub use canvas::{Canvas, Color, MAX_CLIP, PixelFormat, Rect};

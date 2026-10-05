@@ -28,7 +28,7 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
 - **Brave**: el navegador de verdad (JavaScript, YouTube, cualquier sitio). Corre en el
   anfitrión sin ventana y JARVIS-OS lo muestra en una ventana propia, con pestañas, barra de
   dirección, atrás/adelante, mouse, rueda y teclado. Se instala con `cargo xtask brave
-  --instalar`. El navegador propio de K3–K5 queda como "Navegador simple".
+  --instalar`. Es el único navegador: el propio de K3–K5 se sacó ([ADR 0014](adr/0014-sin-navegador-propio.md)).
 - **JARVIS con Claude** (K7, ADR 0008): la consola resuelve sus órdenes locales y lo demás se lo
   pregunta a Claude (`jarvis serve` en el anfitrión, con el login de Claude Code); la respuesta
   aparece a medida que llega y la esfera habla. JARVIS también **actúa**: abre apps y páginas,
@@ -111,14 +111,10 @@ Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincroni
 - **Programas de Windows y Linux**: se descargan (navegador, `wget`, `winget`, `snap download`) y
   se inspeccionan (`file`, `strings`, `xxd`); todavía no se pueden ejecutar (hace falta espacio de
   usuario: K11).
-- **Configuración** (Win+I): fondo de pantalla, apariencia, tipografía, ventanas, idioma, zona horaria, reloj, red, navegador,
-  sonido, mouse, teclado, programas, almacenamiento, PIN de bloqueo y firewall. Se guarda en
+- **Configuración** (Win+I): fondo de pantalla, apariencia, tipografía, ventanas, idioma, zona horaria, reloj, red, Brave,
+  sonido, mouse, teclado, gestos con la cámara, programas, aplicaciones predeterminadas (con qué
+  app se abre cada tipo de archivo), almacenamiento, PIN de bloqueo y firewall. Se guarda en
   `/Sistema/config.ini`.
-- **Navegador con motor de maquetación propio**: cajas con márgenes y bordes, flotantes, flex,
-  grid, tablas, posiciones, `@media`, `calc()`, variables; fuente proporcional (DejaVu) en
-  cualquier tamaño; imágenes, SVG, fondos e íconos con transparencia (el puente los convierte a
-  BMP). Formularios (GET), modo lectura (F9) y descargas a /Descargas. Sin JavaScript: YouTube se
-  arma con los datos que trae la página; otras páginas así avisan que pueden verse incompletas.
 - **Firewall**: reglas por sitio, puerto y app (`ufw` en la terminal o Configuración →
   Firewall). Lo bloqueado queda en `/Sistema/firewall.log`.
 - **`snap`** (tienda propia con canales y revisiones; búsqueda y descarga en Snapcraft) y
@@ -225,7 +221,7 @@ abre Archivos.
 
 | Archivos | |
 |---|---|
-| Enter / doble clic | abrir: carpeta, texto → editor, BMP → visor, HTML → navegador, `.sh` → se ejecuta, `.exe` → la terminal dice qué es |
+| Enter / doble clic | abrir: carpeta, texto → editor, BMP → visor, HTML → editor (cada tipo se elige en Configuración → Aplicaciones predeterminadas), `.sh` → se ejecuta, `.exe` → la terminal dice qué es |
 | Retroceso / Alt+↑ | subir una carpeta · Alt+← atrás |
 | F7 o Ctrl+Shift+N / F6 | nueva carpeta / nuevo archivo de texto |
 | F2 | renombrar |
@@ -334,12 +330,12 @@ al repositorio real. Los instaladores no se ejecutan (ADR 0005); hasta 32 MB por
 
 ```
 roman@jarvis:~$ sudo ufw deny out to tiktok.com          # también sus subdominios
-roman@jarvis:~$ sudo ufw deny out port 80 app navegador  # el navegador, sin http://
+roman@jarvis:~$ sudo ufw deny out port 80 app brave      # Brave, sin http://
 roman@jarvis:~$ sudo ufw default deny outgoing && sudo ufw allow out to wikipedia.org
 roman@jarvis:~$ ufw status numbered · ufw delete 1 · ufw show blocked · ufw app list
 ```
 
-Las reglas se evalúan en orden (gana la primera). Las apps que se pueden nombrar: `navegador`,
+Las reglas se evalúan en orden (gana la primera). Las apps que se pueden nombrar: `brave`,
 `terminal`, `apt`, `snap`, `winget`, `configuracion`, `jarvis` y `sistema`. Lo mismo se maneja
 desde Configuración → Firewall. Lo que entra ya está cerrado: JARVIS-OS no escucha en ningún
 puerto.

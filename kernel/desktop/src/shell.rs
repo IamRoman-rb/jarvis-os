@@ -702,10 +702,9 @@ pub struct StartMenu {
     pub selected: usize,
 }
 
-const MENU_APPS: [AppKind; 9] = [
+const MENU_APPS: [AppKind; 8] = [
     AppKind::Files,
     AppKind::Brave,
-    AppKind::Browser,
     AppKind::Terminal,
     AppKind::Settings,
     AppKind::Monitor,

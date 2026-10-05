@@ -966,7 +966,7 @@ impl Drop for Session {
 
 const STEP: Duration = Duration::from_secs(20);
 
-/// Página que sirve el anfitrión en los tests y las capturas del navegador.
+/// Página que sirve el anfitrión en los tests (la baja `curl` desde la terminal).
 const TEST_PAGE: &str = "<!DOCTYPE html><html><head><title>Red de JARVIS-OS</title></head><body>\
 <h1>La red de JARVIS-OS funciona</h1>\
 <p>Esta página viajó desde la computadora anfitriona hasta el kernel por la placa de red \
@@ -975,7 +975,7 @@ const TEST_PAGE: &str = "<!DOCTYPE html><html><head><title>Red de JARVIS-OS</tit
 <li>El kernel pidió una dirección IP por DHCP (10.0.2.15).</li>\
 <li>Abrió una conexión TCP con el anfitrión (10.0.2.2).</li>\
 <li>Mandó <b>GET /</b> y juntó la respuesta.</li>\
-<li>El navegador convirtió el HTML en texto con títulos, listas y enlaces.</li></ol>\
+<li>curl la mostró en la terminal.</li></ol>\
 <h2>Enlaces</h2><ul><li><a href=\"http://example.com/\">example.com</a></li>\
 <li><a href=\"https://es.wikipedia.org/wiki/Kernel\">Wikipedia: Kernel</a></li></ul>\
 <blockquote>Todo esto corre sobre un kernel escrito desde cero en Rust.</blockquote>\
@@ -986,8 +986,8 @@ const TEST_PAGE: &str = "<!DOCTYPE html><html><head><title>Red de JARVIS-OS</tit
 /// 2. Espacio → JARVIS habla (IRQ1 → asistente);
 /// 3. Tab → Archivos lee la raíz del disco; F7, "prueba", Enter → crea una carpeta;
 /// 4. el mouse hace clic en una fila (IRQ12 → paquetes → selección);
-/// 5. Win+R → Consola; "ir http://10.0.2.2:PUERTO/" → el navegador descarga la página que
-///    sirve este mismo xtask (DNS no: es una IP; TCP y HTTP sí);
+/// 5. Win+R → Consola; "ir ..." abre Brave; en la terminal, `curl http://10.0.2.2:PUERTO/`
+///    descarga la página que sirve este mismo xtask (DNS no: es una IP; TCP y HTTP sí);
 /// 6. Alt+Tab cambia de ventana; Win+D muestra el escritorio; Impr Pant guarda una captura;
 /// 7. se cierra QEMU y `fatfs` verifica en el disco que `/prueba` y la captura quedaron escritas.
 fn test(image: &Path, disk: &Path) -> Result<()> {
@@ -1043,8 +1043,10 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     }
     s.type_text(&format!("ir http://10.0.2.2:{port}/"))?;
     s.monitor("sendkey ret")?;
-    s.wait_for("VENTANA_ABIERTA Navegador", STEP)?;
-    s.wait_for("RED_RESPUESTA 200", STEP)?;
+    // El navegador es Brave (ADR 0014). Se cierra: más adelante se prueba abrirlo de cero.
+    s.wait_for("VENTANA_ABIERTA Brave", STEP)?;
+    s.monitor("sendkey alt-f4")?;
+    s.wait_for("VENTANA_CERRADA Brave", STEP)?;
     s.monitor("sendkey alt-tab")?;
     s.wait_for("VENTANA_FOCO", STEP)?;
     s.monitor("sendkey meta_l-d")?;
@@ -1055,6 +1057,11 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
     s.type_text("echo hola terminal > saludo.txt")?;
     s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // La red: la página que sirve este xtask, por TCP y el HTTP del kernel.
+    s.type_text(&format!("curl http://10.0.2.2:{port}/"))?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("RED_RESPUESTA 200", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
     // apt: instala un paquete del repositorio (lo sirve el puente) y se ejecuta.
     s.type_text("apt install hola")?;
@@ -1282,7 +1289,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     verify_file_exists(disk, "Sistema/firewall.log")?;
     verify_boot_log(disk, "arrancando")?;
     println!(
-        "ok: arranque, red, teclado, mouse, ventanas, navegador, terminal, apt, snap, firewall, configuración, Brave ({}), suspender, cerrar sesión y disco verificados",
+        "ok: arranque, red, teclado, mouse, ventanas, terminal, apt, snap, firewall, configuración, Brave ({}), suspender, cerrar sesión y disco verificados",
         if brave_ok {
             "con página"
         } else {
@@ -1404,10 +1411,9 @@ fn verify_dir_on_disk(disk: &Path, dir: &str) -> Result<()> {
     Ok(())
 }
 
-/// Capturas: JARVIS en reposo y hablando, Archivos y un diálogo, el monitor, el navegador, el
+/// Capturas: JARVIS en reposo y hablando, Archivos y un diálogo, el monitor, Brave, el
 /// menú de inicio, Alt+Tab y la vista de tareas.
 fn screenshot(image: &Path, disk: &Path) -> Result<()> {
-    let port = puente::test_server(TEST_PAGE)?;
     puente::start();
     brave::start(brave_profile());
     let shot = |s: &mut Session, name: &str| s.screenshot(&target_dir().join(name));
@@ -1457,79 +1463,6 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     thread::sleep(Duration::from_millis(500));
     shot(&mut s, "jarvis-os-distribuciones.png")?;
     s.monitor("sendkey esc")?;
-
-    // Navegador con la página de prueba.
-    s.monitor("sendkey meta_l-r")?;
-    s.wait_for("VENTANA_ABIERTA Consola JARVIS", STEP)?;
-    s.type_text(&format!("ir http://10.0.2.2:{port}/"))?;
-    s.monitor("sendkey ret")?;
-    s.wait_for("RED_RESPUESTA 200", STEP)?;
-    thread::sleep(Duration::from_millis(800));
-    shot(&mut s, "jarvis-os-navegador.png")?;
-
-    // Internet de verdad (si hay): http:// directo (DNS + TCP) y https:// por el puente.
-    // Si no hay conexión, se sigue igual: estas capturas son opcionales. El navegador,
-    // maximizado (como se usa para leer).
-    s.monitor("sendkey meta_l-up")?;
-    thread::sleep(Duration::from_millis(300));
-    for (url, name) in [
-        (
-            "http://info.cern.ch/hypertext/WWW/TheProject.html",
-            "jarvis-os-web-http.png",
-        ),
-        (
-            "https://es.wikipedia.org/wiki/Sistema_operativo",
-            "jarvis-os-web-https.png",
-        ),
-    ] {
-        s.monitor("sendkey ctrl-l")?;
-        s.type_text(url)?;
-        s.monitor("sendkey ret")?;
-        match s.wait_for("RED_RESPUESTA", Duration::from_secs(30)) {
-            Ok(()) => {
-                // Hojas de estilo, imágenes y la maquetación.
-                thread::sleep(Duration::from_secs(10));
-                shot(&mut s, name)?;
-            }
-            Err(e) => println!("(sin internet para {url}: {e})"),
-        }
-    }
-
-    // YouTube: se arma con JavaScript; el navegador usa los datos que trae la página.
-    s.monitor("sendkey ctrl-l")?;
-    s.type_text("https://www.youtube.com/results?search_query=rust+kernel")?;
-    s.monitor("sendkey ret")?;
-    match s.wait_for("RED_RESPUESTA", Duration::from_secs(40)) {
-        Ok(()) => {
-            thread::sleep(Duration::from_secs(12));
-            shot(&mut s, "jarvis-os-youtube.png")?;
-        }
-        Err(e) => println!("(sin internet para YouTube: {e})"),
-    }
-
-    // Google con sus estilos (internet de verdad, opcional).
-    s.monitor("sendkey ctrl-l")?;
-    s.type_text("https://www.google.com/")?;
-    s.monitor("sendkey ret")?;
-    match s.wait_for("RED_RESPUESTA", Duration::from_secs(30)) {
-        Ok(()) => {
-            thread::sleep(Duration::from_secs(4)); // hojas de estilo e imágenes
-            shot(&mut s, "jarvis-os-google.png")?;
-        }
-        Err(e) => println!("(sin internet para Google: {e})"),
-    }
-
-    // GitHub: unas 20 hojas de estilo y variables de CSS (internet de verdad, opcional).
-    s.monitor("sendkey ctrl-l")?;
-    s.type_text("https://github.com/rust-lang/rust")?;
-    s.monitor("sendkey ret")?;
-    match s.wait_for("RED_RESPUESTA", Duration::from_secs(30)) {
-        Ok(()) => {
-            thread::sleep(Duration::from_secs(15));
-            shot(&mut s, "jarvis-os-github.png")?;
-        }
-        Err(e) => println!("(sin internet para GitHub: {e})"),
-    }
 
     // Brave de verdad (si está instalado en el anfitrión y hay internet), maximizado.
     if brave::installed() {

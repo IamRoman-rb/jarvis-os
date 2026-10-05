@@ -258,8 +258,8 @@ pub enum Quick {
     Sounds,
     Animations,
     StatusPanel,
-    LightPages,
-    Reader,
+    Gestures,
+    Topbar,
     Clock24,
 }
 
@@ -267,8 +267,8 @@ pub const QUICK: [(Quick, &str); 6] = [
     (Quick::Sounds, "Sonidos"),
     (Quick::Animations, "Animaciones"),
     (Quick::StatusPanel, "Panel de estado"),
-    (Quick::LightPages, "Páginas claras"),
-    (Quick::Reader, "Modo lectura"),
+    (Quick::Gestures, "Gestos"),
+    (Quick::Topbar, "Barra superior"),
     (Quick::Clock24, "Reloj 24 h"),
 ];
 
@@ -277,8 +277,8 @@ pub fn quick_value(cfg: &Config, q: Quick) -> bool {
         Quick::Sounds => cfg.sounds,
         Quick::Animations => cfg.animations,
         Quick::StatusPanel => cfg.status_panel,
-        Quick::LightPages => cfg.light_pages,
-        Quick::Reader => cfg.reader_mode,
+        Quick::Gestures => cfg.gestures,
+        Quick::Topbar => cfg.topbar,
         Quick::Clock24 => cfg.clock_24h,
     }
 }
@@ -288,8 +288,8 @@ pub fn quick_toggle(cfg: &mut Config, q: Quick) {
         Quick::Sounds => cfg.sounds = !cfg.sounds,
         Quick::Animations => cfg.animations = !cfg.animations,
         Quick::StatusPanel => cfg.status_panel = !cfg.status_panel,
-        Quick::LightPages => cfg.light_pages = !cfg.light_pages,
-        Quick::Reader => cfg.reader_mode = !cfg.reader_mode,
+        Quick::Gestures => cfg.gestures = !cfg.gestures,
+        Quick::Topbar => cfg.topbar = !cfg.topbar,
         Quick::Clock24 => cfg.clock_24h = !cfg.clock_24h,
     }
 }

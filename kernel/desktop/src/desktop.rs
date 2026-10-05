@@ -36,8 +36,8 @@ use jarvis_gfx::vfont::VectorText;
 use jarvis_gfx::{Canvas, Color, MAX_CLIP, PixelFormat, Rect, theme};
 
 use crate::apps::{
-    App, Click, Ctx, Pointer, PointerKind, SysView, TaskInfo, brave::Brave, browser::Browser,
-    console::Console, editor::Editor, files::FilesWindow, monitor::Monitor, music::Music, name_of,
+    App, Click, Ctx, Pointer, PointerKind, SysView, TaskInfo, brave::Brave, console::Console,
+    editor::Editor, files::FilesWindow, monitor::Monitor, music::Music, name_of,
     settings::Settings, terminal::Terminal, viewer::Viewer,
 };
 use crate::chrome::{self, Hover};
@@ -433,7 +433,6 @@ macro_rules! ctx {
 /// A nombre de quién salen los pedidos de red de cada app (para el firewall).
 fn app_tag(kind: AppKind) -> &'static str {
     match kind {
-        AppKind::Browser => "navegador",
         AppKind::Terminal => "terminal",
         AppKind::Settings => "configuracion",
         AppKind::Console => "jarvis",
@@ -1584,7 +1583,8 @@ impl<D: BlockDevice> Desktop<D> {
             Key::Escape if m.ctrl && m.shift => self.launch(app(AppKind::Monitor), now_ms, clock),
             Key::Escape if m.ctrl => self.toggle_start(),
             Key::PrintScreen => self.screenshot = true,
-            Key::F(1) => self.launch(Launch::Browse("about:ayuda".into()), now_ms, clock),
+            // La ayuda: los comandos y atajos, en la terminal.
+            Key::F(1) => self.launch(Launch::Terminal(Some("help".into())), now_ms, clock),
             Key::F(11) => match focused {
                 Some(id) => self.wm.toggle_maximize(id),
                 None => return false,
@@ -1822,7 +1822,6 @@ impl<D: BlockDevice> Desktop<D> {
         // Las apps que dependen de la configuración la leen de nuevo.
         for s in &mut self.slots {
             match &mut s.app {
-                App::Browser(b) => b.set_config(&self.config),
                 App::Brave(b) => b.set_config(&self.config),
                 App::Settings(st) => st.sync(&self.config),
                 _ => {}
@@ -2305,7 +2304,7 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::App(k) => *k,
             Launch::Folder(_) => AppKind::Files,
             Launch::Edit(_) => AppKind::Editor,
-            Launch::Browse(_) => AppKind::Browser,
+            Launch::Browse(_) => AppKind::Brave,
             Launch::View(_) => AppKind::Viewer,
             Launch::Play(_) => AppKind::Music,
             Launch::Terminal(_) => AppKind::Terminal,
@@ -2326,7 +2325,10 @@ impl<D: BlockDevice> Desktop<D> {
             let slot = &mut self.slots[i];
             match (&what, &mut slot.app) {
                 (Launch::Folder(p), App::Files(f)) => f.navigate(p, &mut ctx),
-                (Launch::Browse(u), App::Browser(b)) => b.go(u, &mut ctx),
+                (Launch::Browse(u), App::Brave(b)) => {
+                    let url = web_target(u, ctx.config);
+                    b.go(&url, &mut ctx)
+                }
                 (Launch::Play(p), App::Music(m)) => {
                     m.scan(&mut ctx);
                     m.play_file(p, &mut ctx);
@@ -2372,16 +2374,11 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::Edit(p) => App::Editor(Editor::open(&p, &mut ctx)),
             Launch::App(AppKind::Viewer) => App::Files(FilesWindow::new("/Imágenes", &mut ctx)),
             Launch::View(p) => App::Viewer(Viewer::open(&p, &mut ctx)),
-            Launch::App(AppKind::Browser) => {
-                let mut b = Browser::new(ctx.config);
-                let home = ctx.config.homepage.clone();
-                b.go(&home, &mut ctx);
-                App::Browser(b)
-            }
             Launch::Browse(u) => {
-                let mut b = Browser::new(ctx.config);
-                b.go(&u, &mut ctx);
-                App::Browser(b)
+                let mut b = Brave::new(ctx.config);
+                let url = web_target(&u, ctx.config);
+                b.go(&url, &mut ctx);
+                App::Brave(b)
             }
             Launch::App(AppKind::Brave) => App::Brave(Brave::new(ctx.config)),
             Launch::App(AppKind::Terminal) | Launch::Terminal(None) => {
@@ -3238,12 +3235,6 @@ impl<D: BlockDevice> Desktop<D> {
                 Launcher::Capture => self.screenshot = true,
                 Launcher::Jarvis => self.wm.toggle_desktop(),
                 Launcher::App(kind) => {
-                    // El navegador principal se elige en la Configuración.
-                    let kind = if kind == AppKind::Brave && !self.config.brave_default {
-                        AppKind::Browser
-                    } else {
-                        kind
-                    };
                     let existing = self
                         .slots
                         .iter()
@@ -3898,4 +3889,22 @@ impl<D: BlockDevice> Desktop<D> {
         }
         touched
     }
+}
+
+/// Lo que se abre en Brave: una búsqueda ("? texto", con el buscador elegido) o una dirección.
+fn web_target(u: &str, cfg: &Config) -> String {
+    let Some(q) = u.strip_prefix("? ") else {
+        return u.into();
+    };
+    let mut enc = String::new();
+    for b in q.trim().bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                enc.push(b as char)
+            }
+            b' ' => enc.push('+'),
+            _ => enc.push_str(&format!("%{b:02X}")),
+        }
+    }
+    format!("{}{enc}", cfg.search.url())
 }

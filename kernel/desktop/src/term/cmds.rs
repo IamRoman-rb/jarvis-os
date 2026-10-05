@@ -1897,6 +1897,7 @@ impl Shell {
             return 0;
         }
         let p = self.abs(target);
+        let apps = ctx.config.default_apps;
         let Some(fs) = Self::fs(ctx, e) else { return 1 };
         let Ok(st) = fs.stat(&p).or_else(|err| {
             if p == "/" {
@@ -1908,18 +1909,12 @@ impl Shell {
             e.push_str(&format!("open: {target}: no existe\n"));
             return 1;
         };
-        let lower = p.to_lowercase();
-        let launch = if st.is_dir || p == "/" {
-            Launch::Folder(p)
-        } else if [".bmp", ".png", ".jpg", ".jpeg", ".avi"]
-            .iter()
-            .any(|e| lower.ends_with(e))
-        {
-            Launch::View(p)
-        } else if lower.ends_with(".wav") {
-            Launch::Play(p)
-        } else if lower.ends_with(".html") || lower.ends_with(".htm") {
-            Launch::Browse(format!("file://{p}"))
+        let is_dir = st.is_dir || p == "/";
+        // Con la app elegida en Configuración → Aplicaciones predeterminadas; lo que se abriría
+        // en el editor sin ser texto, se explica acá (un binario de Linux, un .exe...).
+        let (launch, _) = crate::defaults::launch_for(&apps, &p, is_dir);
+        let launch = if !matches!(launch, Launch::Edit(_)) {
+            launch
         } else {
             let b = fs.read_prefix(&p, 4 * 1024 * 1024).unwrap_or_default();
             if let Some(why) = binfmt::why_not(&b) {
@@ -2200,7 +2195,7 @@ pub(crate) fn finish_fetch<D: BlockDevice>(
             }
         }
         None => {
-            let text = crate::web::html::decode_bytes(&resp.body);
+            let text = crate::web::decode_bytes(&resp.body);
             (0, text)
         }
     }

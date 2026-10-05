@@ -6,7 +6,7 @@ de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va 
 red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
 idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta; espacio de usuario y programas
-de Linux, la 0010, propuesta; hardware real, la 0011; Wi-Fi, la 0012; JARVIS modificando el sistema desde adentro, la 0013). Roadmap y arquitectura del kernel:
+de Linux, la 0010, propuesta; hardware real, la 0011; Wi-Fi, la 0012; JARVIS modificando el sistema desde adentro, la 0013; sin navegador propio, la 0014). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -15,14 +15,15 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
 
 ## Estructura
 - kernel/        workspace Rust (todo no_std y testeable en el host salvo kernel y xtask):
-    - gfx/         dibujo: canvas, texto, fuente vectorial, fuente de las páginas (webfont.rs,
-                   DejaVu en gfx/fonts/), íconos, esfera, HUD
+    - gfx/         dibujo: canvas, texto, fuente vectorial, íconos, esfera, HUD
     - fs/          FAT32 propio sobre un trait BlockDevice (+ caché de sectores y formateo)
     - desktop/     escritorio: gestor de ventanas (wm.rs), atajos y composición (desktop.rs),
                    barra/panel/menús (shell.rs), paneles Win+X/A/N (panels.rs), configuración
                    (config.rs), aspecto no cromático (look.rs: tamaños, botones, gráficos de la barra), firewall (firewall.rs), idiomas (i18n.rs), teclado latino
-                   (keymap.rs), apps (apps/), shell, apt, snap y winget (term/), web sin red
-                   (web/: URL, HTTP, DOM, CSS y estilos, maquetación en cajas, JSON, adaptadores)
+                   (keymap.rs), apps (apps/), shell, apt, snap y winget (term/), aplicaciones
+                   predeterminadas (defaults.rs), lo que queda de la web (web/: URL, HTTP, JSON).
+                   Para navegar está Brave (apps/brave.rs, ADR 0007); el navegador propio se sacó
+                   (ADR 0014)
     - task/        multitarea (K9): el planificador (prioridades, turnos, esperas por evento o plazo);
                    no_std y sin hardware (el cambio de contexto está en kernel/task.rs)
     - mem/         memoria (K8): allocator de marcos físicos, tablas de páginas de 4 niveles y
@@ -170,10 +171,9 @@ Cerebro (desde la raíz):
     `fetch_as(…, "apt")` para herramientas que corren adentro de otra app). Así cada pedido pasa
     por las reglas con el nombre de quién lo hizo. Una app nueva que use la red va en
     `firewall::APPS` y en `app_tag` (desktop.rs).
-21. Navegador: un cambio de maquetación o de CSS lleva un test en web/layout.rs o web/style.rs, y
-    se mira con la vista previa sobre páginas reales (Wikipedia, Google) antes de darlo por bueno.
-    Los adaptadores de sitios (web/sites.rs) no inventan contenido: solo reordenan lo que trae la
-    página.
+21. Con qué app se abre cada tipo de archivo lo decide solo defaults.rs (Archivos, abrir_archivo y
+    `open` lo usan): un tipo o una app nueva van ahí, con su opción en Configuración → Aplicaciones
+    predeterminadas. No hay navegador propio (ADR 0014): lo web va a Brave.
 
 ## Reglas de seguridad del cerebro (NO negociables)
 1. Jamás permission_mode="bypassPermissions" ni "acceptEdits".
