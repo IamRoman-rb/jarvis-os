@@ -27,6 +27,9 @@ LEVELS: dict[str, int] = {
     "leer_terminal": 1,
     # Le pasa la pregunta a otro agente que Roman vinculó él mismo (no toca JARVIS-OS).
     "consultar_agente": 1,
+    # La memoria de JARVIS (en el anfitrión): anotar y buscar no tocan el sistema.
+    "recordar": 1,
+    "buscar_memoria": 1,
     "escribir_archivo": 2,
     "crear_carpeta": 2,
     "copiar": 2,
@@ -38,6 +41,8 @@ LEVELS: dict[str, int] = {
     # Reinicia el sistema con código nuevo.
     "aplicar_cambios_sistema": 3,
     "a_papelera": 3,
+    # Borrar recuerdos no se puede deshacer.
+    "olvidar": 3,
     "ejecutar_comando": 3,
 }
 

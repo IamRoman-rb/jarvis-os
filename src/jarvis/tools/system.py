@@ -97,6 +97,23 @@ SPECS: list[tuple[str, str, dict[str, type]]] = [
         {},
     ),
     (
+        "recordar",
+        "Anota algo en tu memoria para recordarlo en conversaciones futuras: datos de Roman, "
+        "sus preferencias, fechas, decisiones. Una frase clara y completa.",
+        {"dato": str},
+    ),
+    (
+        "buscar_memoria",
+        "Busca en tu memoria (recuerdos y conversaciones pasadas) con palabras clave: para "
+        '"¿te acordás de...?", "¿qué hablamos de...?" o algo que Roman ya te contó.',
+        {"consulta": str},
+    ),
+    (
+        "olvidar",
+        'Borra de tu memoria los recuerdos sobre algo (o "todo": recuerdos y conversaciones).',
+        {"que": str},
+    ),
+    (
         "consultar_agente",
         "Le pregunta algo a otro agente de IA que Roman vinculó (claude, gemini, chatgpt o "
         "deepseek) y devuelve su respuesta: para una segunda opinión o algo que otro sepa mejor.",
@@ -125,6 +142,8 @@ def describe(tool: str, args: dict[str, Any]) -> str:
             return f"Modificar JARVIS-OS: {a.get('pedido', '?')}"
         case "aplicar_cambios_sistema":
             return "Compilar los cambios y reiniciar JARVIS-OS con la versión nueva."
+        case "olvidar":
+            return f"Borrar de la memoria de JARVIS: {a.get('que', '?')}"
         case "abrir_proyecto":
             what = a.get("pedido") or "seguir con lo que estaban trabajando"
             return f"Abrir el proyecto {a.get('nombre', '?')} y {what}."

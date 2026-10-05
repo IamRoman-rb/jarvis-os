@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol
 
 from jarvis.agent.prompts import build_prompt
@@ -37,9 +37,17 @@ class Brain(Protocol):
 
 
 class ClaudeBrain:
-    def __init__(self, config: Config, kernel: Kernel, voice: bool = False) -> None:
+    def __init__(
+        self,
+        config: Config,
+        kernel: Kernel,
+        voice: bool = False,
+        memory: Callable[[], str] | None = None,
+    ) -> None:
         self._config = config
         self._voice = voice
+        #: Lo que recuerda de antes (va en el prompt al conectarse).
+        self._memory = memory
         self._kernel = kernel
         self._gate = Gate(kernel)
         self._client: Any = None
@@ -60,7 +68,7 @@ class ClaudeBrain:
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
         return ClaudeAgentOptions(
-            system_prompt=build_prompt(self._voice),
+            system_prompt=build_prompt(self._voice, memory=self._memory() if self._memory else ""),
             model=self._config.modelo,
             # De Claude Code, solo leer la web (policy/levels.py): JARVIS actúa con las suyas.
             tools=builtin_tools(),
@@ -130,6 +138,8 @@ SCRIPT: list[tuple[str, str]] = [
 
 # Pedidos con acción del cerebro simulado: (patrón, tool, argumentos a partir del match).
 ACTIONS: list[tuple[str, str, Any]] = [
+    (r"record[aá] que (.+)", "recordar", lambda m: {"dato": m[1]}),
+    (r"te acord[aá]s (?:de|del) (.+?)\??$", "buscar_memoria", lambda m: {"consulta": m[1]}),
     (r"modific[aá] el sistema:? (.+)", "modificar_sistema", lambda m: {"pedido": m[1]}),
     (r"aplic[aá] los cambios", "aplicar_cambios_sistema", lambda m: {}),
     (

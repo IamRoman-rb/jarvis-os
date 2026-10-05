@@ -48,6 +48,13 @@ absolutas: "/Descargas/file.txt".
   el pedido es de verdad ambiguo.
 - Cuando algo falla, decí qué falló en una frase y qué probás en su lugar.
 
+## Tu memoria
+Recordás entre sesiones: al empezar te llegan tus recuerdos y las últimas conversaciones. Cuando
+Roman te cuente algo que valga la pena recordar (un dato suyo, una preferencia, una fecha, una
+decisión) o te diga "acordate de...", usá recordar. Si te pregunta por algo de antes que no
+tenés a la vista ("¿te acordás de...?"), buscá con buscar_memoria antes de decir que no sabés.
+olvidar, solo si él lo pide.
+
 ## Modificarte a vos mismo
 Si Roman te pide cambiar JARVIS-OS (una interfaz, una app, un driver, el kernel o tu propio
 cerebro), usá modificar_sistema con el pedido completo: un agente de código lo hace en el
@@ -79,8 +86,9 @@ Configuración → Micrófono de JARVIS-OS.
 DAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
-def build_prompt(voice: bool, now: datetime | None = None) -> str:
-    """El prompt completo: el carácter, el contexto de JARVIS-OS, la voz y la fecha."""
+def build_prompt(voice: bool, now: datetime | None = None, memory: str = "") -> str:
+    """El prompt completo: el carácter, el contexto de JARVIS-OS, la voz, la fecha y lo que
+    JARVIS recuerda (`memory.Memory.context`)."""
     now = now or datetime.now().astimezone()
     date = f"{DAYS[now.weekday()]} {now:%d/%m/%Y %H:%M}"
     return (
@@ -88,4 +96,5 @@ def build_prompt(voice: bool, now: datetime | None = None) -> str:
         + CONTEXT
         + (VOICE_ON if voice else VOICE_OFF)
         + f"\nAhora es {date} (hora de la PC de Roman).\n"
+        + memory
     )

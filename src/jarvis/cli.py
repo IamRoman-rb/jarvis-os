@@ -56,11 +56,14 @@ def serve(
         if simulado:
             return ScriptedBrain(session)
         voice = host.voice is not None
-        claude = ClaudeBrain(config, session, voice=voice)
+        memory = host.memory.context if host.memory else None
+        claude = ClaudeBrain(config, session, voice=voice, memory=memory)
         if host.agents is None:
             return claude
         # Claude, Gemini, ChatGPT y DeepSeek juntos: el principal y el consejo los elige Roman.
-        return CouncilBrain(claude, host.agents, session, lambda: session.mode, voice=voice)
+        return CouncilBrain(
+            claude, host.agents, session, lambda: session.mode, voice=voice, memory=memory
+        )
 
     def make_os_project(request: str) -> ProjectRunner:
         # Solo se usa si `updater` encontró el repo (ver `Host` abajo).
@@ -84,7 +87,9 @@ def serve(
     )
     if not simulado:
         from jarvis import account
+        from jarvis.memory import Memory
 
+        host.memory = Memory()
         host.account_status = account.status
         host.account_login = account.login
         from jarvis import weather
@@ -235,6 +240,7 @@ def voz_decir(texto: str, voz: str = "") -> None:
 def voz_probar() -> None:
     """Escucha un pedido (sin palabra de activación), lo transcribe y lo repite en voz alta."""
     from jarvis.voice.engine import Voice, VoiceUnavailableError
+    from jarvis.voice.listener import Event
 
     try:
         voice = Voice()
@@ -243,13 +249,14 @@ def voz_probar() -> None:
         raise typer.Exit(2) from None
     heard: list[str] = []
 
-    def on_heard(text: str) -> None:
-        heard.append(text)
-        voice.stop()
+    def on_event(ev: Event) -> None:
+        if ev.kind == "orden":
+            heard.append(ev.text)
+            voice.stop()
 
     typer.echo("Hablá...")
     voice.listen_now()
-    voice.run(on_heard, lambda on: None)
+    voice.run(on_event)
     text = heard[0] if heard else ""
     typer.echo(f"Entendí: {text!r}")
     if text:

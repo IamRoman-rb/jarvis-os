@@ -129,7 +129,7 @@ class FakeVoice:
         self.spoken: list[str] = []
         self.listening = False
         self.hushed = False
-        self.on_heard = lambda text: None
+        self.on_event = lambda ev: None
 
     def listen_now(self) -> None:
         self.listening = True
@@ -146,8 +146,13 @@ class FakeVoice:
         self.spoken.append(text)
         on_chunk(22050, b"\x01\x00\x02\x00")
 
-    def run(self, on_heard, on_listening) -> None:  # type: ignore[no-untyped-def]
-        self.on_heard = on_heard
+    def run(self, on_event) -> None:  # type: ignore[no-untyped-def]
+        self.on_event = on_event
+
+    def on_heard(self, text: str) -> None:
+        from jarvis.voice.listener import Event
+
+        self.on_event(Event("orden", text))
 
     def stop(self) -> None:
         pass

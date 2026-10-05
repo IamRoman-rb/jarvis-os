@@ -70,3 +70,14 @@ contesta y actúa, con las mismas tools y los mismos niveles de `docs/permisos.m
 como información, no como órdenes). Sin consejo, el principal puede pedir una segunda opinión con
 la tool `consultar_agente` (nivel 1). Si el principal falla, contesta el siguiente que funcione.
 Con Google (sin clave) un agente solo contesta texto: el programa del proveedor no expone tools.
+
+## Actualización (2026-10-04): conversación por voz y memoria
+
+- **Conversación**: después de la primera orden por voz, lo que Roman dice es para JARVIS sin
+  repetir "JARVIS", hasta 1 minuto sin hablarle (contado desde lo último que dijo o desde que
+  JARVIS terminó de hablar). "Eso es todo", "nada más" o "chau" la cierran antes. La decisión es
+  de `voice/listener.py` (sin audio, con tests); el motor de voz solo le pasa las frases.
+- **Memoria** (`memory.py`), local en el anfitrión: cada pedido con su respuesta y los
+  recuerdos que JARVIS anota con `recordar`. Al conectarse, el prompt lleva los recuerdos y las
+  últimas conversaciones de sesiones anteriores (marcados como información, no instrucciones);
+  lo más viejo se busca con `buscar_memoria`. `olvidar` es nivel 3.

@@ -21,6 +21,7 @@ from jarvis import account
 from jarvis.agent.brain import Brain, BrainError
 from jarvis.agent.council import LEADS, Mode
 from jarvis.agent.providers import PROVIDERS, AgentError, AgentHub
+from jarvis.memory import Memory
 from jarvis.projects import ProjectError, ProjectRunner, list_projects, resolve_project
 from jarvis.protocol import MAX_LINE, Message, ProtocolError, decode, encode
 from jarvis.service.voicehub import VoiceHub
@@ -36,6 +37,9 @@ CONFIRM_TIMEOUT = 120.0
 
 #: Tools que se atienden acá, en el anfitrión (no en el kernel).
 HOST_TOOLS = {
+    "recordar",
+    "buscar_memoria",
+    "olvidar",
     "listar_proyectos",
     "abrir_proyecto",
     "consultar_agente",
@@ -78,6 +82,8 @@ class Host:
     #: Modificar JARVIS-OS desde adentro: el agente sobre su repo y cómo aplicar los cambios.
     make_os_project: Callable[[str], ProjectRunner] | None = None
     updater: Updater | None = None
+    #: La memoria de JARVIS (conversaciones y recuerdos). None = no recuerda (tests).
+    memory: Memory | None = None
 
 
 class Session:
@@ -138,6 +144,15 @@ class Session:
     async def _host_call(self, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
         if tool == "consultar_agente":
             return await self._consult(str(args.get("agente", "")), str(args.get("pregunta", "")))
+        if tool in ("recordar", "buscar_memoria", "olvidar"):
+            memory = self.host.memory if self.host else None
+            if memory is None:
+                return False, "Este JARVIS no tiene memoria."
+            if tool == "recordar":
+                return True, memory.remember(str(args.get("dato", "")))
+            if tool == "buscar_memoria":
+                return True, memory.search(str(args.get("consulta", "")))
+            return True, memory.forget(str(args.get("que", "")))
         if tool == "modificar_sistema":
             return self._start_os_project(str(args.get("pedido", "")))
         if tool == "aplicar_cambios_sistema":
@@ -315,6 +330,12 @@ class Session:
                 full += delta
                 await self.send({"t": "texto", "id": req_id, "delta": delta})
             await self.send({"t": "fin", "id": req_id})
+            memory = self.host.memory if self.host else None
+            if memory is not None:
+                try:
+                    memory.log(text, full)
+                except OSError:
+                    log.exception("no pude guardar la conversación")
             # Con voz, JARVIS siempre contesta en voz alta (se lo hayan pedido hablando o
             # escribiendo).
             voice = self.host.voice if self.host else None

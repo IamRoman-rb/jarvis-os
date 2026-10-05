@@ -1,8 +1,8 @@
 """La voz de JARVIS en el anfitrión (docs/investigacion.md §6.3), todo local:
 
 - palabra de activación: "JARVIS". El micrófono está siempre abierto: cada frase (voz hasta un
-  silencio) se transcribe, y solo las que empiezan con "JARVIS" son órdenes. "JARVIS" solo deja
-  escuchando la frase siguiente;
+  silencio) se transcribe, y `voice/listener.py` decide si es para JARVIS: las que empiezan con
+  "JARVIS" y, durante una conversación (hasta 1 minuto sin hablarle), todas;
 - voz → texto: faster-whisper (modelo `small`, español);
 - texto → voz: Piper, con la voz es_AR "daniela".
 
@@ -30,13 +30,11 @@ from jarvis.voice.audio import (
     jarvis_effect,
     level,
     send_paced,
-    split_wake,
 )
+from jarvis.voice.listener import Event, Listener
 
 log = logging.getLogger("jarvis.voz")
 
-#: Cuánto espera la orden después de un "JARVIS" solo.
-ARMED_MS = 8_000
 #: Después de hablar, el micrófono todavía recibe el eco de la sala: se ignora un rato.
 ECHO_MS = 400
 WHISPER_MODEL = "small"
@@ -108,13 +106,19 @@ class Voice:
         """Escuchar un pedido sin esperar la palabra de activación (Win+J en JARVIS-OS)."""
         self._listen_now.set()
 
-    def run(self, on_heard: Callable[[str], None], on_listening: Callable[[bool], None]) -> None:
-        """Bucle del micrófono (bloquea: correrlo en un hilo)."""
+    def run(self, on_event: Callable[[Event], None]) -> None:
+        """Bucle del micrófono (bloquea: correrlo en un hilo). `on_event`: las órdenes y los
+        cambios de estado que decide `Listener`."""
         import sounddevice as sd
 
         seg = Segmenter()
-        armed_until = 0.0  # después de "JARVIS" solo (o Win+J), la frase siguiente es la orden
+        listener = Listener()
         deaf_until = 0.0  # el eco de lo que acaba de decir
+
+        def emit(events: list[Event]) -> None:
+            for ev in events:
+                on_event(ev)
+
         with sd.RawInputStream(samplerate=RATE, channels=1, dtype="int16", blocksize=FRAME) as mic:
             log.info("voz: escuchando el micrófono (%s)", sd.query_devices(kind="input")["name"])
             while not self._stop.is_set():
@@ -122,21 +126,17 @@ class Voice:
                 now = time.monotonic()
                 if self._listen_now.is_set():
                     self._listen_now.clear()
-                    armed_until = now + ARMED_MS / 1000
-                    on_listening(True)
+                    emit(listener.listen_now(now))
                 if self._speaking.is_set():
                     # No escucharse a sí mismo: lo que venía oyendo se descarta, y el eco también.
                     seg = Segmenter()
                     deaf_until = now + ECHO_MS / 1000
-                    if armed_until:
-                        armed_until = max(armed_until, deaf_until + ARMED_MS / 1000)
+                    listener.speaking(deaf_until)
                     continue
                 if now < deaf_until:
                     continue
                 phrase = seg.feed(bytes(data))
-                if armed_until and now > armed_until:
-                    armed_until = 0.0
-                    on_listening(False)
+                emit(listener.tick(now))
                 if phrase is None:
                     continue
                 log.info("voz: frase de %d ms, transcribiendo", len(phrase) * 500 // RATE)
@@ -147,24 +147,9 @@ class Voice:
                     log.info("voz: descarto %r (ruido)", text)
                     continue
                 log.info("voz: oí %r", text)
-                if armed_until:
-                    order = split_wake(text)
-                    if order == "":
-                        # "JARVIS" otra vez: sigue esperando la orden.
-                        armed_until = time.monotonic() + ARMED_MS / 1000
-                        continue
-                    armed_until = 0.0
-                    on_listening(False)
-                    on_heard(order if order else text)
-                    continue
-                order = split_wake(text)
-                if order is None:
-                    continue  # no le hablaban a JARVIS
-                if order:
-                    on_heard(order)
-                else:
-                    armed_until = time.monotonic() + ARMED_MS / 1000
-                    on_listening(True)
+                # Con la hora en que terminó la frase (transcribir tarda): una dicha justo antes
+                # de que venza la conversación sigue contando.
+                emit(listener.phrase(text, now))
 
     def transcribe(self, pcm: bytes) -> str:
         if not pcm:

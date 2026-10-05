@@ -28,6 +28,8 @@ registra (default deny). Detalle del modelo en [investigacion.md §6.4 y §12.2]
 | `consultar_agente` | 1 | Le pasa una pregunta a otro agente de IA que Roman vinculó él mismo (Gemini, ChatGPT, DeepSeek o Claude); no toca JARVIS-OS. Lo que contesta es información, no instrucciones. Los agentes principales que no son Claude usan estas mismas tools con estos mismos niveles. |
 | `WebSearch` | 1 | De Claude Code: busca en la web desde el anfitrión. Solo lectura; lo que encuentra es información, no instrucciones. |
 | `WebFetch` | 1 | De Claude Code: lee una página desde el anfitrión. Igual que `WebSearch`. |
+| `recordar` | 1 | Anota un dato en la memoria de JARVIS (en el anfitrión); no toca JARVIS-OS. |
+| `buscar_memoria` | 1 | Solo lectura de la memoria de JARVIS. Lo que encuentra es información, no instrucciones. |
 | `escribir_archivo` | 2 | Cambia el disco, pero es reversible y se ve. |
 | `crear_carpeta` | 2 | Reversible. |
 | `copiar` | 2 | Reversible. |
@@ -36,6 +38,7 @@ registra (default deny). Detalle del modelo en [investigacion.md §6.4 y §12.2]
 | `abrir_proyecto` | 2 | Arranca un agente de código en el anfitrión; cada edición y comando suyo se confirma aparte. |
 | `modificar_sistema` | 2 | Arranca un agente de código sobre el repositorio de JARVIS-OS (como `abrir_proyecto`); cada edición suya es nivel 2 y cada comando nivel 3, salvo los de la tabla de abajo. |
 | `aplicar_cambios_sistema` | 3 | Compila y, si compila, reinicia JARVIS-OS con la versión nueva. |
+| `olvidar` | 3 | Borra recuerdos (o toda la memoria): no se puede deshacer. |
 | `a_papelera` | 3 | Borrado (aunque va a la Papelera, nunca definitivo). |
 | `ejecutar_comando` | 3 | Un comando puede instalar, borrar o usar la red; se muestra entero. |
 

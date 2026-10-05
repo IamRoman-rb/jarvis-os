@@ -86,7 +86,9 @@ class CouncilBrain:
         kernel: Kernel,
         mode: Callable[[], Mode],
         voice: bool = False,
+        memory: Callable[[], str] | None = None,
     ) -> None:
+        self._memory = memory
         self._claude = claude
         self._hub = hub
         self._gate = Gate(kernel)
@@ -121,7 +123,8 @@ class CouncilBrain:
             async for delta in self._claude.reply(prompt):
                 yield delta
             return
-        system = build_prompt(self._voice) + NO_WEB_NOTE
+        memory = self._memory() if self._memory else ""
+        system = build_prompt(self._voice, memory=memory) + NO_WEB_NOTE
         try:
             answer = await self._hub.ask(agent, system, prompt, SPECS, self._run_tool)
         except AgentError as e:

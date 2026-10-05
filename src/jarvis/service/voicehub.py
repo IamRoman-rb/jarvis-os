@@ -2,7 +2,8 @@
 
 - Lo que se oye va al kernel como `oido{texto}`: la consola lo trata como si se hubiera escrito
   (una orden local o un pedido a Claude con `origen: voz`).
-- Mientras escucha, `escuchando{activo}`.
+- Mientras escucha sin la palabra de activación (después de "JARVIS" solo, Win+J o durante una
+  conversación: ver `voice/listener.py`), `escuchando{activo}`.
 - La respuesta a un pedido de voz se dice en voz alta, y el nivel del audio (`voz{nivel}`, ~20
   por segundo) mueve la esfera.
 - Si el kernel tiene parlantes (`hola{parlantes}`, K12), la voz la reproduce **JARVIS-OS**: se le
@@ -19,6 +20,8 @@ import threading
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from jarvis.voice.listener import Event
+
 log = logging.getLogger("jarvis.voz")
 
 
@@ -31,9 +34,7 @@ class VoiceLike(Protocol):
 
     def hush(self) -> None: ...
 
-    def run(
-        self, on_heard: Callable[[str], None], on_listening: Callable[[bool], None]
-    ) -> None: ...
+    def run(self, on_event: Callable[[Event], None]) -> None: ...
 
     def stop(self) -> None: ...
 
@@ -60,20 +61,23 @@ class VoiceHub:
     def start(self) -> None:
         def run() -> None:
             try:
-                self.voice.run(
-                    lambda text: self._post({"t": "oido", "texto": text}),
-                    self._listening,
-                )
+                self.voice.run(self.on_event)
             except Exception:
                 log.exception("la voz se detuvo")
 
         threading.Thread(target=run, name="jarvis-voz", daemon=True).start()
 
-    def _listening(self, on: bool) -> None:
-        self._post({"t": "escuchando", "activo": on})
-        if on:
+    def on_event(self, ev: Event) -> None:
+        """Desde el hilo del audio: lo que decidió `Listener`."""
+        if ev.kind == "orden":
+            self._post({"t": "oido", "texto": ev.text})
+        elif ev.kind == "activo":
+            self._post({"t": "escuchando", "activo": ev.on})
+        elif ev.kind == "si":
             # "JARVIS" solo: contesta, así Roman sabe que lo escuchó.
             asyncio.run_coroutine_threadsafe(self.speak("¿Sí?"), self.loop)
+        elif ev.kind == "fin":
+            asyncio.run_coroutine_threadsafe(self.speak("Cuando quieras."), self.loop)
 
     def listen_now(self) -> None:
         self.voice.listen_now()
