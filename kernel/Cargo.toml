@@ -25,3 +25,8 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 debug = 1
+
+# acpi 6.1.1 deja IndexField y BankField como `todo!()`, y el AML de VirtualBox los usa
+# (pánico al arrancar). Copia con eso implementado en vendor/acpi/src/aml/mod.rs.
+[patch.crates-io]
+acpi = { path = "vendor/acpi" }
