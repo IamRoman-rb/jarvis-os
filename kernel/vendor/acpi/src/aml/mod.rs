@@ -253,9 +253,24 @@ where
                         .evaluate_if_present(AmlName::from_str("_STA").unwrap().resolve(path)?, vec![])
                     {
                         Ok(Some(result)) => {
-                            let Object::Integer(result) = *result else { panic!() };
-                            let status = DeviceStatus(result);
-                            status.present() && status.functioning()
+                            // `_STA` may return a field or a buffer instead of an Integer.
+                            let result = match *result {
+                                Object::Integer(result) => Ok(result),
+                                Object::FieldUnit(ref field) => {
+                                    self.do_field_read(field).and_then(|value| value.as_integer())
+                                }
+                                ref other => other.to_integer(8),
+                            };
+                            match result {
+                                Ok(result) => {
+                                    let status = DeviceStatus(result);
+                                    status.present() && status.functioning()
+                                }
+                                Err(err) => {
+                                    warn!("_STA for device {} is not an integer: {:?}", path, err);
+                                    false
+                                }
+                            }
                         }
                         Ok(None) => true,
                         Err(err) => {
@@ -2310,12 +2325,20 @@ where
                     Object::Buffer(value) => {
                         unsafe { target.gain_mut(&token) }.write_buffer_field(value.as_slice(), &token)?;
                     }
-                    _ => panic!(),
+                    other => {
+                        return Err(AmlError::ObjectNotOfExpectedType {
+                            expected: ObjectType::Buffer,
+                            got: other.typ(),
+                        });
+                    }
                 },
                 Object::FieldUnit(field) => self.do_field_write(field, object)?,
                 Object::Reference { kind, inner } => {
                     match kind {
-                        ReferenceKind::RefOf => todo!(),
+                        // Store to a RefOf: overwrite the referenced object (ACPI 6.5, 19.3.5.5).
+                        ReferenceKind::RefOf | ReferenceKind::Unresolved => unsafe {
+                            *inner.gain_mut(&token) = object.gain_mut(&token).clone();
+                        },
                         ReferenceKind::LocalOrArg => {
                             if let Object::Reference { kind: _inner_kind, inner: inner_inner } = &**inner {
                                 // TODO: this should store into the reference, potentially doing an
@@ -2330,13 +2353,34 @@ where
                                 }
                             }
                         }
-                        ReferenceKind::Unresolved => todo!(),
                     }
                 }
                 Object::Debug => {
                     self.handler.handle_debug(&object);
                 }
-                _ => panic!("Stores to objects like {:?} are not yet supported", target),
+                /*
+                 * Stores to named Buffers and Strings convert the source to the target's type
+                 * (ACPI 6.5, 19.3.5.8). Anything else (Packages, uninitialized names...) is
+                 * overwritten with a copy of the source.
+                 */
+                Object::Buffer(target) => {
+                    let width = if self.dsdt_revision >= 2 { 8 } else { 4 };
+                    *target = unsafe { object.gain_mut(&token) }.to_buffer(width)?;
+                }
+                Object::String(target) => match unsafe { object.gain_mut(&token) } {
+                    Object::String(value) => *target = value.clone(),
+                    Object::Buffer(bytes) => {
+                        *target = bytes.iter().take_while(|&&b| b != 0).map(|&b| b as char).collect();
+                    }
+                    Object::Integer(value) => *target = alloc::format!("{value:X}"),
+                    other => {
+                        return Err(AmlError::ObjectNotOfExpectedType {
+                            expected: ObjectType::String,
+                            got: other.typ(),
+                        });
+                    }
+                },
+                target => *target = unsafe { object.gain_mut(&token) }.clone(),
             },
 
             Argument::Namestring(_) => todo!(),
