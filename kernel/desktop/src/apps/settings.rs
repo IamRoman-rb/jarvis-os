@@ -198,10 +198,9 @@ pub enum Opt {
     /// El agente principal (Claude, Gemini, ChatGPT o DeepSeek) y el consejo.
     AiLead,
     AiCouncil,
-    /// El agente N de `BrainService::agents`: vincularlo con Google, con el formulario (la
-    /// clave de API) o desvincularlo.
-    AiAgentGoogle(usize),
-    AiAgentKey(usize),
+    /// El agente N de `BrainService::agents`: vincularlo (con Google o en la PC, sin claves) o
+    /// desvincularlo.
+    AiAgentLink(usize),
     AiAgentUnlink(usize),
     SyncCode,
     SyncRelay,
@@ -1812,42 +1811,44 @@ impl Settings {
             ),
         ];
         for (i, a) in stats.brain_agents.iter().enumerate() {
+            // Sin claves de API: Gemini y ChatGPT con la cuenta de Google, DeepSeek en la PC.
+            let local = a.method == "local";
             let status = if a.linked {
-                let how = if a.method == "google" {
-                    tr("con Google")
+                let how = if local {
+                    tr("en esta PC")
                 } else {
-                    tr("con clave")
+                    tr("con Google")
                 };
                 format!("{how} · {}", a.detail)
             } else {
                 tr("sin vincular").into()
             };
             let detail = if a.state.is_empty() {
-                String::from(tr("Vinculalo con Google o con el formulario"))
+                String::from(tr("Sin claves: con tu cuenta de Google o en esta PC"))
             } else {
                 a.state.clone()
             };
             rows.push(Row::new(Opt::Info, a.name.clone(), detail, Value(status)));
-            rows.push(Row::new(
-                Opt::AiAgentGoogle(i),
-                trf("{}: iniciar sesión con Google", &[&a.name]),
-                tr("Abre el navegador de la PC para entrar"),
-                Button(tr("GOOGLE")),
-            ));
-            rows.push(Row::new(
-                Opt::AiAgentKey(i),
-                trf("{}: clave de API", &[&a.name]),
-                tr("Formulario: pegá la clave y Enter (se valida y se guarda en el anfitrión)"),
-                Text {
-                    value: String::new(),
-                    secret: true,
-                },
-            ));
+            rows.push(if local {
+                Row::new(
+                    Opt::AiAgentLink(i),
+                    trf("{}: correr en esta PC", &[&a.name]),
+                    tr("Con Ollama, sin cuenta ni clave (la primera vez baja el modelo)"),
+                    Button(tr("VINCULAR")),
+                )
+            } else {
+                Row::new(
+                    Opt::AiAgentLink(i),
+                    trf("{}: iniciar sesión con Google", &[&a.name]),
+                    tr("Abre el navegador de la PC para entrar"),
+                    Button(tr("GOOGLE")),
+                )
+            });
             if a.linked {
                 rows.push(Row::new(
                     Opt::AiAgentUnlink(i),
                     trf("Desvincular {}", &[&a.name]),
-                    tr("Borra la clave o la sesión guardada en el anfitrión"),
+                    tr("Borra la sesión guardada en el anfitrión"),
                     Button(tr("DESVINCULAR")),
                 ));
             }
@@ -2113,20 +2114,14 @@ impl Settings {
                 c.ai_lead = step(c.ai_lead as i32, crate::brain::AGENTS.len() as i32) as u8
             }
             Opt::AiCouncil => c.ai_council = !c.ai_council,
-            Opt::AiAgentGoogle(i) | Opt::AiAgentKey(i) | Opt::AiAgentUnlink(i) => {
+            Opt::AiAgentLink(i) | Opt::AiAgentUnlink(i) => {
                 let Some(a) = ctx.stats.brain_agents.get(i) else {
                     return;
                 };
                 let id = a.id.clone();
                 match opt {
-                    Opt::AiAgentGoogle(_) => {
-                        ctx.out.brain.push(crate::brain::BrainOp::AgentGoogle(id))
-                    }
-                    Opt::AiAgentUnlink(_) => {
-                        ctx.out.brain.push(crate::brain::BrainOp::AgentUnlink(id))
-                    }
-                    _ if delta == 0 => self.editing = Some((opt, TextInput::new("", 200))),
-                    _ => {}
+                    Opt::AiAgentLink(_) => ctx.out.brain.push(crate::brain::BrainOp::AgentLink(id)),
+                    _ => ctx.out.brain.push(crate::brain::BrainOp::AgentUnlink(id)),
                 }
                 return;
             }
@@ -2332,17 +2327,6 @@ impl Settings {
                 pmk: Some(pmk),
             });
             self.commit(ctx);
-            self.dirty = true;
-            return;
-        }
-        if let Opt::AiAgentKey(i) = opt {
-            // La clave va directo al anfitrión: en la configuración de JARVIS-OS no queda.
-            let key = input.text.trim().to_string();
-            if let (Some(a), false) = (ctx.stats.brain_agents.get(i), key.is_empty()) {
-                ctx.out
-                    .brain
-                    .push(crate::brain::BrainOp::AgentKey(a.id.clone(), key));
-            }
             self.dirty = true;
             return;
         }

@@ -227,8 +227,8 @@ static EN: &[(&str, &str)] = &[
         "Borders, active icons, the text cursor and the sphere",
     ),
     (
-        "Borra la clave o la sesión guardada en el anfitrión",
-        "Deletes the key or session stored on the host",
+        "Borra la sesión guardada en el anfitrión",
+        "Deletes the session saved on the host",
     ),
     (
         "Borra para siempre lo que hay en /Papelera",
@@ -295,6 +295,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Colores de todo el sistema: ventanas, menús y el escritorio",
         "Colors of the whole system: windows, menus and the desktop",
+    ),
+    (
+        "Con Ollama, sin cuenta ni clave (la primera vez baja el modelo)",
+        "With Ollama, no account or key (the first time it downloads the model)",
     ),
     ("Con varios monitores", "With several monitors"),
     ("Conectada", "Connected"),
@@ -437,10 +441,6 @@ static EN: &[(&str, &str)] = &[
     ("Enter guarda · Esc cancela", "Enter saves · Esc cancels"),
     ("Enter para abrir la carpeta", "Enter to open the folder"),
     (
-        "Enviando la clave al anfitrión...",
-        "Sending the key to the host...",
-    ),
-    (
         "Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3).",
         "That network uses a security JARVIS-OS does not support (WEP, WPA or WPA3).",
     ),
@@ -478,10 +478,6 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Fondo de escritorio", "Desktop background"),
     ("Formato de 24 horas", "24-hour format"),
-    (
-        "Formulario: pegá la clave y Enter (se valida y se guarda en el anfitrión)",
-        "Form: paste the key and press Enter (it is checked and stored on the host)",
-    ),
     ("GENERAR", "GENERATE"),
     ("GOOGLE", "GOOGLE"),
     ("GUARDAR COMO", "SAVE AS"),
@@ -859,6 +855,10 @@ static EN: &[(&str, &str)] = &[
         "Otherwise, 12 hours with a.m. / p.m.",
     ),
     ("Siempre", "Always"),
+    (
+        "Sin claves: con tu cuenta de Google o en esta PC",
+        "No keys: with your Google account or on this PC",
+    ),
     ("Sin conectar", "Not connected"),
     (
         "Sin conexión con el relé (reintenta sola)",
@@ -965,6 +965,7 @@ static EN: &[(&str, &str)] = &[
     ("VACIAR LA PAPELERA", "EMPTY TRASH"),
     ("VENTANA (ALT+ESPACIO)", "WINDOW (ALT+SPACE)"),
     ("VER", "VIEW"),
+    ("VINCULAR", "LINK"),
     ("VISTA PREVIA", "PREVIEW"),
     ("Vaciar la Papelera", "Empty the Trash"),
     ("Velocidad de las animaciones", "Animation speed"),
@@ -978,10 +979,7 @@ static EN: &[(&str, &str)] = &[
     ("Verde", "Green"),
     ("Versión", "Version"),
     ("Videos (.avi)", "Videos (.avi)"),
-    (
-        "Vinculalo con Google o con el formulario",
-        "Link it with Google or with the form",
-    ),
+    ("Vinculando en el anfitrión...", "Linking on the host..."),
     ("Violeta", "Violet"),
     ("Visor", "Viewer"),
     ("Visor de imágenes", "Image viewer"),
@@ -1012,7 +1010,6 @@ static EN: &[(&str, &str)] = &[
     ("audio", "audio"),
     ("carpeta", "folder"),
     ("con Google", "with Google"),
-    ("con clave", "with key"),
     ("con sesión", "signed in"),
     ("conectado", "connected"),
     ("contraseña incorrecta", "wrong password"),
@@ -1029,6 +1026,7 @@ static EN: &[(&str, &str)] = &[
         "the access point does not answer",
     ),
     ("en ejecución", "running"),
+    ("en esta PC", "on this PC"),
     ("en pausa (espacio sigue)", "paused (space resumes)"),
     (
         "en una PC Intel se lee de la CPU.",
@@ -1201,8 +1199,8 @@ static PT: &[(&str, &str)] = &[
         "Bordas, ícones ativos, o cursor de texto e a esfera",
     ),
     (
-        "Borra la clave o la sesión guardada en el anfitrión",
-        "Apaga a chave ou a sessão guardada no anfitrião",
+        "Borra la sesión guardada en el anfitrión",
+        "Apaga a sessão salva no anfitrião",
     ),
     (
         "Borra para siempre lo que hay en /Papelera",
@@ -1275,6 +1273,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Colores de todo el sistema: ventanas, menús y el escritorio",
         "Cores de todo o sistema: janelas, menus e a área de trabalho",
+    ),
+    (
+        "Con Ollama, sin cuenta ni clave (la primera vez baja el modelo)",
+        "Com Ollama, sem conta nem chave (na primeira vez baixa o modelo)",
     ),
     ("Con varios monitores", "Com vários monitores"),
     ("Conectada", "Conectada"),
@@ -1423,10 +1425,6 @@ static PT: &[(&str, &str)] = &[
     ("Enter guarda · Esc cancela", "Enter salva · Esc cancela"),
     ("Enter para abrir la carpeta", "Enter para abrir a pasta"),
     (
-        "Enviando la clave al anfitrión...",
-        "Enviando a chave ao anfitrião...",
-    ),
-    (
         "Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3).",
         "Essa rede usa uma segurança que o JARVIS-OS não suporta (WEP, WPA ou WPA3).",
     ),
@@ -1464,10 +1462,6 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Fondo de escritorio", "Papel de parede"),
     ("Formato de 24 horas", "Formato de 24 horas"),
-    (
-        "Formulario: pegá la clave y Enter (se valida y se guarda en el anfitrión)",
-        "Formulário: cole a chave e Enter (é validada e guardada no anfitrião)",
-    ),
     ("GENERAR", "GERAR"),
     ("GOOGLE", "GOOGLE"),
     ("GUARDAR COMO", "SALVAR COMO"),
@@ -1860,6 +1854,10 @@ static PT: &[(&str, &str)] = &[
         "Se não, 12 horas com a.m. / p.m.",
     ),
     ("Siempre", "Sempre"),
+    (
+        "Sin claves: con tu cuenta de Google o en esta PC",
+        "Sem chaves: com sua conta Google ou neste PC",
+    ),
     ("Sin conectar", "Sem conexão"),
     (
         "Sin conexión con el relé (reintenta sola)",
@@ -1966,6 +1964,7 @@ static PT: &[(&str, &str)] = &[
     ("VACIAR LA PAPELERA", "ESVAZIAR A LIXEIRA"),
     ("VENTANA (ALT+ESPACIO)", "JANELA (ALT+ESPAÇO)"),
     ("VER", "VER"),
+    ("VINCULAR", "VINCULAR"),
     ("VISTA PREVIA", "PRÉ-VISUALIZAÇÃO"),
     ("Vaciar la Papelera", "Esvaziar a Lixeira"),
     ("Velocidad de las animaciones", "Velocidade das animações"),
@@ -1980,8 +1979,8 @@ static PT: &[(&str, &str)] = &[
     ("Versión", "Versão"),
     ("Videos (.avi)", "Vídeos (.avi)"),
     (
-        "Vinculalo con Google o con el formulario",
-        "Vincule com o Google ou com o formulário",
+        "Vinculando en el anfitrión...",
+        "Vinculando no anfitrião...",
     ),
     ("Violeta", "Violeta"),
     ("Visor", "Visualizador"),
@@ -2016,7 +2015,6 @@ static PT: &[(&str, &str)] = &[
     ("audio", "áudio"),
     ("carpeta", "pasta"),
     ("con Google", "com o Google"),
-    ("con clave", "com chave"),
     ("con sesión", "conectado"),
     ("conectado", "conectado"),
     ("contraseña incorrecta", "senha incorreta"),
@@ -2033,6 +2031,7 @@ static PT: &[(&str, &str)] = &[
         "o ponto de acesso não responde",
     ),
     ("en ejecución", "em execução"),
+    ("en esta PC", "neste PC"),
     ("en pausa (espacio sigue)", "em pausa (espaço continua)"),
     (
         "en una PC Intel se lee de la CPU.",
@@ -2225,7 +2224,7 @@ static EN_F: &[(&str, &str)] = &[
         "{} · has partitions: left untouched",
     ),
     ("{} · vacío", "{} · empty"),
-    ("{}: clave de API", "{}: API key"),
+    ("{}: correr en esta PC", "{}: run on this PC"),
     ("{}: iniciar sesión con Google", "{}: sign in with Google"),
     ("{}{} · Editor", "{}{} · Editor"),
     ("¿Mover \"{}\" a la Papelera?", "Move \"{}\" to the Trash?"),
@@ -2379,7 +2378,7 @@ static PT_F: &[(&str, &str)] = &[
         "{} · tem partições: não é tocado",
     ),
     ("{} · vacío", "{} · vazio"),
-    ("{}: clave de API", "{}: chave de API"),
+    ("{}: correr en esta PC", "{}: rodar neste PC"),
     ("{}: iniciar sesión con Google", "{}: entrar com o Google"),
     ("{}{} · Editor", "{}{} · Editor"),
     (

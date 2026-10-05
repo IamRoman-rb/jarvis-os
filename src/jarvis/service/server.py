@@ -243,19 +243,18 @@ class Session:
             if only is None or m["id"] == only:
                 await self.send(m)
 
-    async def _link(self, agent: str, metodo: str, key: str) -> None:
+    async def _link(self, agent: str) -> None:
         hub = self.host.agents if self.host else None
         if hub is None:
             return
         try:
-            if metodo == "clave":
-                hub.estados[agent] = "Validando la clave..."
-                await self.send_agents(agent)
-                await hub.link_key(agent, key)
-            else:
-                hub.estados[agent] = "Seguí en el navegador de la PC (entrá con Google)."
-                await self.send_agents(agent)
-                await hub.link_google(agent)
+            hub.estados[agent] = (
+                "Preparándolo en esta PC (con Ollama)..."
+                if PROVIDERS[agent].metodo == "local"
+                else "Seguí en el navegador de la PC (entrá con Google)."
+            )
+            await self.send_agents(agent)
+            await hub.link(agent)
         except AgentError as e:
             hub.estados[agent] = str(e)
         except Exception as e:  # el kernel tiene que enterarse de cualquier falla
@@ -455,7 +454,7 @@ class Session:
         elif t == "agentes_modo":
             self.set_mode(msg)
         elif t == "vincular":
-            agent, metodo = msg.get("agente"), msg.get("metodo")
+            agent = msg.get("agente")
             hub = self.host.agents if self.host else None
             if hub is None or agent not in PROVIDERS:
                 raise ProtocolError("vincular: agente desconocido")
@@ -464,10 +463,9 @@ class Session:
                 hub.estados[agent] = "Ya hay un inicio de sesión en curso."
                 await self.send_agents(agent)
                 return
-            key = msg.get("clave")
-            self._linking[agent] = self._spawn(
-                self._link(agent, "clave" if metodo == "clave" else "google", str(key or ""))
-            )
+            # Sin claves de API: cada agente se vincula de una sola manera (con Google o en la
+            # PC). Un kernel viejo que mande una clave igual pasa por ahí.
+            self._linking[agent] = self._spawn(self._link(agent))
         elif t == "desvincular":
             agent = msg.get("agente")
             hub = self.host.agents if self.host else None

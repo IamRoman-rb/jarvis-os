@@ -8,12 +8,15 @@ Roman elige en Configuración → Asistente el **agente principal** y si quiere 
   pedido; el principal recibe esas opiniones (como información, no como órdenes) y decide.
 - Sin el consejo, el principal igual puede preguntarle a otro con la tool `consultar_agente`.
 - Si el principal falla (sin sesión, sin red, sin saldo), contesta el siguiente que funcione.
+  Si se quedó **sin uso** (Claude llegó al límite de su cuenta), se lo saltea por un rato
+  ([`EXHAUSTED_FOR`]): los demás siguen contestando y actuando, y después se vuelve a probar.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
@@ -26,6 +29,8 @@ log = logging.getLogger("jarvis.consejo")
 
 #: Lo que se espera la opinión de cada agente del consejo.
 ADVISOR_TIMEOUT = 45.0
+#: Un agente sin uso (el límite de su cuenta) se saltea este rato antes de volver a probarlo.
+EXHAUSTED_FOR = 15 * 60.0
 
 LEADS = ("claude", *PROVIDERS)
 
@@ -76,6 +81,22 @@ async def ask_claude(model: str | None, system: str, prompt: str) -> str:
     return "".join(parts).strip()
 
 
+def _out_of_usage(error: str) -> bool:
+    """¿El error de un agente dice que se quedó sin uso (límite de la cuenta o de pedidos)?"""
+    low = error.lower()
+    return any(
+        w in low
+        for w in (
+            "quota",
+            "rate limit",
+            "usage limit",
+            "resource_exhausted",
+            "429",
+            "limit reached",
+        )
+    )
+
+
 class CouncilBrain:
     """Un `Brain` que reparte el pedido entre los agentes (ver el comentario del módulo)."""
 
@@ -87,19 +108,29 @@ class CouncilBrain:
         mode: Callable[[], Mode],
         voice: bool = False,
         memory: Callable[[], str] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._memory = memory
+        self._clock = clock
+        #: Hasta cuándo se saltea a cada agente que se quedó sin uso.
+        self._exhausted: dict[str, float] = {}
         self._claude = claude
         self._hub = hub
         self._gate = Gate(kernel)
         self._mode = mode
         self._voice = voice
 
+    def resting(self, agent: str) -> bool:
+        """¿Se quedó sin uso hace poco? (se lo saltea)"""
+        return self._exhausted.get(agent, 0.0) > self._clock()
+
     def _order(self, lead: str, linked: list[str]) -> list[str]:
-        """Quién contesta: el principal y, si falla, los demás (Claude primero)."""
+        """Quién contesta: el principal y, si falla, los demás (Claude primero). Los que se
+        quedaron sin uso van al final (por si son los únicos)."""
         rest = ["claude", *linked]
         first = lead if lead == "claude" or lead in linked else "claude"
-        return [first, *[a for a in rest if a != first]]
+        order = [first, *[a for a in rest if a != first]]
+        return [a for a in order if not self.resting(a)] + [a for a in order if self.resting(a)]
 
     async def _opinions(self, text: str, advisors: list[str]) -> list[tuple[str, str]]:
         async def one(agent: str) -> tuple[str, str] | None:
@@ -128,7 +159,7 @@ class CouncilBrain:
         try:
             answer = await self._hub.ask(agent, system, prompt, SPECS, self._run_tool)
         except AgentError as e:
-            raise BrainError(str(e)) from e
+            raise BrainError(str(e), agotado=_out_of_usage(str(e))) from e
         if not answer:
             raise BrainError(f"{agent_name(agent)} no contestó nada.")
         yield answer
@@ -137,8 +168,15 @@ class CouncilBrain:
         mode = self._mode()
         linked = self._hub.linked()
         order = self._order(mode.principal, linked)
-        advisors = [a for a in linked if a != order[0]] if mode.consejo else []
-        if mode.consejo and order[0] != "claude" and self._hub.claude is not None:
+        advisors = (
+            [a for a in linked if a != order[0] and not self.resting(a)] if mode.consejo else []
+        )
+        if (
+            mode.consejo
+            and order[0] != "claude"
+            and self._hub.claude is not None
+            and not self.resting("claude")
+        ):
             # Claude opina con una consulta suelta (su conversación es la de JARVIS principal).
             advisors.insert(0, "claude")
         opinions = await self._opinions(text, advisors) if advisors else []
@@ -158,7 +196,11 @@ class CouncilBrain:
                 if started:
                     raise
                 log.warning("%s no pudo contestar: %s", agent, e)
-                errors.append(f"{agent_name(agent)} no pudo contestar")
+                if e.agotado:
+                    self._exhausted[agent] = self._clock() + EXHAUSTED_FOR
+                    errors.append(f"{agent_name(agent)} se quedó sin uso por ahora")
+                else:
+                    errors.append(f"{agent_name(agent)} no pudo contestar")
         raise BrainError("Ningún agente pudo contestar: " + "; ".join(errors))
 
     async def interrupt(self) -> None:

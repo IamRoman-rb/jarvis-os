@@ -21,7 +21,23 @@ from jarvis.tools.system import Gate, Kernel, build_server
 
 
 class BrainError(RuntimeError):
-    """El cerebro no pudo responder (sin Claude Code, sin sesión, error del modelo)."""
+    """El cerebro no pudo responder (sin Claude Code, sin sesión, error del modelo).
+
+    `agotado`: se quedó sin uso (el límite de la cuenta o sin saldo). No tiene sentido volver a
+    probar enseguida: el cerebro conjunto sigue con otro agente por un rato."""
+
+    def __init__(self, msg: str, agotado: bool = False) -> None:
+        super().__init__(msg)
+        self.agotado = agotado
+
+
+#: Los errores de Claude que quieren decir "sin uso por ahora".
+OUT_OF_USAGE = ("rate_limit", "billing_error")
+#: Lo que dice Claude Code cuando se acabó el uso (versiones que no marcan el error).
+OUT_OF_USAGE_TEXT = re.compile(
+    r"usage limit|hit your limit|limit reached|credit balance is too low|out of (extra )?usage",
+    re.IGNORECASE,
+)
 
 
 class Brain(Protocol):
@@ -111,13 +127,23 @@ class ClaudeBrain:
                 if delta.get("type") == "text_delta" and delta.get("text"):
                     streamed = True
                     yield delta["text"]
+            elif isinstance(msg, AssistantMessage) and msg.error is not None:
+                # Sin uso (o sin sesión): antes de mostrar nada, así contesta otro agente.
+                text = "".join(b.text for b in msg.content if isinstance(b, TextBlock))
+                raise BrainError(_claude_error(msg.error, text), agotado=msg.error in OUT_OF_USAGE)
             elif isinstance(msg, AssistantMessage) and not streamed:
-                # Sin eventos parciales (versiones viejas del CLI): el mensaje entero.
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        yield block.text
+                # Sin eventos parciales (el mensaje del límite llega así): el mensaje entero.
+                text = "".join(b.text for b in msg.content if isinstance(b, TextBlock))
+                if OUT_OF_USAGE_TEXT.search(text) and len(text) < 300:
+                    raise BrainError(_claude_error("rate_limit", text), agotado=True)
+                if text:
+                    yield text
             elif isinstance(msg, ResultMessage) and msg.is_error:
-                raise BrainError(str(msg.result or "Claude devolvió un error"))
+                result = str(msg.result or "Claude devolvió un error")
+                raise BrainError(
+                    result,
+                    agotado=msg.api_error_status == 429 or bool(OUT_OF_USAGE_TEXT.search(result)),
+                )
 
     async def interrupt(self) -> None:
         if self._client is not None:
@@ -127,6 +153,12 @@ class ClaudeBrain:
         if self._client is not None:
             await self._client.disconnect()
             self._client = None
+
+
+def _claude_error(kind: str, text: str) -> str:
+    if kind in OUT_OF_USAGE:
+        return "Claude se quedó sin uso por ahora" + (f" ({text.strip()})" if text.strip() else "")
+    return f"Claude: {text.strip() or kind}"
 
 
 # Respuestas del cerebro simulado: la primera clave contenida en el pedido gana.

@@ -1,19 +1,20 @@
-"""Los otros agentes de IA que se vinculan a JARVIS: Gemini, ChatGPT y DeepSeek.
+"""Los otros agentes de IA que se vinculan a JARVIS: Gemini, ChatGPT y DeepSeek. Sin claves de
+API: se entra con la cuenta (Google) o el modelo corre en la PC.
 
-Cada uno se vincula de dos maneras (Configuración → Asistente de JARVIS-OS):
+- **Gemini**: con la cuenta de Google, por Gemini CLI (el programa oficial de Google). Al
+  vincularlo abre el navegador de la PC para entrar; las credenciales las guarda ese programa,
+  nunca pasan por JARVIS.
+- **ChatGPT**: con la cuenta de ChatGPT, por Codex CLI (el programa oficial de OpenAI). La
+  página para entrar ofrece "Continuar con Google".
+- **DeepSeek**: no tiene un programa para entrar con Google (su API solo funciona con claves).
+  Corre **en la PC**, con Ollama: el modelo abierto de DeepSeek, sin cuenta ni clave.
 
-- **Con Google**: se lanza en el anfitrión el programa oficial del proveedor, que abre el
-  navegador para entrar (Gemini CLI con la cuenta de Google; Codex CLI con la de ChatGPT, que
-  ofrece "Continuar con Google"). Las credenciales las guarda ese programa, nunca pasan por
-  JARVIS. DeepSeek no tiene un programa así: se abre su página de claves (se entra con Google) y
-  la clave se pega en el formulario.
-- **Con el formulario**: una clave de API. Se valida contra el proveedor y se guarda en el
-  anfitrión (`agentes.json` en la carpeta de configuración, solo legible por el usuario); al
-  kernel solo le llegan los últimos 4 caracteres.
+Los tres son parte del cerebro: tienen las mismas tools de JARVIS que Claude, con los mismos
+permisos. Gemini y ChatGPT las usan por MCP a través del puente del cerebro (`toolbridge`), con
+las herramientas propias de esos programas apagadas (salvo leer la web: no tocan la PC);
+DeepSeek, por la API local de Ollama.
 
-Con clave, el agente habla por la API y puede usar las tools de JARVIS (function calling), con
-los mismos permisos que Claude. Con Google, habla por el programa del proveedor y solo contesta
-texto.
+Las claves de API de antes quedan en `agentes.json` pero ya no se usan.
 """
 
 from __future__ import annotations
@@ -23,7 +24,9 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shutil
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -35,67 +38,69 @@ from typing import Any, Protocol
 
 from platformdirs import user_config_path
 
+from jarvis.agent import toolbridge
 from jarvis.protocol import Message
 
 log = logging.getLogger("jarvis.agentes")
 
 #: Lo que se espera a que Roman termine de entrar en el navegador.
 LOGIN_TIMEOUT = 300.0
-#: Lo que puede tardar una respuesta (con tools, cada vuelta).
+#: Lo que puede tardar bajar el modelo local (unos GB).
+PULL_TIMEOUT = 3600.0
+#: Lo que puede tardar una respuesta (con tools, cada vuelta en la API; todo, en los programas).
 ASK_TIMEOUT = 90.0
+CLI_TIMEOUT = 240.0
 #: Vueltas de tools como máximo por pedido (para que un modelo no quede en un bucle).
 MAX_ROUNDS = 8
+#: Ollama, en la PC.
+OLLAMA = "http://127.0.0.1:11434"
 
 
 class AgentError(RuntimeError):
-    """El agente no pudo vincularse o responder (sin clave, clave inválida, sin red...)."""
+    """El agente no pudo vincularse o responder (sin sesión, sin el programa, sin red...)."""
 
 
 @dataclass(frozen=True)
 class Provider:
     id: str
     nombre: str
-    #: "openai" (ChatGPT y DeepSeek hablan el mismo formato) o "gemini".
-    api: str
-    base_url: str
-    modelo: str
-    #: Dónde se crea una clave de API (se entra con Google).
-    claves_url: str
-    #: El programa del anfitrión para entrar con Google ("" = no hay: se abre `claves_url`).
+    #: "google" (un programa del anfitrión con la cuenta) o "local" (Ollama en la PC).
+    metodo: str
+    #: El programa del anfitrión (gemini, codex, ollama).
     cli: str
     #: Cómo se instala ese programa (para decírselo a Roman si falta).
-    instalar: str = ""
+    instalar: str
+    #: Dónde se baja, si falta (se abre en el navegador).
+    pagina: str
+    #: El modelo (solo el local; los otros usan el de su programa).
+    modelo: str = ""
 
 
 PROVIDERS: dict[str, Provider] = {
     "gemini": Provider(
         "gemini",
         "Gemini",
-        "gemini",
-        "https://generativelanguage.googleapis.com/v1beta",
-        "gemini-2.5-flash",
-        "https://aistudio.google.com/apikey",
+        "google",
         "gemini",
         "npm install -g @google/gemini-cli",
+        "https://github.com/google-gemini/gemini-cli",
     ),
     "chatgpt": Provider(
         "chatgpt",
         "ChatGPT",
-        "openai",
-        "https://api.openai.com/v1",
-        "gpt-5-mini",
-        "https://platform.openai.com/api-keys",
+        "google",
         "codex",
         "npm install -g @openai/codex",
+        "https://github.com/openai/codex",
     ),
     "deepseek": Provider(
         "deepseek",
         "DeepSeek",
-        "openai",
-        "https://api.deepseek.com",
-        "deepseek-chat",
-        "https://platform.deepseek.com/api_keys",
-        "",
+        "local",
+        "ollama",
+        "https://ollama.com/download",
+        "https://ollama.com/download",
+        "deepseek-r1:8b",
     ),
 }
 
@@ -112,50 +117,43 @@ def provider(agent: str) -> Provider:
 
 @dataclass(frozen=True)
 class Link:
-    #: "clave" (API) o "google" (el programa del proveedor).
+    #: "google" o "local".
     metodo: str
-    clave: str = ""
-    #: Con quién se entró (con Google), si se sabe.
-    email: str = ""
+    #: Con quién se entró (con Google) o el modelo (local).
+    detalle: str = ""
 
     def detail(self) -> str:
-        """Lo que ve el kernel: nunca la clave entera."""
-        if self.metodo == "clave":
-            return f"clave ...{self.clave[-4:]}" if len(self.clave) >= 8 else "clave"
-        return self.email or "Google"
+        """Lo que ve el kernel."""
+        if self.metodo == "local":
+            return f"en esta PC ({self.detalle})" if self.detalle else "en esta PC"
+        return self.detalle or "Google"
 
 
 class Vault:
-    """Los vínculos, en `agentes.json` (carpeta de configuración del usuario, modo 600)."""
+    """Los vínculos, en `agentes.json` (carpeta de configuración del usuario, modo 600). Las
+    claves de API de antes se dejan como están, pero no se usan."""
 
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or user_config_path("jarvis") / "agentes.json"
 
-    def load(self) -> dict[str, Link]:
+    def _raw(self) -> dict[str, Any]:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
-        if not isinstance(data, dict):
-            return {}
+        return data if isinstance(data, dict) else {}
+
+    def load(self) -> dict[str, Link]:
         links = {}
-        for agent, v in data.items():
-            if (
-                agent in PROVIDERS
-                and isinstance(v, dict)
-                and v.get("metodo") in ("clave", "google")
-            ):
-                links[agent] = Link(
-                    str(v["metodo"]), str(v.get("clave", "")), str(v.get("email", ""))
-                )
+        for agent, v in self._raw().items():
+            p = PROVIDERS.get(agent)
+            if p is not None and isinstance(v, dict) and v.get("metodo") == p.metodo:
+                # "email" era el nombre del campo antes.
+                links[agent] = Link(p.metodo, str(v.get("detalle") or v.get("email") or ""))
         return links
 
-    def _save(self, links: dict[str, Link]) -> None:
+    def _save(self, data: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            a: {"metodo": lk.metodo, "clave": lk.clave, "email": lk.email}
-            for a, lk in links.items()
-        }
         tmp = self.path.with_suffix(".tmp")
         # Solo el usuario lo puede leer (en Windows, la carpeta del perfil ya es privada).
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -164,14 +162,14 @@ class Vault:
         os.replace(tmp, self.path)
 
     def set(self, agent: str, link: Link) -> None:
-        links = self.load()
-        links[agent] = link
-        self._save(links)
+        data = self._raw()
+        data[agent] = {"metodo": link.metodo, "detalle": link.detalle}
+        self._save(data)
 
     def remove(self, agent: str) -> None:
-        links = self.load()
-        if links.pop(agent, None) is not None:
-            self._save(links)
+        data = self._raw()
+        if data.pop(agent, None) is not None:
+            self._save(data)
 
 
 # --- HTTP y programas del anfitrión (inyectables para los tests) --------------------------
@@ -186,7 +184,7 @@ class Http(Protocol):
 
 
 class UrllibHttp:
-    """HTTP con la biblioteca estándar, en un hilo (las APIs son todas HTTPS fijas)."""
+    """HTTP con la biblioteca estándar, en un hilo. Solo a Ollama, en la PC."""
 
     async def request(
         self, method: str, url: str, headers: dict[str, str], body: Any = None
@@ -195,19 +193,19 @@ class UrllibHttp:
 
     @staticmethod
     def _request(method: str, url: str, headers: dict[str, str], body: Any) -> tuple[int, Any]:
-        if not url.startswith("https://"):
-            raise AgentError("solo HTTPS")
+        if not url.startswith(OLLAMA + "/"):
+            raise AgentError("solo a Ollama, en esta PC")
         data = None if body is None else json.dumps(body).encode()
-        req = urllib.request.Request(  # noqa: S310 (siempre https://, ver arriba)
+        req = urllib.request.Request(  # noqa: S310 (siempre Ollama local, ver arriba)
             url, data=data, method=method, headers={"Content-Type": "application/json", **headers}
         )
         try:
-            with urllib.request.urlopen(req, timeout=ASK_TIMEOUT) as r:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=CLI_TIMEOUT) as r:  # noqa: S310
                 status, raw = r.status, r.read()
         except urllib.error.HTTPError as e:
             status, raw = e.code, e.read()
         except (urllib.error.URLError, TimeoutError, OSError) as e:
-            raise AgentError(f"sin conexión con el proveedor ({e})") from e
+            raise AgentError(f"Ollama no está andando en la PC ({e})") from e
         text = raw.decode("utf-8", "replace")
         try:
             return status, json.loads(text)
@@ -251,7 +249,7 @@ def _error_text(data: Any) -> str:
     return str(data)[:200]
 
 
-# --- Las tools en el formato de cada proveedor ---------------------------------------------
+# --- Las tools en el formato de cada uno ------------------------------------------------------
 
 #: (nombre, descripción, parámetros), como `tools.system.SPECS`.
 ToolSpec = tuple[str, str, dict[str, type]]
@@ -276,14 +274,74 @@ def openai_tools(specs: list[ToolSpec]) -> list[dict[str, Any]]:
     ]
 
 
-def gemini_tools(specs: list[ToolSpec]) -> list[dict[str, Any]]:
-    decls = []
-    for n, d, p in specs:
-        decl: dict[str, Any] = {"name": n, "description": d}
-        if p:
-            decl["parameters"] = _schema(p)
-        decls.append(decl)
-    return [{"functionDeclarations": decls}]
+#: Las herramientas propias de Gemini CLI que se apagan: todo lo que toca la PC (la terminal y
+#: los archivos) o no sirve acá. Quedan las de leer la web (como Claude).
+GEMINI_EXCLUDED_TOOLS = [
+    "run_shell_command",
+    "write_file",
+    "replace",
+    "edit",
+    "read_file",
+    "read_many_files",
+    "list_directory",
+    "glob",
+    "grep_search",
+    "search_file_content",
+    "save_memory",
+    "write_todos",
+    "codebase_investigator",
+    "activate_skill",
+    "get_internal_docs",
+    "cli_help",
+    "enter_plan_mode",
+    "exit_plan_mode",
+    "complete_task",
+    "ask_user",
+]
+
+
+def gemini_extension() -> dict[str, Any]:
+    """La extensión de Gemini CLI para JARVIS (`~/.gemini/extensions/jarvis`): el servidor MCP
+    con las tools de JARVIS y las herramientas propias de Gemini apagadas. El puente le llega por
+    la variable de entorno (Gemini la reemplaza al lanzar el servidor)."""
+    return {
+        "name": "jarvis",
+        "version": "1.0.0",
+        "mcpServers": {
+            "jarvis": {
+                "command": sys.executable,
+                "args": ["-m", "jarvis.agent.mcp_proxy"],
+                "env": {toolbridge.ENV: "${" + toolbridge.ENV + "}"},
+                # Sin la confirmación de Gemini: los permisos los pide JARVIS (el Gate).
+                "trust": True,
+            }
+        },
+        "excludeTools": GEMINI_EXCLUDED_TOOLS,
+    }
+
+
+def gemini_home() -> Path:
+    return Path.home() / ".gemini"
+
+
+def codex_profile(with_tools: bool) -> str:
+    """El perfil de Codex para JARVIS (`-p`): sin su terminal, sin pedir aprobación (no puede
+    preguntarle a nadie) y, con tools, el servidor MCP de JARVIS. El puente le llega por la
+    variable de entorno (`env_vars`): así nada raro pasa por la línea de comandos."""
+    lines = ['approval_policy = "never"', "", "[features]", "shell_tool = false"]
+    if with_tools:
+        lines += [
+            "",
+            "[mcp_servers.jarvis]",
+            f"command = {json.dumps(sys.executable)}",
+            'args = ["-m", "jarvis.agent.mcp_proxy"]',
+            f'env_vars = ["{toolbridge.ENV}"]',
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def codex_home() -> Path:
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 
 
 # --- Los agentes -----------------------------------------------------------------------------
@@ -296,7 +354,7 @@ class AgentHub:
     vault: Vault = field(default_factory=Vault)
     http: Http = field(default_factory=UrllibHttp)
     cli: CliRunner = run_cli
-    #: Modelos elegidos en `config.toml` (`[agentes]`), por agente.
+    #: Modelos elegidos en `config.toml` (`[agentes]`), por agente (solo el local).
     modelos: dict[str, str] = field(default_factory=dict)
     #: El estado del último intento de vincular, por agente (lo ve Roman).
     estados: dict[str, str] = field(default_factory=dict)
@@ -304,6 +362,9 @@ class AgentHub:
     open_url: Callable[[str], Any] = webbrowser.open
     #: Claude como consultado (sin tools): (sistema, pedido) → respuesta. None = no se consulta.
     claude: Callable[[str, str], Awaitable[str]] | None = None
+    #: Dónde van los perfiles de Codex y la extensión de Gemini (inyectables para los tests).
+    codex_dir: Callable[[], Path] = codex_home
+    gemini_dir: Callable[[], Path] = gemini_home
 
     def linked(self) -> list[str]:
         """Los vinculados, en el orden de `PROVIDERS`."""
@@ -318,7 +379,7 @@ class AgentHub:
             "id": agent,
             "nombre": provider(agent).nombre,
             "vinculado": link is not None,
-            "metodo": link.metodo if link else "",
+            "metodo": provider(agent).metodo,
             "detalle": link.detail() if link else "",
             "estado": self.estados.get(agent, ""),
         }
@@ -329,52 +390,37 @@ class AgentHub:
     def _model(self, p: Provider) -> str:
         return self.modelos.get(p.id) or p.modelo
 
+    def _program(self, p: Provider) -> str:
+        cli = self.which(p.cli)
+        if cli is None:
+            self.open_url(p.pagina)
+            raise AgentError(
+                f"No encontré {p.cli} en la PC: instalalo ({p.instalar}) y volvé a vincular. "
+                "Te abrí la página en el navegador."
+            )
+        return cli
+
     # Vincular ------------------------------------------------------------------------------
 
-    async def link_key(self, agent: str, key: str) -> None:
-        """El formulario: valida la clave contra el proveedor y la guarda."""
+    async def link(self, agent: str) -> None:
+        """Vincula el agente como corresponde (con Google o en la PC)."""
         p = provider(agent)
-        key = key.strip()
-        if len(key) < 8 or any(c.isspace() for c in key):
-            raise AgentError("Esa no parece una clave de API.")
-        if p.api == "gemini":
-            status, data = await self.http.request(
-                "GET", f"{p.base_url}/models?pageSize=1", {"x-goog-api-key": key}
-            )
+        if p.metodo == "local":
+            await self._link_local(p)
         else:
-            status, data = await self.http.request(
-                "GET", f"{p.base_url}/models", {"Authorization": f"Bearer {key}"}
-            )
-        if status in (400, 401, 403):
-            raise AgentError(f"{p.nombre} rechazó la clave: {_error_text(data)}")
-        if status >= 300:
-            raise AgentError(f"{p.nombre} contestó {status}: {_error_text(data)}")
-        self.vault.set(agent, Link("clave", key))
-        self.estados[agent] = "Listo: clave guardada en el anfitrión."
+            await self._link_google(p)
 
-    async def link_google(self, agent: str) -> None:
-        """Abre el navegador del anfitrión para entrar con Google (o con la cuenta del
-        proveedor, que ofrece "Continuar con Google")."""
-        p = provider(agent)
-        cli = self.which(p.cli) if p.cli else None
-        if cli is None:
-            self.open_url(p.claves_url)
-            falta = f"No encontré {p.cli} ({p.instalar}). " if p.cli else ""
-            self.estados[agent] = (
-                f"{falta}Te abrí la página de claves de {p.nombre} en el navegador de la PC: "
-                "entrá con Google, creá una clave y pegala en «Clave de API»."
-            )
-            return
+    async def _link_google(self, p: Provider) -> None:
+        """Abre el navegador del anfitrión para entrar con la cuenta (Google)."""
+        cli = self._program(p)
         try:
             if p.id == "gemini":
                 # Sin credenciales guardadas, Gemini CLI abre el navegador para entrar con Google.
-                code, out = await self.cli(
-                    [cli, "--output-format", "json"], "Respondé solo: ok", GEMINI_ENV, LOGIN_TIMEOUT
-                )
+                code, out = await self._gemini(cli, "Respondé solo: ok", None, LOGIN_TIMEOUT)
                 email = gemini_email()
                 if code != 0 or email is None:
                     raise AgentError(_last_line(out) or "Gemini CLI no terminó de entrar.")
-                self.vault.set(agent, Link("google", email=email))
+                self.vault.set(p.id, Link("google", email))
             else:
                 code, out = await self.cli([cli, "login"], "", {}, LOGIN_TIMEOUT)
                 if code != 0:
@@ -382,10 +428,31 @@ class AgentHub:
                 code, out = await self.cli([cli, "login", "status"], "", {}, 30.0)
                 if code != 0:
                     raise AgentError(_last_line(out) or "Codex dice que no hay sesión.")
-                self.vault.set(agent, Link("google", email=_last_line(out)[:60]))
+                self.vault.set(p.id, Link("google", _last_line(out)[:60]))
         except TimeoutError as e:
             raise AgentError("Pasaron 5 minutos sin terminar de entrar.") from e
-        self.estados[agent] = "Listo: entraste."
+        self.estados[p.id] = "Listo: entraste y quedó conectado al cerebro."
+
+    async def _link_local(self, p: Provider) -> None:
+        """El modelo en la PC con Ollama: si falta, lo baja (una vez)."""
+        cli = self._program(p)
+        model = self._model(p)
+        status, data = await self.http.request("GET", f"{OLLAMA}/api/tags", {})
+        if status >= 300 or not isinstance(data, dict):
+            raise AgentError(
+                "Ollama está instalado pero no está andando: abrilo y volvé a vincular."
+            )
+        have = {m.get("name") for m in data.get("models", []) if isinstance(m, dict)}
+        if model not in have:
+            self.estados[p.id] = f"Bajando {model} a la PC (unos GB, puede tardar)..."
+            try:
+                code, out = await self.cli([cli, "pull", model], "", {}, PULL_TIMEOUT)
+            except TimeoutError as e:
+                raise AgentError(f"Bajar {model} tardó más de una hora.") from e
+            if code != 0:
+                raise AgentError(_last_line(out) or f"Ollama no pudo bajar {model}.")
+        self.vault.set(p.id, Link("local", model))
+        self.estados[p.id] = "Listo: corre en esta PC, sin cuenta ni clave."
 
     def unlink(self, agent: str) -> None:
         provider(agent)
@@ -402,69 +469,108 @@ class AgentHub:
         tools: list[ToolSpec] | None = None,
         run_tool: ToolRunner | None = None,
     ) -> str:
-        """La respuesta del agente. Con `tools` (y vinculado con clave), puede usarlas."""
+        """La respuesta del agente. Con `tools` y `run_tool`, puede usar las de JARVIS."""
         if agent == "claude":
             if self.claude is None:
                 raise AgentError("Claude no se puede consultar desde acá.")
             return await self.claude(system, prompt)
         p = provider(agent)
-        link = self.vault.load().get(agent)
-        if link is None:
+        if self.vault.load().get(agent) is None:
             raise AgentError(f"{p.nombre} no está vinculado.")
-        if link.metodo == "google":
-            return await self._ask_cli(p, f"{system}\n\n---\n\n{prompt}")
         use_tools = tools if run_tool is not None else None
-        if p.api == "gemini":
-            return await self._ask_gemini(p, link.clave, system, prompt, use_tools, run_tool)
-        return await self._ask_openai(p, link.clave, system, prompt, use_tools, run_tool)
+        if p.metodo == "local":
+            return await self._ask_local(p, system, prompt, use_tools, run_tool)
+        return await self._ask_cli(
+            p, f"{system}\n\n---\n\n{prompt}", run_tool if use_tools else None
+        )
 
-    async def _ask_cli(self, p: Provider, text: str) -> str:
-        cli = self.which(p.cli) if p.cli else None
+    async def _gemini(
+        self, cli: str, text: str, bridge: str | None, wait: float
+    ) -> tuple[int, str]:
+        """Gemini CLI con la cuenta de Google y la extensión de JARVIS (y ninguna otra)."""
+        ext = self.gemini_dir() / "extensions" / "jarvis"
+        ext.mkdir(parents=True, exist_ok=True)
+        (ext / "gemini-extension.json").write_text(
+            json.dumps(gemini_extension(), indent=2), encoding="utf-8"
+        )
+        env = {
+            **GEMINI_ENV,
+            # Corre en una carpeta temporal vacía: que confíe en ella (si no, apaga el MCP).
+            "GEMINI_CLI_TRUST_WORKSPACE": "true",
+            toolbridge.ENV: bridge or "",
+        }
+        # Sin tools (una opinión del consejo), ningún servidor MCP.
+        servers = "jarvis" if bridge is not None else "ninguno"
+        args = [cli, "--output-format", "json", "-e", "jarvis"]
+        args += ["--allowed-mcp-server-names", servers]
+        return await self.cli(args, text, env, wait)
+
+    async def _codex(self, cli: str, text: str, bridge: str | None) -> tuple[int, str, str]:
+        """Codex con la cuenta de ChatGPT y el perfil de JARVIS. (código, salida, respuesta)."""
+        name = "jarvis" if bridge is not None else "jarvis-consulta"
+        home = self.codex_dir()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / f"{name}.config.toml").write_text(
+            codex_profile(bridge is not None), encoding="utf-8"
+        )
+        fd, last = tempfile.mkstemp(prefix="jarvis-codex-", suffix=".txt")
+        os.close(fd)
+        try:
+            args = [cli, "exec", "-p", name, "--skip-git-repo-check", "--sandbox", "read-only"]
+            args += ["--output-last-message", last, "-"]
+            env = {toolbridge.ENV: bridge} if bridge is not None else {}
+            code, out = await self.cli(args, text, env, CLI_TIMEOUT)
+            answer = (await asyncio.to_thread(Path(last).read_text, "utf-8")).strip()
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(last)
+        return code, out, answer
+
+    async def _ask_cli(self, p: Provider, text: str, run_tool: ToolRunner | None) -> str:
+        cli = self.which(p.cli)
         if cli is None:
             raise AgentError(f"No encontré {p.cli} en la PC ({p.instalar}).")
         try:
-            if p.id == "gemini":
-                code, out = await self.cli(
-                    [cli, "--output-format", "json"], text, GEMINI_ENV, ASK_TIMEOUT
-                )
-                answer = _gemini_cli_answer(out)
-            else:
-                fd, name = tempfile.mkstemp(prefix="jarvis-codex-", suffix=".txt")
-                os.close(fd)
-                try:
-                    args = [cli, "exec", "--skip-git-repo-check", "--sandbox", "read-only"]
-                    args += ["--output-last-message", name, "-"]
-                    code, out = await self.cli(args, text, {}, ASK_TIMEOUT)
-                    answer = (await asyncio.to_thread(Path(name).read_text, "utf-8")).strip()
-                finally:
-                    with contextlib.suppress(OSError):
-                        os.unlink(name)
+            async with contextlib.AsyncExitStack() as stack:
+                bridge = None
+                if run_tool is not None:
+                    bridge = (
+                        await stack.enter_async_context(toolbridge.ToolBridge(run_tool))
+                    ).address
+                if p.id == "gemini":
+                    code, out = await self._gemini(cli, text, bridge, CLI_TIMEOUT)
+                    answer = _gemini_cli_answer(out)
+                else:
+                    code, out, answer = await self._codex(cli, text, bridge)
         except TimeoutError as e:
             raise AgentError(f"{p.nombre} no contestó a tiempo.") from e
         if code != 0 or not answer:
             raise AgentError(f"{p.nombre}: {_last_line(out) or 'no contestó'}")
         return answer
 
-    async def _ask_openai(
+    async def _ask_local(
         self,
         p: Provider,
-        key: str,
         system: str,
         prompt: str,
         tools: list[ToolSpec] | None,
         run_tool: ToolRunner | None,
     ) -> str:
+        """Ollama en la PC, con su API compatible con la de OpenAI (y function calling)."""
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ]
+        url = f"{OLLAMA}/v1/chat/completions"
         for _ in range(MAX_ROUNDS):
             body: dict[str, Any] = {"model": self._model(p), "messages": messages}
             if tools:
                 body["tools"] = openai_tools(tools)
-            status, data = await self.http.request(
-                "POST", f"{p.base_url}/chat/completions", {"Authorization": f"Bearer {key}"}, body
-            )
+            status, data = await self.http.request("POST", url, {}, body)
+            if status == 400 and tools and "tools" in _error_text(data):
+                # Este modelo no sabe usar tools: contesta solo texto.
+                tools = None
+                continue
             if status >= 300 or not isinstance(data, dict):
                 raise AgentError(f"{p.nombre} contestó {status}: {_error_text(data)}")
             try:
@@ -473,7 +579,7 @@ class AgentHub:
                 raise AgentError(f"{p.nombre} contestó algo que no entiendo.") from e
             calls = msg.get("tool_calls") or []
             if not calls or run_tool is None:
-                return str(msg.get("content") or "").strip()
+                return _without_thinking(str(msg.get("content") or ""))
             messages.append(msg)
             for call in calls:
                 fn = call.get("function", {})
@@ -491,56 +597,6 @@ class AgentHub:
                         "content": result if ok else f"ERROR: {result}",
                     }
                 )
-        raise AgentError(f"{p.nombre} encadenó demasiadas herramientas.")
-
-    async def _ask_gemini(
-        self,
-        p: Provider,
-        key: str,
-        system: str,
-        prompt: str,
-        tools: list[ToolSpec] | None,
-        run_tool: ToolRunner | None,
-    ) -> str:
-        contents: list[dict[str, Any]] = [{"role": "user", "parts": [{"text": prompt}]}]
-        url = f"{p.base_url}/models/{self._model(p)}:generateContent"
-        for _ in range(MAX_ROUNDS):
-            body: dict[str, Any] = {
-                "systemInstruction": {"parts": [{"text": system}]},
-                "contents": contents,
-            }
-            if tools:
-                body["tools"] = gemini_tools(tools)
-            status, data = await self.http.request("POST", url, {"x-goog-api-key": key}, body)
-            if status >= 300 or not isinstance(data, dict):
-                raise AgentError(f"{p.nombre} contestó {status}: {_error_text(data)}")
-            try:
-                content = data["candidates"][0]["content"]
-                parts = content.get("parts", [])
-            except (KeyError, IndexError, TypeError, AttributeError) as e:
-                raise AgentError(f"{p.nombre} no devolvió una respuesta.") from e
-            calls = [pt["functionCall"] for pt in parts if "functionCall" in pt]
-            if not calls or run_tool is None:
-                return "".join(
-                    str(pt.get("text", "")) for pt in parts if not pt.get("thought")
-                ).strip()
-            # La respuesta del modelo va entera (lleva las firmas de su razonamiento).
-            contents.append(content)
-            results = []
-            for call in calls:
-                args = call.get("args") or {}
-                ok, result = await run_tool(
-                    str(call.get("name", "")), args if isinstance(args, dict) else {}
-                )
-                results.append(
-                    {
-                        "functionResponse": {
-                            "name": call.get("name", ""),
-                            "response": {"ok": ok, "resultado": result},
-                        }
-                    }
-                )
-            contents.append({"role": "user", "parts": results})
         raise AgentError(f"{p.nombre} encadenó demasiadas herramientas.")
 
 
@@ -569,6 +625,11 @@ def _gemini_cli_answer(out: str) -> str:
             if isinstance(data, dict) and isinstance(data.get("response"), str):
                 return str(data["response"]).strip()
     return out.strip()
+
+
+def _without_thinking(text: str) -> str:
+    """DeepSeek-R1 puede devolver su razonamiento entre `<think>`: no es la respuesta."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
 
 
 def _last_line(out: str) -> str:

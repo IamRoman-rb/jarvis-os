@@ -390,7 +390,7 @@ fn vincular_gemini_chatgpt_y_deepseek_desde_configuracion() {
     b.t.combo(Mods::WIN, Key::Char('i'));
     b.t.key(Key::PageUp);
     // Cerebro, Cuenta, Google (Claude), Actualizar, Agente principal, Consejo, Gemini (estado),
-    // Gemini con Google, Gemini clave de API...
+    // Gemini con Google, ChatGPT (estado)... (sin claves de API)
     b.t.keys(&[Key::Down, Key::Down, Key::Down]);
     // Agente principal: → pasa de Claude a Gemini y se le avisa al cerebro.
     b.t.key(Key::Down);
@@ -413,29 +413,21 @@ fn vincular_gemini_chatgpt_y_deepseek_desde_configuracion() {
     b.t.keys(&[Key::Down, Key::Down]);
     b.t.key(Key::Enter);
     b.collect();
-    assert_eq!(
-        b.sent,
-        "{\"t\":\"vincular\",\"agente\":\"gemini\",\"metodo\":\"google\"}\n"
-    );
-    // ChatGPT con el formulario: la clave va al anfitrión y no a los logs.
+    assert_eq!(b.sent, "{\"t\":\"vincular\",\"agente\":\"gemini\"}\n");
+    // DeepSeek corre en la PC: también un botón, sin formulario de clave.
+    b.reply(r#"{"t":"agente","id":"deepseek","nombre":"DeepSeek","vinculado":false,"metodo":"local","detalle":"","estado":""}"#);
     b.sent.clear();
     b.t.keys(&[Key::Down, Key::Down, Key::Down, Key::Down]);
     b.t.key(Key::Enter);
-    b.t.type_text("sk-prueba-1234");
-    b.t.key(Key::Enter);
     b.collect();
-    assert_eq!(
-        b.sent,
-        "{\"t\":\"vincular\",\"agente\":\"chatgpt\",\"metodo\":\"clave\",\"clave\":\"sk-prueba-1234\"}\n"
-    );
-    assert!(!b.t.d.config().serialize().contains("sk-prueba"));
-    b.reply(r#"{"t":"agente","id":"chatgpt","nombre":"ChatGPT","vinculado":true,"metodo":"clave","detalle":"clave ...1234","estado":"Listo: clave guardada en el anfitrión."}"#);
+    assert_eq!(b.sent, "{\"t\":\"vincular\",\"agente\":\"deepseek\"}\n");
+    b.reply(r#"{"t":"agente","id":"deepseek","nombre":"DeepSeek","vinculado":true,"metodo":"local","detalle":"en esta PC (deepseek-r1:8b)","estado":"Listo: corre en esta PC, sin cuenta ni clave."}"#);
     let logs = b.t.logs();
-    assert!(logs.iter().any(|l| l == "CEREBRO_VINCULAR chatgpt clave"));
-    assert!(!logs.iter().any(|l| l.contains("sk-prueba")));
+    assert!(logs.iter().any(|l| l == "CEREBRO_VINCULAR deepseek"));
     assert!(
-        logs.iter()
-            .any(|l| l == "CEREBRO_AGENTE chatgpt si Listo: clave guardada en el anfitrión.")
+        logs.iter().any(
+            |l| l == "CEREBRO_AGENTE deepseek si Listo: corre en esta PC, sin cuenta ni clave."
+        )
     );
 }
 

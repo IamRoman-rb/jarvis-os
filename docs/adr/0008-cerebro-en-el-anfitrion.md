@@ -71,6 +71,26 @@ como información, no como órdenes). Sin consejo, el principal puede pedir una 
 la tool `consultar_agente` (nivel 1). Si el principal falla, contesta el siguiente que funcione.
 Con Google (sin clave) un agente solo contesta texto: el programa del proveedor no expone tools.
 
+## Actualización (2026-10-05): sin claves, todos conectados al cerebro
+
+Reemplaza a la de arriba en cómo se vinculan los agentes:
+
+- **Sin claves de API.** Gemini se vincula con la cuenta de Google (Gemini CLI) y ChatGPT con la
+  de ChatGPT (Codex CLI, "Continuar con Google"). DeepSeek no tiene forma de entrar con Google a
+  su API: corre **en la PC** con Ollama (el modelo abierto, sin cuenta ni clave; la primera vez
+  se baja). Las claves que ya estaban en `agentes.json` quedan pero no se usan.
+- **Conectados al cerebro.** Los tres tienen las mismas tools de JARVIS que Claude, con los
+  mismos niveles de `docs/permisos.md`. Gemini CLI y Codex las usan por MCP: una extensión de
+  Gemini (`~/.gemini/extensions/jarvis`) y un perfil de Codex (`~/.codex/jarvis.config.toml`)
+  lanzan `agent/mcp_proxy.py`, que le pasa cada llamada al puente del cerebro
+  (`agent/toolbridge.py`: 127.0.0.1, un token por respuesta) y de ahí al `Gate`. Las
+  herramientas propias de esos programas que tocan la PC (la terminal, los archivos) quedan
+  apagadas: solo pueden leer la web. DeepSeek usa las tools por la API local de Ollama.
+- **Si Claude se queda sin uso** (el límite de la cuenta), el SDK lo marca (`rate_limit`,
+  `billing_error`, HTTP 429): `ClaudeBrain` lo detecta antes de mostrar nada y el cerebro
+  conjunto sigue con el próximo agente vinculado, salteando a Claude 15 minutos antes de volver
+  a probar. Lo mismo con cualquier agente que se quede sin cuota.
+
 ## Actualización (2026-10-04): conversación por voz y memoria
 
 - **Conversación**: después de la primera orden por voz, lo que Roman dice es para JARVIS sin

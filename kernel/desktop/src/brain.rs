@@ -95,7 +95,8 @@ pub enum Gesture {
 
 /// Los agentes que pueden ser el cerebro de JARVIS: (código del protocolo, nombre). Claude es
 /// el de siempre (la cuenta de Claude Code del anfitrión); los demás se vinculan desde
-/// Configuración → Asistente, con Google o con el formulario (una clave de API).
+/// Configuración → Asistente, sin claves de API: Gemini y ChatGPT con la cuenta de Google y
+/// DeepSeek en la PC (Ollama).
 pub const AGENTS: [(&str, &str); 4] = [
     ("claude", "Claude"),
     ("gemini", "Gemini"),
@@ -110,9 +111,9 @@ pub struct AiAgent {
     pub id: String,
     pub name: String,
     pub linked: bool,
-    /// "google" o "clave" (vacío = sin vincular).
+    /// Cómo se vincula: "google" (la cuenta) o "local" (en la PC).
     pub method: String,
-    /// Con qué cuenta entró, o los últimos 4 caracteres de la clave (nunca la clave entera).
+    /// Con qué cuenta entró, o el modelo que corre en la PC.
     pub detail: String,
     /// El inicio de sesión en curso o cómo terminó.
     pub state: String,
@@ -147,11 +148,9 @@ pub enum BrainOp {
     Login,
     /// Volver a preguntar la cuenta.
     AccountStatus,
-    /// Vincular un agente (por su código) con Google: el anfitrión abre su navegador.
-    AgentGoogle(String),
-    /// Vincular un agente con el formulario: la clave de API viaja al anfitrión, que la valida
-    /// y la guarda (en JARVIS-OS no queda).
-    AgentKey(String, String),
+    /// Vincular un agente (por su código): con Google el anfitrión abre su navegador; DeepSeek
+    /// se prepara en la PC (Ollama).
+    AgentLink(String),
     AgentUnlink(String),
     /// Volver a preguntar el estado de los agentes.
     AgentsStatus,
@@ -369,28 +368,12 @@ impl BrainService {
                 );
             }
             BrainOp::AccountStatus => self.send(out, "{\"t\":\"cuenta\"}".into()),
-            BrainOp::AgentGoogle(id) => {
-                self.set_agent_state(&id, crate::i18n::tr("Abriendo el navegador de la PC..."));
-                self.logs.push(format!("CEREBRO_VINCULAR {id} google"));
+            BrainOp::AgentLink(id) => {
+                self.set_agent_state(&id, crate::i18n::tr("Vinculando en el anfitrión..."));
+                self.logs.push(format!("CEREBRO_VINCULAR {id}"));
                 self.send(
                     out,
-                    format!(
-                        "{{\"t\":\"vincular\",\"agente\":{},\"metodo\":\"google\"}}",
-                        quote(&id)
-                    ),
-                );
-            }
-            BrainOp::AgentKey(id, key) => {
-                self.set_agent_state(&id, crate::i18n::tr("Enviando la clave al anfitrión..."));
-                // La clave no va a los logs.
-                self.logs.push(format!("CEREBRO_VINCULAR {id} clave"));
-                self.send(
-                    out,
-                    format!(
-                        "{{\"t\":\"vincular\",\"agente\":{},\"metodo\":\"clave\",\"clave\":{}}}",
-                        quote(&id),
-                        quote(&key)
-                    ),
+                    format!("{{\"t\":\"vincular\",\"agente\":{}}}", quote(&id)),
                 );
             }
             BrainOp::AgentUnlink(id) => {
