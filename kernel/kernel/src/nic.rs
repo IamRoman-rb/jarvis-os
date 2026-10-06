@@ -18,7 +18,7 @@ use smoltcp::time::Instant;
 
 use crate::virtio_net::{self, VirtioNet};
 use crate::wifi::Wifi;
-use crate::{e1000, rtl8139, rtl8169, serial_println};
+use crate::{e1000, pcnet, rtl8139, rtl8169, serial_println};
 
 /// Lo que tiene que saber hacer un driver de placa de red.
 pub trait Frames: Send {
@@ -59,7 +59,7 @@ impl Nic {
     }
 }
 
-/// Busca una placa real: Intel, después Realtek 8168 y 8139.
+/// Busca una placa real: Intel, después Realtek 8168 y 8139, y AMD PCnet (VirtualBox).
 pub fn probe() -> Option<(Box<dyn Frames>, &'static str)> {
     if let Some(n) = e1000::probe() {
         return Some((Box::new(n), "Intel e1000"));
@@ -69,6 +69,9 @@ pub fn probe() -> Option<(Box<dyn Frames>, &'static str)> {
     }
     if let Some(n) = rtl8139::probe() {
         return Some((Box::new(n), "Realtek RTL8139"));
+    }
+    if let Some(n) = pcnet::probe() {
+        return Some((Box::new(n), "AMD PCnet"));
     }
     serial_println!("red: no hay placa de red conocida");
     None

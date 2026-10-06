@@ -1,5 +1,5 @@
-//! Placas de red Intel (e1000) y Realtek (RTL8139, RTL8168/8111): el formato de sus anillos de
-//! descriptores.
+//! Placas de red Intel (e1000), Realtek (RTL8139, RTL8168/8111) y AMD PCnet: el formato de sus
+//! anillos de descriptores.
 //!
 //! Una placa de red moderna no copia tramas de a una por la CPU: el driver le deja en memoria
 //! un **anillo de descriptores**, cada uno apuntando a un buffer. Para recibir, la placa llena
@@ -9,7 +9,8 @@
 //!
 //! Referencias: Intel "PCI/PCI-X Family of Gigabit Ethernet Controllers Software Developer's
 //! Manual" (8254x, §3.2 y §3.3) y 82574 datasheet; Realtek RTL8139D datasheet y "RTL8168/8111
-//! Programming Guide"; drivers `e1000`, `8139too` y `r8169` de Linux.
+//! Programming Guide"; AMD Am79C973 datasheet (PCnet-FAST III, §"Initialization Block" y
+//! "Descriptor Rings"); drivers `e1000`, `8139too`, `r8169` y `pcnet32` de Linux.
 
 use crate::le;
 
@@ -120,4 +121,76 @@ pub fn r8169_rx_done(opts1: u32) -> Option<Option<usize>> {
     let whole = opts1 & R8169_FS != 0 && opts1 & R8169_LS != 0;
     let len = (opts1 & 0x3FFF) as usize;
     Some((whole && opts1 & R8169_RX_RES == 0 && len > 4).then(|| len - 4))
+}
+
+// --- AMD PCnet (Am79C970A/973, la placa por defecto de VirtualBox) --------------------------------
+//
+// Con SWSTYLE 2 (32 bits), el bloque de inicialización mide 28 bytes y cada descriptor 16. Los
+// largos de buffer van en complemento a dos (negativos) con los 4 bits altos en 1.
+
+/// Descriptores: la placa es dueña (OWN), hubo error (ERR), primer y último tramo (STP, ENP).
+pub const PCNET_OWN: u16 = 1 << 15;
+pub const PCNET_ERR: u16 = 1 << 14;
+pub const PCNET_STP: u16 = 1 << 9;
+pub const PCNET_ENP: u16 = 1 << 8;
+
+/// El largo de un buffer como lo pide la placa (BCNT: −largo, con 1111 arriba).
+pub fn pcnet_bcnt(len: usize) -> u16 {
+    (0u16.wrapping_sub(len as u16) & 0x0FFF) | 0xF000
+}
+
+/// El bloque de inicialización (28 bytes). `rx_log2`/`tx_log2`: cantidad de descriptores en
+/// potencias de 2 (hasta 9 = 512).
+pub fn pcnet_init_block(
+    mac: [u8; 6],
+    rx_log2: u8,
+    tx_log2: u8,
+    rx_ring: u32,
+    tx_ring: u32,
+) -> [u8; 28] {
+    let mut b = [0u8; 28];
+    // MODE = 0: recibir y mandar normal (sin modo promiscuo).
+    b[2] = rx_log2 << 4;
+    b[3] = tx_log2 << 4;
+    b[4..10].copy_from_slice(&mac);
+    // 12..20: filtro de multicast (LADRF). Todo en 1: aceptar multicast (IPv6, mDNS).
+    b[12..20].fill(0xFF);
+    b[20..24].copy_from_slice(&rx_ring.to_le_bytes());
+    b[24..28].copy_from_slice(&tx_ring.to_le_bytes());
+    b
+}
+
+/// Un descriptor de recepción vacío, de la placa.
+pub fn pcnet_rx_desc(buffer: u32, len: usize) -> [u8; 16] {
+    let mut d = [0u8; 16];
+    d[..4].copy_from_slice(&buffer.to_le_bytes());
+    d[4..6].copy_from_slice(&pcnet_bcnt(len).to_le_bytes());
+    d[6..8].copy_from_slice(&PCNET_OWN.to_le_bytes());
+    d
+}
+
+/// Qué llegó: `None` si la placa todavía es dueña; `Some(None)` si llegó con error o partida en
+/// varios buffers (se descarta); si no, el largo sin el CRC.
+pub fn pcnet_rx_done(d: &[u8]) -> Option<Option<usize>> {
+    let status = le(d, 6, 2) as u16;
+    if status & PCNET_OWN != 0 {
+        return None;
+    }
+    let whole = status & (PCNET_STP | PCNET_ENP) == PCNET_STP | PCNET_ENP;
+    let len = (le(d, 8, 4) & 0x0FFF) as usize;
+    Some((whole && status & PCNET_ERR == 0 && len > 4).then(|| len - 4))
+}
+
+/// Un descriptor de transmisión de una trama entera, para la placa.
+pub fn pcnet_tx_desc(buffer: u32, len: usize) -> [u8; 16] {
+    let mut d = [0u8; 16];
+    d[..4].copy_from_slice(&buffer.to_le_bytes());
+    d[4..6].copy_from_slice(&pcnet_bcnt(len).to_le_bytes());
+    d[6..8].copy_from_slice(&(PCNET_OWN | PCNET_STP | PCNET_ENP).to_le_bytes());
+    d
+}
+
+/// ¿La placa ya mandó (devolvió) este descriptor de transmisión?
+pub fn pcnet_tx_free(d: &[u8]) -> bool {
+    le(d, 6, 2) as u16 & PCNET_OWN == 0
 }

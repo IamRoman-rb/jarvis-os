@@ -49,6 +49,7 @@ mod nic;
 mod nvme;
 mod paging;
 mod pci;
+mod pcnet;
 mod pit;
 mod power;
 mod process;

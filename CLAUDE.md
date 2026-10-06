@@ -48,7 +48,7 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red
                    (desktop/src/sync.rs lo une con el FAT32 y las conexiones largas)
     - drivers/     hardware real (K13, ADR 0011): la mitad de los drivers que interpreta (tablas
-                   ACPI, APIC/MSI, GPT, AHCI, NVMe, placas de red, USB/xHCI, HDA, sensores, la
+                   ACPI, APIC/MSI, GPT, AHCI, NVMe, IDE, CD (El Torito), placas de red (Intel, Realtek, AMD PCnet), USB/xHCI, HDA, sensores, la
                    placa Wi-Fi RTL8821CE en rtw88/ y el ramdisk del arranque); no_std y sin unsafe
                    (los registros los tocan kernel/ahci.rs, xhci.rs, hda.rs, rtw88.rs…). Las
                    tablas de Realtek salen de drivers/tablas/generar_rtw8821c.py

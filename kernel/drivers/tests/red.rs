@@ -69,3 +69,43 @@ fn rtl8168_descriptores() {
     let opts1 = u32::from_le_bytes(t[..4].try_into().unwrap());
     assert_eq!(opts1, R8169_OWN | R8169_FS | R8169_LS | 60);
 }
+
+#[test]
+fn pcnet_bloque_y_descriptores() {
+    use jarvis_drivers::nic::{
+        PCNET_ENP, PCNET_ERR, PCNET_OWN, PCNET_STP, pcnet_bcnt, pcnet_init_block, pcnet_rx_desc,
+        pcnet_rx_done, pcnet_tx_desc, pcnet_tx_free,
+    };
+    // −1536 en 12 bits = 0xA00, con 1111 arriba.
+    assert_eq!(pcnet_bcnt(1536), 0xFA00);
+    assert_eq!(pcnet_bcnt(60), 0xFFC4);
+
+    let mac = [0x08, 0x00, 0x27, 0x12, 0x34, 0x56];
+    let b = pcnet_init_block(mac, 4, 3, 0x0010_2000, 0x0010_3000);
+    assert_eq!(&b[..4], &[0, 0, 0x40, 0x30]);
+    assert_eq!(&b[4..10], &mac);
+    assert_eq!(&b[12..20], &[0xFF; 8]);
+    assert_eq!(&b[20..24], &0x0010_2000u32.to_le_bytes());
+    assert_eq!(&b[24..28], &0x0010_3000u32.to_le_bytes());
+
+    let mut d = pcnet_rx_desc(0x0020_0000, 1536);
+    assert_eq!(&d[..4], &0x0020_0000u32.to_le_bytes());
+    assert_eq!(pcnet_rx_done(&d), None, "todavía es de la placa");
+    // La placa la llena: 64 bytes con CRC, una sola parte.
+    d[6..8].copy_from_slice(&(PCNET_STP | PCNET_ENP).to_le_bytes());
+    d[8..12].copy_from_slice(&64u32.to_le_bytes());
+    assert_eq!(pcnet_rx_done(&d), Some(Some(60)));
+    d[6..8].copy_from_slice(&(PCNET_STP | PCNET_ENP | PCNET_ERR).to_le_bytes());
+    assert_eq!(pcnet_rx_done(&d), Some(None), "con error se descarta");
+    d[6..8].copy_from_slice(&PCNET_STP.to_le_bytes());
+    assert_eq!(pcnet_rx_done(&d), Some(None), "partida en varios buffers");
+
+    let mut t = pcnet_tx_desc(0x0030_0000, 60);
+    assert_eq!(
+        u16::from_le_bytes([t[6], t[7]]),
+        PCNET_OWN | PCNET_STP | PCNET_ENP
+    );
+    assert!(!pcnet_tx_free(&t));
+    t[7] &= 0x7F;
+    assert!(pcnet_tx_free(&t));
+}

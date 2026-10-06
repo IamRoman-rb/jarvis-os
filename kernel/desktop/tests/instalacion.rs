@@ -224,3 +224,49 @@ fn el_primer_inicio_pide_la_contrasena_y_jarvis_presenta_el_sistema() {
     let text = String::from_utf8(fatfs_read(t.d, "/Sistema/config.ini").unwrap()).unwrap();
     assert!(text.contains("presentacion=no"), "{text}");
 }
+
+#[test]
+fn la_tecla_windows_no_saltea_la_contrasena() {
+    use jarvis_desktop::Mods;
+    let win = Mods {
+        win: true,
+        ..Mods::NONE
+    };
+    let alt = Mods {
+        alt: true,
+        ..Mods::NONE
+    };
+    let mut t = installed("ana", "luna-azul");
+    t.frame();
+    // La tecla Windows sola (apretar y soltar), Alt+Tab, Win+D, Win+E, Esc.
+    t.mods(win);
+    t.mods(Mods::NONE);
+    t.mods(alt);
+    t.key(Key::Tab);
+    t.mods(Mods::NONE);
+    t.combo(win, Key::Char('d'));
+    t.combo(win, Key::Char('e'));
+    t.key(Key::Escape);
+    t.frame();
+    assert!(t.d.is_locked(), "sigue en la pantalla de inicio de sesión");
+    assert_eq!(t.d.overlay_name(), "sesion");
+    assert!(t.d.focused_app().is_none(), "no se abrió nada");
+    t.type_text("luna-azul");
+    t.key(Key::Enter);
+    assert!(!t.d.is_locked());
+}
+
+#[test]
+fn la_tecla_windows_no_saltea_el_asistente() {
+    use jarvis_desktop::Mods;
+    let win = Mods {
+        win: true,
+        ..Mods::NONE
+    };
+    let mut t = live(disks());
+    t.mods(win);
+    t.mods(Mods::NONE);
+    t.combo(win, Key::Char('d'));
+    t.frame();
+    assert_eq!(t.d.overlay_name(), "instalador");
+}

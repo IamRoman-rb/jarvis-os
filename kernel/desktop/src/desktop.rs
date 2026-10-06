@@ -396,6 +396,9 @@ pub struct Desktop<D: BlockDevice> {
     pin_wrong: bool,
     /// La presentación de JARVIS del primer inicio de sesión: la próxima frase y cuándo.
     tour: Option<(usize, u64)>,
+    /// El próximo `set_overlay` puede salir del bloqueo o del asistente (lo prenden `unlock`
+    /// y "probar sin instalar").
+    leave_guard: bool,
     /// La última hora que llegó (para lo que pasa fuera de un evento, como una respuesta de red).
     last_clock: Option<DateTime>,
     /// La carpeta /Sincronizado con otras máquinas (ADR 0007).
@@ -559,6 +562,7 @@ impl<D: BlockDevice> Desktop<D> {
             last_input: 0,
             pin_input: String::new(),
             tour: None,
+            leave_guard: false,
             pin_wrong: false,
             notices: Vec::new(),
             beep_until: None,
@@ -1220,6 +1224,11 @@ impl<D: BlockDevice> Desktop<D> {
     fn on_mods(&mut self, m: Mods, now_ms: u64, clock: Option<DateTime>) {
         let prev = self.mods;
         self.mods = m;
+        if self.is_guarded() {
+            // Bloqueado o instalando: la tecla Windows y Alt+Tab no abren nada.
+            self.win_alone = false;
+            return;
+        }
         if m.win && !prev.win {
             self.win_alone = true;
         }
@@ -1233,7 +1242,26 @@ impl<D: BlockDevice> Desktop<D> {
         }
     }
 
+    /// ¿Está la pantalla de inicio de sesión/bloqueo o el asistente de instalación? Ahí no
+    /// se puede llegar al escritorio por ningún atajo.
+    fn is_guarded(&self) -> bool {
+        matches!(self.overlay, Overlay::Lock | Overlay::Setup(_))
+    }
+
     fn set_overlay(&mut self, o: Overlay) {
+        // De la pantalla de bloqueo solo se sale con la contraseña (`unlock`) o suspendiendo
+        // (al despertar vuelve); del asistente, con "probar sin instalar". Cualquier otro
+        // camino (un atajo, un menú, un gesto) se ignora.
+        let allowed = core::mem::take(&mut self.leave_guard)
+            || match self.overlay {
+                Overlay::Lock => matches!(o, Overlay::Lock | Overlay::Sleep),
+                Overlay::Setup(_) => matches!(o, Overlay::Setup(_)),
+                _ => true,
+            };
+        if !allowed {
+            self.logs.push("ESCRITORIO_BLOQUEO_PROTEGIDO".into());
+            return;
+        }
         let was_full = self.overlay_is_fullscreen();
         self.overlay = o;
         self.overlay_dirty = true;
@@ -1330,7 +1358,10 @@ impl<D: BlockDevice> Desktop<D> {
             return;
         }
         if matches!(self.overlay, Overlay::Lock) {
-            self.lock_key(key);
+            // (Win+letra no escribe en la contraseña.)
+            if !self.mods.win {
+                self.lock_key(key);
+            }
             return;
         }
         if let Overlay::Setup(setup) = &mut self.overlay {
@@ -1426,6 +1457,7 @@ impl<D: BlockDevice> Desktop<D> {
         } else {
             self.logs.push("ESCRITORIO_DESBLOQUEADO".into());
         }
+        self.leave_guard = true;
         self.set_overlay(Overlay::None);
     }
 
@@ -1489,6 +1521,7 @@ impl<D: BlockDevice> Desktop<D> {
             Action::None => {}
             Action::Redraw => self.overlay_dirty = true,
             Action::Leave => {
+                self.leave_guard = true;
                 self.set_overlay(Overlay::None);
                 self.say(
                     tr("Modo en vivo: nada se guarda al apagar. Para instalar, reiniciá desde la ISO."),
