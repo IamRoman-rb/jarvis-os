@@ -562,3 +562,22 @@ fn gestos_de_la_mano_mueven_el_puntero_hacen_clic_y_abren_el_inicio() {
     b.reply(r#"{"t":"gesto","tipo":"deslizar","dir":"derecha"}"#);
     assert_eq!(b.t.d.focused_app(), Some(AppKind::Monitor));
 }
+
+#[test]
+fn sin_cerebro_el_boton_de_google_avisa_como_conectarlo() {
+    // Como en VirtualBox sin `cargo xtask vbox`: no hay token, el cerebro no se conecta.
+    let mut t = Driver::new();
+    t.combo(Mods::WIN, Key::Char('i'));
+    t.key(Key::PageUp);
+    t.key(Key::Down);
+    t.key(Key::Down);
+    t.logs();
+    t.key(Key::Enter);
+    let logs = t.logs();
+    assert!(
+        logs.iter().any(
+            |l| l.starts_with("AVISO El cerebro no está conectado") && l.contains("xtask vbox")
+        ),
+        "{logs:?}"
+    );
+}

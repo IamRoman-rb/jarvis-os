@@ -27,6 +27,7 @@ mod hardware;
 mod iso;
 mod puente;
 mod sincro;
+mod vbox;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -48,6 +49,10 @@ fn main() -> ExitCode {
         "usuario" => build_user().map(|d| println!("programas de Linux: {}", d.display())),
         "screenshot" => build().and_then(|img| screenshot(&img, &fresh_disk("disco-captura.img")?)),
         "vdi" => build().and_then(|img| vdi(&img)),
+        "vbox" if env::args().any(|a| a == "--iso") => build()
+            .and_then(|img| iso::build(&img))
+            .and_then(|iso| vbox::run(Some(&iso))),
+        "vbox" => vbox::run(None),
         "disk" => {
             let reset = env::args().any(|a| a == "--reset");
             disk_image(reset).map(|d| println!("disco: {}", d.display()))
@@ -61,7 +66,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };

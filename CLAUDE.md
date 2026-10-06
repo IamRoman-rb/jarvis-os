@@ -86,6 +86,9 @@ Kernel (desde kernel/):
 - Disco:            cargo xtask disk --reset   (vuelve target/disco.img a kernel/rootfs)
 - Brave:            cargo xtask brave --instalar | --probar URL (el puente sin QEMU → target/brave-prueba.png)
 - Sincronización:   cargo xtask relay | run2 | sincronizar (dos QEMU + relé; verifica los discos con fatfs)
+- VirtualBox:       cargo xtask vbox [MÁQUINA] [--iso] [--simulado] [--sin-ventana] (arranca la VM, por
+                    defecto "JARVISOS", con el cerebro: token por la línea de comandos de fw_cfg y
+                    NAT con acceso al localhost de la PC; --iso la arma y la monta)
 - ISO:              cargo xtask iso [--probar|--abrir] (El Torito, UEFI 64 bits; sin disco → modo en vivo
                     con el asistente de instalación, FAT32 en RAM)
 - Programas Linux:  cargo xtask usuario (compila kernel/usuario/ → target/usuario/; run y test lo hacen

@@ -465,6 +465,9 @@ fn save_config<D: BlockDevice>(
         .and_then(|()| fs.write_file(config::PATH, cfg.serialize().as_bytes(), ts))
 }
 
+/// Qué hacer cuando el cerebro (en la PC) no está conectado.
+pub const BRAIN_OFFLINE: &str = "El cerebro no está conectado. En la PC: cargo xtask vbox (VirtualBox) o cargo xtask run (QEMU).";
+
 fn singleton(kind: AppKind) -> bool {
     !matches!(kind, AppKind::Editor | AppKind::Viewer)
 }
@@ -2796,7 +2799,20 @@ impl<D: BlockDevice> Desktop<D> {
                 if op == crate::brain::BrainOp::Cancel {
                     self.sound.hush();
                 }
+                // Los botones de Configuración → Asistente: sin cerebro, se avisa en pantalla
+                // (el error de abajo va a la consola, que puede estar cerrada).
+                let from_settings = matches!(
+                    op,
+                    crate::brain::BrainOp::Login
+                        | crate::brain::BrainOp::AccountStatus
+                        | crate::brain::BrainOp::AgentLink(_)
+                        | crate::brain::BrainOp::AgentUnlink(_)
+                        | crate::brain::BrainOp::AgentsStatus
+                );
                 if !self.brain.handle(op, &mut self.out) {
+                    if from_settings {
+                        self.notify(tr(BRAIN_OFFLINE), true, now_ms);
+                    }
                     self.brain_events(
                         alloc::vec![crate::brain::BrainEvent::Error(
                             tr("El cerebro no está conectado.").into()

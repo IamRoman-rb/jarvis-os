@@ -419,6 +419,10 @@ static EN: &[(&str, &str)] = &[
         "El cerebro no está conectado.",
         "The brain is not connected.",
     ),
+    (
+        "El cerebro no está conectado. En la PC: cargo xtask vbox (VirtualBox) o cargo xtask run (QEMU).",
+        "The brain isn't connected. On the PC: cargo xtask vbox (VirtualBox) or cargo xtask run (QEMU).",
+    ),
     ("El de la barra de arriba", "The one on the top bar"),
     (
         "El de la barra de íconos, JARVIS y la barra de arriba",
@@ -455,6 +459,10 @@ static EN: &[(&str, &str)] = &[
     (
         "En /Sistema/firewall.log (ufw show blocked)",
         "In /Sistema/firewall.log (ufw show blocked)",
+    ),
+    (
+        "En la PC: cargo xtask vbox (VirtualBox) o cargo xtask run (QEMU)",
+        "On the PC: cargo xtask vbox (VirtualBox) or cargo xtask run (QEMU)",
     ),
     ("En la barra de arriba", "In the top bar"),
     ("Enero", "January"),
@@ -1514,6 +1522,10 @@ static PT: &[(&str, &str)] = &[
         "El cerebro no está conectado.",
         "O cérebro não está conectado.",
     ),
+    (
+        "El cerebro no está conectado. En la PC: cargo xtask vbox (VirtualBox) o cargo xtask run (QEMU).",
+        "O cérebro não está conectado. No PC: cargo xtask vbox (VirtualBox) ou cargo xtask run (QEMU).",
+    ),
     ("El de la barra de arriba", "O da barra superior"),
     (
         "El de la barra de íconos, JARVIS y la barra de arriba",
@@ -1550,6 +1562,10 @@ static PT: &[(&str, &str)] = &[
     (
         "En /Sistema/firewall.log (ufw show blocked)",
         "Em /Sistema/firewall.log (ufw show blocked)",
+    ),
+    (
+        "En la PC: cargo xtask vbox (VirtualBox) o cargo xtask run (QEMU)",
+        "No PC: cargo xtask vbox (VirtualBox) ou cargo xtask run (QEMU)",
     ),
     ("En la barra de arriba", "Na barra superior"),
     ("Enero", "Janeiro"),

@@ -946,7 +946,11 @@ impl Settings {
                     Row::new(
                         Opt::Info,
                         tr("Cerebro"),
-                        tr("Claude, por el Agent SDK en el anfitrión"),
+                        if stats.brain_online {
+                            tr("Claude, por el Agent SDK en el anfitrión")
+                        } else {
+                            tr("En la PC: cargo xtask vbox (VirtualBox) o cargo xtask run (QEMU)")
+                        },
                         Value(
                             if stats.brain_online {
                                 tr("conectado")

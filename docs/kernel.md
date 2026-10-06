@@ -514,6 +514,12 @@ firmware UEFI (OVMF en QEMU)
   bloqueo (ni del asistente de instalación) salvo por `unlock` con la contraseña correcta o
   suspendiendo (al despertar vuelve al bloqueo); cualquier otro camino se registra como
   `ESCRITORIO_BLOQUEO_PROTEGIDO` y se ignora.
+- **El cerebro en VirtualBox.** En QEMU el kernel recibe el puerto y el token del cerebro por un
+  archivo de fw_cfg. VirtualBox 7 también tiene fw_cfg, pero sin archivos con nombre: solo la
+  "línea de comandos" (elementos 0x14/0x15), así que `cargo xtask vbox` deja ahí
+  `jarvis.cerebro=puerto,token`. Además, la NAT de VirtualBox 7 no deja llegar al `localhost`
+  de la PC (donde escucha `jarvis serve`) salvo con `--nat-localhostreachable1 on`. Sin cerebro,
+  los botones de Configuración → Asistente avisan cómo conectarlo.
 - **AMD PCnet** (kernel/src/pcnet.rs), la placa que VirtualBox pone por defecto: después del
   reinicio está en modo de 16 bits y una escritura de 32 en RDP la pasa a 32; con SWSTYLE 2 se le
   da un bloque de inicialización con la MAC y los anillos. Los largos de buffer van negativos.
