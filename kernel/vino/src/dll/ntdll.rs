@@ -26,12 +26,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         NtWriteFile,
         NtReadFile,
         RtlNtStatusToDosError,
-        RtlCaptureContext,
-        RtlLookupFunctionEntry,
-        RtlVirtualUnwind,
-        RtlUnwindEx,
-        RtlUnwind,
-        RtlPcToFileHeader,
         RtlGetVersion,
         RtlAllocateHeap,
         RtlFreeHeap,
@@ -112,58 +106,6 @@ unsafe extern "win64" fn RtlNtStatusToDosError(status: u32) -> u32 {
         STATUS_PIPE_BROKEN => 109, // ERROR_BROKEN_PIPE
         _ => 31,                   // ERROR_GEN_FAILURE
     }
-}
-
-unsafe extern "win64" fn RtlCaptureContext(ctx: *mut u8) {
-    // CONTEXT: 1232 bytes. Vacío: alcanza para que el CRT arme su informe de error y termine.
-    std::ptr::write_bytes(ctx, 0, 1232);
-}
-
-unsafe extern "win64" fn RtlLookupFunctionEntry(_pc: u64, base: *mut u64, _h: u64) -> u64 {
-    if !base.is_null() {
-        *base = 0;
-    }
-    0 // "es una función hoja": no hay nada que desenrollar
-}
-
-unsafe extern "win64" fn RtlVirtualUnwind(
-    _t: u32,
-    _base: u64,
-    _pc: u64,
-    _f: u64,
-    _ctx: u64,
-    data: *mut u64,
-    frame: *mut u64,
-    _ptrs: u64,
-) -> u64 {
-    if !data.is_null() {
-        *data = 0;
-    }
-    if !frame.is_null() {
-        *frame = 0;
-    }
-    0
-}
-
-unsafe extern "win64" fn RtlUnwindEx(
-    _f: u64,
-    _ip: u64,
-    _rec: u64,
-    _rv: u64,
-    _ctx: u64,
-    _h: u64,
-) -> ! {
-    super::fatal("el programa desenrolla la pila por una excepción y vino todavía no las maneja")
-}
-
-unsafe extern "win64" fn RtlUnwind(_f: u64, _ip: u64, _rec: u64, _rv: u64) -> ! {
-    super::fatal("el programa desenrolla la pila por una excepción y vino todavía no las maneja")
-}
-
-unsafe extern "win64" fn RtlPcToFileHeader(pc: u64, base: *mut u64) -> u64 {
-    let r = crate::modules::module_at(pc).map_or(0, |(b, _)| b);
-    *base = r;
-    r
 }
 
 unsafe extern "win64" fn RtlGetVersion(v: *mut u8) -> u32 {

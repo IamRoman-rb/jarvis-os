@@ -46,6 +46,8 @@ pub struct Module {
     pub tls: Option<(usize, Vec<u8>)>,
     /// `DisableThreadLibraryCalls`: no avisarle de los hilos.
     pub no_thread_calls: bool,
+    /// `.pdata`: dónde está la tabla de funciones (dirección absoluta) y cuántas entradas tiene.
+    pub pdata: (u64, usize),
     pub inited: bool,
 }
 
@@ -167,6 +169,16 @@ pub fn module_at(addr: u64) -> Option<(u64, u64)> {
         .map(|m| (m.base, m.size))
 }
 
+/// La tabla `.pdata` del módulo que contiene `addr`: (base del módulo, dirección de la tabla,
+/// cuántas entradas). Para el desenrollador de excepciones.
+pub fn pdata_at(addr: u64) -> Option<(u64, u64, usize)> {
+    modules()
+        .iter()
+        .find(|m| addr >= m.base && addr < m.base + m.size)
+        .filter(|m| m.pdata.1 > 0)
+        .map(|m| (m.base, m.pdata.0, m.pdata.1))
+}
+
 pub fn path_of(base: u64) -> Option<String> {
     modules()
         .iter()
@@ -282,6 +294,7 @@ pub fn load_image(unix_path: &str, file: &[u8], dll: bool) -> Result<u64, LoadEr
         tls_callbacks: Vec::new(),
         tls: None,
         no_thread_calls: false,
+        pdata: (base + img.exception.0 as u64, img.exception.1 as usize / 12),
         inited: !dll,
     });
     loader::bind(&img, mem, &mut |d, s| resolve_import(d, s, &dir))?;

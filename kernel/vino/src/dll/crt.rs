@@ -126,7 +126,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         __C_specific_handler,
         __CxxFrameHandler3,
         __CxxFrameHandler4,
-        _CxxThrowException,
         __std_terminate,
         _purecall,
         __current_exception,
@@ -854,17 +853,19 @@ unsafe extern "win64" fn memchr(s: *const u8, c: i32, n: usize) -> *const u8 {
 
 /// Los manejadores de excepciones los llama Windows al despachar una excepción, cosa que `vino`
 /// no hace: si llegaran a llamarse, "seguir buscando".
-unsafe extern "win64" fn __C_specific_handler(_r: u64, _f: u64, _c: u64, _d: u64) -> i32 {
-    1 // ExceptionContinueSearch
+unsafe extern "win64" fn __C_specific_handler(
+    record: *mut u8,
+    frame: u64,
+    context: *mut u8,
+    dispatcher: *mut u8,
+) -> u32 {
+    super::seh::__C_specific_handler(record, frame, context, dispatcher)
 }
 unsafe extern "win64" fn __CxxFrameHandler3(_r: u64, _f: u64, _c: u64, _d: u64) -> i32 {
     1
 }
 unsafe extern "win64" fn __CxxFrameHandler4(_r: u64, _f: u64, _c: u64, _d: u64) -> i32 {
     1
-}
-unsafe extern "win64" fn _CxxThrowException(_obj: u64, _info: u64) -> ! {
-    super::fatal("el programa lanzó una excepción de C++ y vino todavía no las maneja")
 }
 unsafe extern "win64" fn __std_terminate() -> ! {
     super::fatal("el programa llamó a std::terminate()")

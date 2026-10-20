@@ -22,6 +22,7 @@ pub mod extra;
 pub mod kernel32;
 pub mod lowio;
 pub mod ntdll;
+pub mod seh;
 pub mod sistema;
 pub mod sync;
 pub mod threads;
@@ -100,6 +101,9 @@ fn table() -> &'static HashMap<(Dll, &'static str), usize> {
             (Dll::Kernel32, sync::exports()),
             (Dll::Kernel32, threads::exports()),
             (Dll::Ntdll, ntdll::exports()),
+            (Dll::Ntdll, seh::exports()),
+            (Dll::Kernel32, seh::exports()),
+            (Dll::Crt, seh::exports()),
             (Dll::Crt, crt::exports()),
             (Dll::Crt, lowio::exports()),
             (Dll::Crt, crt2::exports()),

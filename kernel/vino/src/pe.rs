@@ -53,6 +53,7 @@ const FILE_DLL: u16 = 0x2000;
 const DIR_EXPORT: usize = 0;
 const DIR_IMPORT: usize = 1;
 const DIR_BASERELOC: usize = 5;
+const DIR_EXCEPTION: usize = 3;
 const DIR_TLS: usize = 9;
 const DIR_CLR: usize = 14;
 
@@ -129,6 +130,8 @@ pub struct Image {
     /// la imagen no va en su dirección preferida.
     pub relocs: Vec<u32>,
     pub tls: Option<Tls>,
+    /// La tabla de funciones para desenrollar la pila (`.pdata`): RVA y tamaño.
+    pub exception: (u32, u32),
     /// Es una biblioteca (DLL), no un programa.
     pub dll: bool,
     /// Lo que ofrece (vacío en casi todos los programas).
@@ -286,12 +289,14 @@ fn parse_image(file: &[u8], want_dll: bool) -> Result<Image, LoadError> {
         imports: Vec::new(),
         relocs: Vec::new(),
         tls: None,
+        exception: (0, 0),
         dll,
         exports: Vec::new(),
     };
     img.exports = exports(file, &img, dir(DIR_EXPORT))?;
     img.imports = imports(file, &img, dir(DIR_IMPORT).0)?;
     img.relocs = relocs(file, &img, dir(DIR_BASERELOC))?;
+    img.exception = dir(DIR_EXCEPTION);
     let (tls_rva, _) = dir(DIR_TLS);
     if tls_rva != 0 {
         let o = img.offset(tls_rva).ok_or(broken("TLS"))?;

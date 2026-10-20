@@ -235,7 +235,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         FormatMessageA,
         OutputDebugStringA,
         OutputDebugStringW,
-        RaiseException,
         SetUnhandledExceptionFilter,
         UnhandledExceptionFilter,
         AddVectoredExceptionHandler,
@@ -2385,12 +2384,6 @@ unsafe extern "win64" fn FormatMessageA(
 }
 unsafe extern "win64" fn OutputDebugStringA(_s: *const u8) {}
 unsafe extern "win64" fn OutputDebugStringW(_s: *const u16) {}
-
-unsafe extern "win64" fn RaiseException(code: u32, _flags: u32, _n: u32, _args: u64) -> ! {
-    super::fatal(&format!(
-        "el programa lanzó una excepción de Windows (0x{code:08X}) y vino todavía no las maneja"
-    ))
-}
 
 unsafe extern "win64" fn SetUnhandledExceptionFilter(_f: u64) -> u64 {
     0

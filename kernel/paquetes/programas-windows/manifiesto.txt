@@ -9,3 +9,4 @@ usuario:saludo.dll -> /Programas/windows/saludo.dll
 usuario:usa-dll.exe -> /Programas/windows/usa-dll.exe
 usuario:hilos-win.exe -> /Programas/windows/hilos-win.exe
 usuario:hilos-c-win.exe -> /Programas/windows/hilos-c-win.exe
+usuario:excep-win.exe -> /Programas/windows/excep-win.exe

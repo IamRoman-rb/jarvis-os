@@ -26,6 +26,7 @@ pub mod pe;
 pub mod printf;
 pub mod state;
 pub mod teb;
+pub mod unwind;
 pub mod win;
 
 #[cfg(target_os = "linux")]

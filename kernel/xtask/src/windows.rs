@@ -20,7 +20,7 @@ use std::time::Duration;
 use super::{BOOT_MARKER, BOOT_TIMEOUT, Result, STEP, Session, target_dir, workspace_root};
 
 /// Los `.exe` de prueba: (nombre, de dónde sale).
-pub const PROGRAMS: [(&str, &str); 9] = [
+pub const PROGRAMS: [(&str, &str); 10] = [
     (
         "hola-rust-win.exe",
         "Rust, con el CRT en DLL (vcruntime140 y ucrtbase)",
@@ -48,6 +48,7 @@ pub const PROGRAMS: [(&str, &str); 9] = [
         "hilos-c-win.exe",
         "C, hilos: CreateThread, CRITICAL_SECTION, eventos, semáforos",
     ),
+    ("excep-win.exe", "C, excepciones estructuradas: __try/__except/__finally"),
 ];
 
 fn prebuilt_dir() -> PathBuf {
@@ -164,6 +165,7 @@ pub fn build_programs() -> Result<()> {
         // saludo.lib la deja la línea anterior: con ella se enlazan los imports de la DLL.
         ("/MD", "usa-dll.c saludo.lib", "usa-dll.exe"),
         ("/MD", "hilos-win.c", "hilos-c-win.exe"),
+        ("/MT", "excep.c", "excep-win.exe"),
     ];
     let mut script = format!(
         "@call \"{}\" >nul\r\ncd /d \"{}\"\r\n",
@@ -284,6 +286,15 @@ pub fn steps(s: &mut Session) -> Result<()> {
     s.wait_for("antes del evento: esperando", STEP)?;
     s.wait_for("evento y semaforo: ok, codigo 7", STEP)?;
     s.wait_for("HILOS_C_OK", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // Excepciones estructuradas de Windows (SEH): __try/__except/__finally con desenrollado.
+    s.type_text("wine /Programas/windows/excep-win.exe")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("filtro: codigo 0xE0000001", STEP)?;
+    s.wait_for("__finally corre (por excepcion)", STEP)?;
+    s.wait_for("atrapada en __except", STEP)?;
+    s.wait_for("pasos: 11", STEP)?;
+    s.wait_for("SEH_OK", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
     // Lo que falta se dice (y el programa termina), en vez de colgarse.
     s.type_text("wine /Programas/windows/falta-win.exe")?;
