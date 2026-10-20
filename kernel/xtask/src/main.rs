@@ -11,6 +11,8 @@
 //!   lo abre a la red local, `--probar URL` hace de kernel y guarda la página en un PNG)
 //! - `vino`        solo la parte de programas de Windows de `test` (ADR 0018)
 //! - `windows`     compila los `.exe` de prueba con Visual Studio (ver `windows.rs`)
+//! - `consola`     JARVIS-OS con la Terminal abierta, que tipea lo que se agrega a
+//!   `target/consola/entrada.txt` (`--python`: con el Python de Windows del anfitrión)
 
 use std::env;
 use std::fs;
@@ -51,9 +53,15 @@ fn main() -> ExitCode {
         "test-instalar" => build().and_then(|img| test_install(&img)),
         "usuario" => build_user().map(|d| println!("programas de Linux: {}", d.display())),
         "windows" => windows::build_programs(),
+        "consola" => build_user()
+            .and_then(|_| build())
+            .and_then(|img| windows::console(&img, env::args().any(|a| a == "--python"))),
         "vino" => build_user()
             .and_then(|_| build())
-            .and_then(|img| windows::test(&img, &fresh_disk("disco-vino.img")?)),
+            .and_then(|img| {
+                let python = env::args().any(|a| a == "--python");
+                windows::test(&img, &fresh_disk("disco-vino.img")?, python)
+            }),
         "screenshot" => build().and_then(|img| screenshot(&img, &fresh_disk("disco-captura.img")?)),
         "vdi" => build().and_then(|img| vdi(&img)),
         "vbox" if env::args().any(|a| a == "--iso") => build()
@@ -73,7 +81,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino|windows|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino [--python]|windows|consola [--python]|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -887,6 +895,18 @@ impl Session {
                 }
                 Err(_) => return Err(format!("no llegó {marker} en {} s", timeout.as_secs())),
             }
+        }
+    }
+
+    /// Muestra lo que llegue por el puerto serie durante `d` (para la consola de desarrollo).
+    fn pump(&mut self, d: Duration) {
+        let deadline = Instant::now() + d;
+        while let Ok(line) = self
+            .lines
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            println!("[serie] {line}");
+            self.history.push(line);
         }
     }
 

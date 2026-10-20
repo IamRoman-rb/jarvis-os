@@ -8,7 +8,7 @@ use std::alloc::{Layout, alloc, alloc_zeroed, dealloc};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 /// Lo que hay detrás de un HANDLE.
@@ -156,7 +156,10 @@ pub fn state() -> Guard {
 /// La dirección del TEB (el último error vive ahí, en `TEB+0x68`, como en Windows: hay código que
 /// lo lee directo de `gs:[0x68]`).
 pub static TEB: AtomicU64 = AtomicU64::new(0);
-static LAST_ERROR: AtomicU32 = AtomicU32::new(0);
+thread_local! {
+    /// Sin TEB (en los tests del anfitrión): uno por hilo, como en Windows.
+    static LAST_ERROR: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
 
 pub fn set_last_error(e: u32) {
     let teb = TEB.load(Ordering::Relaxed);
@@ -164,7 +167,7 @@ pub fn set_last_error(e: u32) {
         // SAFETY: el TEB lo armó `run` y vive hasta el final del proceso.
         unsafe { ((teb as usize + crate::teb::off::TEB_LAST_ERROR) as *mut u32).write(e) };
     } else {
-        LAST_ERROR.store(e, Ordering::Relaxed);
+        LAST_ERROR.with(|l| l.set(e));
     }
 }
 
@@ -174,7 +177,7 @@ pub fn last_error() -> u32 {
         // SAFETY: ídem.
         unsafe { ((teb as usize + crate::teb::off::TEB_LAST_ERROR) as *const u32).read() }
     } else {
-        LAST_ERROR.load(Ordering::Relaxed)
+        LAST_ERROR.with(|l| l.get())
     }
 }
 

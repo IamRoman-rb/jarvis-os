@@ -163,6 +163,7 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         _vsnprintf,
         _vscprintf,
         fopen,
+        _fdopen,
         _wfopen,
         fopen_s,
         _wfopen_s,
@@ -200,13 +201,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         fputws,
         fputwc,
         putwchar,
-        _write,
-        _read,
-        _isatty,
-        _setmode,
-        _close,
-        _get_osfhandle,
-        _commit,
         remove,
         _unlink,
         _wremove,
@@ -427,7 +421,11 @@ pub mod errno {
     pub const ENOTEMPTY: i32 = 41;
 }
 
-fn set_errno(e: i32) {
+pub fn get_errno() -> i32 {
+    ERRNO.load(Ordering::Relaxed)
+}
+
+pub fn set_errno(e: i32) {
     ERRNO.store(e, Ordering::Relaxed);
 }
 
@@ -1035,6 +1033,9 @@ struct Stream {
     /// Modo texto: al leer, `\r\n` → `\n` (al escribir no se agrega `\r`: los archivos de
     /// JARVIS-OS quedan con fines de línea de Linux).
     text: bool,
+    /// La ruta (para darle un descriptor con `_fileno`) y ese descriptor, si ya se pidió.
+    path: String,
+    fd: Option<i32>,
 }
 
 impl Stream {
@@ -1047,6 +1048,8 @@ impl Stream {
             eof: false,
             err: false,
             text,
+            path: String::new(),
+            fd: None,
         }
     }
 
@@ -1240,9 +1243,9 @@ fn open_stream(path: &str, mode: &str) -> Result<u64, i32> {
     let file = o.open(win::to_unix(path)).map_err(|e| errno_of(&e))?;
     // Un bloque de 48 bytes por FILE: así cada uno tiene una dirección propia y estable.
     let key = Box::leak(Box::new([0u8; 48])).as_ptr() as u64;
-    streams()
-        .as_mut()
-        .map(|m| m.insert(key, Stream::new(Target::File(file), text)));
+    let mut st = Stream::new(Target::File(file), text);
+    st.path = win::to_unix(path);
+    streams().as_mut().map(|m| m.insert(key, st));
     Ok(key)
 }
 
@@ -1293,6 +1296,31 @@ unsafe extern "win64" fn _wfopen_s(out: *mut u64, path: *const u16, mode: *const
 unsafe extern "win64" fn freopen(path: *const u8, mode: *const u8, f: u64) -> u64 {
     fclose(f);
     fopen(path, mode)
+}
+
+/// `_fdopen`: un `FILE*` sobre un descriptor de `_open` (comparte el archivo).
+unsafe extern "win64" fn _fdopen(fd: i32, mode: *const u8) -> u64 {
+    if (0..3).contains(&fd) {
+        return std_file(fd as usize);
+    }
+    let text = !cstr(mode).contains(&b'b');
+    let Some(h) = super::lowio::handle_of(fd) else {
+        set_errno(errno::EBADF);
+        return 0;
+    };
+    match super::kernel32::with_file(h, |f| f.try_clone()) {
+        Ok(file) => {
+            let key = Box::leak(Box::new([0u8; 48])).as_ptr() as u64;
+            streams()
+                .as_mut()
+                .map(|m| m.insert(key, Stream::new(Target::File(file), text)));
+            key
+        }
+        Err(_) => {
+            set_errno(errno::EBADF);
+            0
+        }
+    }
 }
 
 unsafe extern "win64" fn fclose(f: u64) -> i32 {
@@ -1492,57 +1520,32 @@ unsafe extern "win64" fn clearerr(f: u64) {
         s.err = false;
     })
 }
+/// El descriptor de un `FILE*`. Para un archivo, uno nuevo de [`super::lowio`] que comparte el
+/// archivo (Python abre con `_wfopen` y después pide `fstat(fileno(f))`).
 unsafe extern "win64" fn _fileno(f: u64) -> i32 {
-    with(f, -1, |s| match s.target {
-        Target::Std(n) => n as i32,
-        Target::File(_) => 3,
+    with(f, -1, |s| match &s.target {
+        Target::Std(n) => *n as i32,
+        Target::File(file) => {
+            if let Some(fd) = s.fd {
+                return fd;
+            }
+            let Ok(clone) = file.try_clone() else {
+                return -1;
+            };
+            let h = state::state().insert(state::Object::File {
+                file: clone,
+                path: s.path.clone(),
+            });
+            let fd = super::lowio::new_fd(h, s.text);
+            s.fd = Some(fd);
+            fd
+        }
     })
 }
 unsafe extern "win64" fn setvbuf(_f: u64, _b: u64, _mode: i32, _size: usize) -> i32 {
     0
 }
 unsafe extern "win64" fn setbuf(_f: u64, _b: u64) {}
-
-// Entrada/salida "de bajo nivel" (descriptores de archivo del CRT): solo los estándar.
-
-unsafe extern "win64" fn _write(fd: i32, buf: *const u8, n: u32) -> i32 {
-    let data = std::slice::from_raw_parts(buf, n as usize);
-    match fd {
-        1 | 2 => put(std_file(fd as usize), data) as i32,
-        _ => {
-            set_errno(errno::EBADF);
-            -1
-        }
-    }
-}
-unsafe extern "win64" fn _read(fd: i32, buf: *mut u8, n: u32) -> i32 {
-    if fd != 0 {
-        set_errno(errno::EBADF);
-        return -1;
-    }
-    let out = std::slice::from_raw_parts_mut(buf, n as usize);
-    with(std_file(0), -1, |s| s.read(out) as i32)
-}
-unsafe extern "win64" fn _isatty(fd: i32) -> i32 {
-    i32::from((0..3).contains(&fd))
-}
-unsafe extern "win64" fn _setmode(_fd: i32, _mode: i32) -> i32 {
-    0x4000 // _O_TEXT
-}
-unsafe extern "win64" fn _close(_fd: i32) -> i32 {
-    0
-}
-unsafe extern "win64" fn _get_osfhandle(fd: i32) -> u64 {
-    match fd {
-        0 => state::STD_IN,
-        1 => state::STD_OUT,
-        2 => state::STD_ERR,
-        _ => state::INVALID_HANDLE,
-    }
-}
-unsafe extern "win64" fn _commit(_fd: i32) -> i32 {
-    0
-}
 
 fn io_result(r: std::io::Result<()>) -> i32 {
     match r {
@@ -2032,8 +2035,9 @@ unsafe extern "win64" fn _strupr(s: *mut u8) -> *mut u8 {
     s
 }
 
-unsafe extern "win64" fn strerror(e: i32) -> *const u8 {
-    let t: &'static [u8] = match e {
+/// El mensaje de `strerror` (terminado en cero).
+pub fn strerror_text(e: i32) -> &'static [u8] {
+    match e {
         0 => b"No error\0",
         errno::ENOENT => b"No such file or directory\0",
         errno::EBADF => b"Bad file descriptor\0",
@@ -2044,8 +2048,11 @@ unsafe extern "win64" fn strerror(e: i32) -> *const u8 {
         errno::ERANGE => b"Result too large\0",
         errno::ENOTEMPTY => b"Directory not empty\0",
         _ => b"Unknown error\0",
-    };
-    t.as_ptr()
+    }
+}
+
+unsafe extern "win64" fn strerror(e: i32) -> *const u8 {
+    strerror_text(e).as_ptr()
 }
 unsafe extern "win64" fn perror(s: *const u8) {
     let msg = cstr(strerror(ERRNO.load(Ordering::Relaxed)));

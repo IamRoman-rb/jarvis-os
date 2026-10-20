@@ -17,9 +17,12 @@
 #![allow(clippy::missing_safety_doc, clippy::too_many_arguments)]
 
 pub mod crt;
+pub mod crt2;
 pub mod extra;
 pub mod kernel32;
+pub mod lowio;
 pub mod ntdll;
+pub mod sistema;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -36,15 +39,17 @@ pub enum Dll {
     Bcrypt,
     Advapi32,
     User32,
+    Version,
 }
 
-const ALL: [Dll; 6] = [
+const ALL: [Dll; 7] = [
     Dll::Kernel32,
     Dll::Ntdll,
     Dll::Crt,
     Dll::Bcrypt,
     Dll::Advapi32,
     Dll::User32,
+    Dll::Version,
 ];
 
 /// `KERNEL32.dll`, `api-ms-win-crt-runtime-l1-1-0.dll`… → la DLL de `vino` que la reemplaza.
@@ -65,6 +70,7 @@ pub fn dll_of(name: &str) -> Option<Dll> {
         "bcryptprimitives" | "bcrypt" => Dll::Bcrypt,
         "advapi32" | "cryptbase" => Dll::Advapi32,
         "user32" => Dll::User32,
+        "version" => Dll::Version,
         _ => return None,
     })
 }
@@ -78,6 +84,7 @@ pub fn file_name(d: Dll) -> &'static str {
         Dll::Bcrypt => "bcryptprimitives.dll",
         Dll::Advapi32 => "advapi32.dll",
         Dll::User32 => "user32.dll",
+        Dll::Version => "version.dll",
     }
 }
 
@@ -87,8 +94,12 @@ fn table() -> &'static HashMap<(Dll, &'static str), usize> {
         let mut t = HashMap::new();
         for (d, list) in [
             (Dll::Kernel32, kernel32::exports()),
+            (Dll::Kernel32, sistema::exports()),
             (Dll::Ntdll, ntdll::exports()),
             (Dll::Crt, crt::exports()),
+            (Dll::Crt, lowio::exports()),
+            (Dll::Crt, crt2::exports()),
+            (Dll::Version, extra::version_exports()),
             (Dll::Bcrypt, extra::bcrypt_exports()),
             (Dll::Advapi32, extra::advapi32_exports()),
             (Dll::User32, extra::user32_exports()),

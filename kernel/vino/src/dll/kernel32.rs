@@ -324,7 +324,7 @@ pub fn write_handle(h: u64, data: &[u8]) -> Result<usize, u32> {
 }
 
 /// ¿Es uno de los estándar (cuál) o un archivo (`None`)?
-fn std_of(h: u64) -> Result<Option<u8>, u32> {
+pub fn std_of(h: u64) -> Result<Option<u8>, u32> {
     match state().get(h) {
         Some(Object::Std(n)) => Ok(Some(*n)),
         Some(Object::File { .. }) => Ok(None),
@@ -672,7 +672,7 @@ unsafe extern "win64" fn WriteFile(
 }
 
 /// Lo que hace una función sobre un archivo abierto (o el error de Windows).
-fn with_file<R>(h: u64, f: impl FnOnce(&mut File) -> io::Result<R>) -> Result<R, u32> {
+pub fn with_file<R>(h: u64, f: impl FnOnce(&mut File) -> io::Result<R>) -> Result<R, u32> {
     match state().get(h) {
         Some(Object::File { file, .. }) => f(file).map_err(|e| win::error_code(&e)),
         _ => Err(error::INVALID_HANDLE),
@@ -725,7 +725,7 @@ unsafe extern "win64" fn GetFileSize(h: u64, high: *mut u32) -> u32 {
     }
 }
 
-fn seek(h: u64, dist: i64, method: u32) -> Result<u64, u32> {
+pub fn seek(h: u64, dist: i64, method: u32) -> Result<u64, u32> {
     let pos = match method {
         0 => SeekFrom::Start(dist.max(0) as u64),
         1 => SeekFrom::Current(dist),
@@ -780,7 +780,7 @@ unsafe extern "win64" fn SetEndOfFile(h: u64) -> Bool {
 
 /// Los datos de un archivo o carpeta abiertos: atributos, tamaño, fecha (FILETIME) y un número
 /// que lo identifica.
-fn handle_meta(h: u64) -> Result<(u32, u64, u64, u64), u32> {
+pub fn handle_meta(h: u64) -> Result<(u32, u64, u64, u64), u32> {
     let (meta, path) = match state().get(h) {
         Some(Object::File { file, path }) => (file.metadata(), path.clone()),
         Some(Object::Dir(p)) => (fs::metadata(&*p), p.to_string_lossy().into_owned()),

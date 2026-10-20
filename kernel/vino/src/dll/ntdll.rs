@@ -37,6 +37,8 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         RtlFreeHeap,
         RtlGetLastWin32Error,
         RtlSetLastWin32Error,
+        VerSetConditionMask,
+        RtlVerifyVersionInfo,
     ]
 }
 
@@ -187,4 +189,22 @@ unsafe extern "win64" fn RtlGetLastWin32Error() -> u32 {
 
 unsafe extern "win64" fn RtlSetLastWin32Error(e: u32) {
     state::set_last_error(e)
+}
+
+/// `VerSetConditionMask`: 3 bits de condición por cada dato de la versión (VER_MINORVERSION = 1,
+/// VER_MAJORVERSION = 2, VER_BUILDNUMBER = 4…), en el lugar de ese bit.
+unsafe extern "win64" fn VerSetConditionMask(mask: u64, type_mask: u32, condition: u8) -> u64 {
+    let mut m = mask;
+    for i in 0..8 {
+        if type_mask & (1 << i) != 0 {
+            m |= ((condition & 7) as u64) << (i * 3);
+        }
+    }
+    m
+}
+
+/// `RtlVerifyVersionInfo`: ¿es al menos tal Windows? JARVIS-OS se presenta como Windows 10, así
+/// que lo que piden los programas (7, 8, 10) se cumple.
+unsafe extern "win64" fn RtlVerifyVersionInfo(_info: u64, _type_mask: u32, _cond: u64) -> u32 {
+    STATUS_SUCCESS
 }

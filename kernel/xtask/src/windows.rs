@@ -11,6 +11,7 @@
 
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -265,18 +266,190 @@ pub fn steps(s: &mut Session) -> Result<()> {
 }
 
 /// `cargo xtask vino`: solo la parte de Windows (más rápido que `cargo xtask test`).
-pub fn test(image: &Path, disk: &Path) -> Result<()> {
+pub fn test(image: &Path, disk: &Path, python: bool) -> Result<()> {
+    if python {
+        copy_python(disk)?;
+    }
     super::puente::start();
     let mut s = Session::start(image, disk)?;
     s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
     s.monitor("sendkey ctrl-alt-t")?;
     s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
     thread::sleep(Duration::from_millis(500));
-    let r = steps(&mut s);
+    let mut r = steps(&mut s);
+    if python && r.is_ok() {
+        r = python_steps(&mut s);
+    }
     thread::sleep(Duration::from_secs(1));
     s.screenshot(&target_dir().join("jarvis-os-vino.png"))?;
     s.quit();
     r?;
     println!("ok: vino corrió los programas de Windows (Rust y C, con el CRT en DLL y adentro)");
     Ok(())
+}
+
+/// Python de Windows (el del anfitrión) corre un script en JARVIS-OS y tiene que dar lo mismo que
+/// en Windows: se compara con lo que da el mismo Python acá.
+fn python_steps(s: &mut Session) -> Result<()> {
+    let script = workspace_root().join("usuario-win/python/prueba-python.py");
+    let py = host_python().ok_or("no encontré Python en el anfitrión")?;
+    let work = target_dir().join("python-anfitrion");
+    fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let native = Command::new(py.join("python.exe"))
+        .arg(&script)
+        .current_dir(&work)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let want = String::from_utf8_lossy(&native.stdout).replace("\r\n", "\n");
+    fs::copy(&script, target_dir().join("usuario/prueba-python.py")).map_err(|e| e.to_string())?;
+    s.type_text(
+        "wget -q http://paquetes.jarvis/usuario/prueba-python.py -O /Documentos/prueba-python.py",
+    )?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("wine /Programas/python/python.exe /Documentos/prueba-python.py")?;
+    s.monitor("sendkey ret")?;
+    // Las últimas líneas no dependen de la carpeta: hashes, decimales, azar con semilla.
+    let lines: Vec<&str> = want.lines().collect();
+    for line in &lines[lines.len().saturating_sub(5)..] {
+        s.wait_for(line, Duration::from_secs(120))?;
+    }
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    Ok(())
+}
+
+/// Las carpetas de la biblioteca de Python que no hacen falta (y pesan): tests, interfaces
+/// gráficas, instaladores y los `.pyc` del anfitrión.
+const PYTHON_SKIP: [&str; 9] = [
+    "__pycache__",
+    "test",
+    "tests",
+    "idlelib",
+    "tkinter",
+    "turtledemo",
+    "ensurepip",
+    "site-packages",
+    "lib2to3",
+];
+
+/// Copia `src` adentro de `dir` en el disco (sin lo de [`PYTHON_SKIP`] ni las DLL de prueba).
+fn copy_filtered<T: fatfs::ReadWriteSeek>(dir: &fatfs::Dir<'_, T>, src: &Path) -> Result<()> {
+    let io = |e: std::io::Error| format!("{}: {e}", src.display());
+    for entry in fs::read_dir(src).map_err(io)?.filter_map(|e| e.ok()) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        if PYTHON_SKIP.contains(&name.as_str()) || name.starts_with("_test") {
+            continue;
+        }
+        if path.is_dir() {
+            copy_filtered(&dir.create_dir(&name).map_err(io)?, &path)?;
+        } else {
+            let data = fs::read(&path).map_err(io)?;
+            let mut file = dir.create_file(&name).map_err(io)?;
+            file.truncate().map_err(io)?;
+            file.write_all(&data).map_err(io)?;
+        }
+    }
+    Ok(())
+}
+
+/// El Python de Windows instalado en el anfitrión (para probar `vino` con un programa grande de
+/// verdad). Solo en la PC de desarrollo: no va al repositorio.
+fn host_python() -> Option<PathBuf> {
+    let base = PathBuf::from(env::var("LOCALAPPDATA").ok()?).join("Programs/Python");
+    let mut found: Vec<PathBuf> = fs::read_dir(base)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.join("python.exe").is_file())
+        .collect();
+    found.sort();
+    found.pop()
+}
+
+/// Pone el Python del anfitrión en `/Programas/python` del disco.
+fn copy_python(disk: &Path) -> Result<()> {
+    let py = host_python().ok_or(r"no encontré Python en %LOCALAPPDATA%\Programs\Python")?;
+    let mut file = super::open_fatfs(disk)?;
+    let fs =
+        fatfs::FileSystem::new(&mut file, fatfs::FsOptions::new()).map_err(|e| e.to_string())?;
+    let root = fs.root_dir();
+    let programas = root
+        .open_dir("Programas")
+        .or_else(|_| root.create_dir("Programas"))
+        .map_err(|e| e.to_string())?;
+    let dest = programas.create_dir("python").map_err(|e| e.to_string())?;
+    for entry in fs::read_dir(&py)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let lower = name.to_ascii_lowercase();
+        let path = entry.path();
+        if path.is_file() && (lower.ends_with(".exe") || lower.ends_with(".dll")) {
+            let data = fs::read(&path).map_err(|e| e.to_string())?;
+            let mut f = dest.create_file(&name).map_err(|e| e.to_string())?;
+            f.truncate().map_err(|e| e.to_string())?;
+            f.write_all(&data).map_err(|e| e.to_string())?;
+        } else if name == "Lib" || name == "DLLs" {
+            copy_filtered(&dest.create_dir(&name).map_err(|e| e.to_string())?, &path)?;
+        }
+    }
+    drop(dest);
+    drop(programas);
+    drop(root);
+    fs.unmount().map_err(|e| e.to_string())?;
+    println!("Python de {} copiado a /Programas/python", py.display());
+    Ok(())
+}
+
+/// `cargo xtask consola [--python]`: JARVIS-OS con la Terminal abierta y `vino` instalado, que
+/// tipea cada renglón que se agrega a `target/consola/entrada.txt`. Lo que llega por el puerto
+/// serie sale por la salida estándar. Para desarrollar `vino` sin reiniciar QEMU: se recompila
+/// en el anfitrión (`cargo xtask usuario`) y en JARVIS-OS se baja de nuevo con
+/// `wget http://paquetes.jarvis/usuario/vino -O /Programas/bin/vino`.
+///
+/// Renglones especiales: `!salir`, `!captura` (en `target/consola.png`) y `!tecla X` (una tecla
+/// con el nombre de QEMU: `ctrl-c`, `ret`…).
+pub fn console(image: &Path, python: bool) -> Result<()> {
+    let disk = super::fresh_disk("disco-consola.img")?;
+    if python {
+        copy_python(&disk)?;
+    }
+    super::puente::start();
+    let dir = target_dir().join("consola");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let input = dir.join("entrada.txt");
+    fs::write(&input, "").map_err(|e| e.to_string())?;
+    let mut s = Session::start(image, &disk)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    s.type_text("apt install vino programas-windows")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO programas-windows", STEP)?;
+    println!("CONSOLA_LISTA: agregá renglones a {}", input.display());
+    let mut done = 0;
+    loop {
+        s.pump(Duration::from_millis(300));
+        let text = fs::read_to_string(&input).unwrap_or_default();
+        let lines: Vec<&str> = text.lines().collect();
+        while done < lines.len() {
+            let line = lines[done].trim_end();
+            done += 1;
+            println!("[consola] {line}");
+            if line == "!salir" {
+                s.quit();
+                return Ok(());
+            } else if line == "!captura" {
+                s.screenshot(&target_dir().join("consola.png"))?;
+            } else if let Some(k) = line.strip_prefix("!tecla ") {
+                s.monitor(&format!("sendkey {k}"))?;
+            } else {
+                s.type_text(line)?;
+                s.monitor("sendkey ret")?;
+            }
+        }
+    }
 }
