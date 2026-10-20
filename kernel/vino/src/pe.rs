@@ -10,14 +10,38 @@
 //! nombre o por número (ordinal). Algunas no están en la DLL sino que la "reenvían" a otra
 //! (`KERNEL32.HeapAlloc` es en realidad `NTDLL.RtlAllocateHeap`).
 //!
-//! Lo que hace el cargador con esto está en `process::win`. Referencia: "PE Format" de Microsoft
-//! (learn.microsoft.com/windows/win32/debug/pe-format).
+//! Lo que hace el cargador con esto está en [`crate::loader`]. Referencia: "PE Format" de
+//! Microsoft (learn.microsoft.com/windows/win32/debug/pe-format).
 
-use alloc::string::String;
-use alloc::vec::Vec;
+use std::fmt;
 
-use crate::abi::prot;
-use crate::elf::LoadError;
+/// Los permisos de una página, con los números de `mmap` de Linux (`PROT_*`).
+pub mod prot {
+    pub const READ: u32 = 1;
+    pub const WRITE: u32 = 2;
+    pub const EXEC: u32 = 4;
+}
+
+/// Por qué no se puede cargar un archivo.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LoadError {
+    /// No empieza con `MZ` … `PE\0\0`.
+    NotPe,
+    /// Es un PE, pero de un tipo que `vino` no corre (32 bits, .NET, ARM64, una DLL).
+    WrongKind(&'static str),
+    /// Está roto o es raro: qué parte.
+    Broken(&'static str),
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LoadError::NotPe => f.write_str("no es un programa de Windows"),
+            LoadError::WrongKind(why) => f.write_str(why),
+            LoadError::Broken(what) => write!(f, "el programa está dañado ({what})"),
+        }
+    }
+}
 
 const MACHINE_AMD64: u16 = 0x8664;
 const MACHINE_I386: u16 = 0x14c;
@@ -151,7 +175,7 @@ pub fn parse_dll(file: &[u8]) -> Result<Image, LoadError> {
 fn parse_image(file: &[u8], want_dll: bool) -> Result<Image, LoadError> {
     let broken = LoadError::Broken;
     if !is_pe(file) {
-        return Err(LoadError::NotElf);
+        return Err(LoadError::NotPe);
     }
     let pe = u32_at(file, 0x3c).ok_or(broken("encabezado"))? as usize;
     let coff = pe + 4;
@@ -165,7 +189,7 @@ fn parse_image(file: &[u8], want_dll: bool) -> Result<Image, LoadError> {
         (MACHINE_AMD64, PE32_PLUS) => {}
         (MACHINE_I386, _) | (_, PE32) => {
             return Err(LoadError::WrongKind(
-                "es un programa de Windows de 32 bits (x86); JARVIS-OS corre los de 64 bits",
+                "es un programa de Windows de 32 bits (x86); vino corre los de 64 bits",
             ));
         }
         (MACHINE_ARM64, _) => {
@@ -325,7 +349,7 @@ fn exports(file: &[u8], img: &Image, (rva, size): (u32, u32)) -> Result<Vec<Expo
         .offset(u32_at(file, d + 28).ok_or(broken.clone())?)
         .ok_or(broken.clone())?;
     // Los nombres: cada uno apunta (por su índice en la tabla de ordinales) a una función.
-    let mut names: Vec<Option<String>> = alloc::vec![None; nfuncs];
+    let mut names: Vec<Option<String>> = vec![None; nfuncs];
     if nnames > 0 {
         let name_ptrs = img
             .offset(u32_at(file, d + 32).ok_or(broken.clone())?)
@@ -459,7 +483,6 @@ fn relocs(file: &[u8], img: &Image, (rva, size): (u32, u32)) -> Result<Vec<u32>,
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use alloc::vec;
 
     /// Un `.exe` mínimo armado a mano: una sección de código (`.text`, con `ret`) y una de
     /// datos con los imports de `KERNEL32.dll` (`ExitProcess` y el ordinal 7) y `msvcrt.dll`.
@@ -613,7 +636,7 @@ pub mod tests {
         let clr = 0x84 + 20 + 112 + DIR_CLR * 8;
         f[clr] = 1;
         assert!(matches!(parse(&f), Err(LoadError::WrongKind(m)) if m.contains(".NET")));
-        assert!(matches!(parse(b"MZ"), Err(LoadError::NotElf)));
+        assert!(matches!(parse(b"MZ"), Err(LoadError::NotPe)));
         assert!(!is_pe(b"\x7fELF"));
     }
 }

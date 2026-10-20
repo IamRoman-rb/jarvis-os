@@ -1,0 +1,22 @@
+# vino: corre programas de Windows (x86-64, de consola) en JARVIS-OS, como Wine en Linux (ADR 0018).
+# Es un programa de Linux más: estático (musl), en el anillo 3, y le habla al kernel solo con la
+# ABI de Linux. Workspace aparte, sin dependencias. `cargo test` corre en el anfitrión (la mitad
+# portable: PE, cargador, printf, rutas); `cargo xtask usuario` lo compila para musl.
+[workspace]
+
+[package]
+name = "vino"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[profile.release]
+opt-level = "s"
+panic = "abort"
+strip = true
+lto = true
+codegen-units = 1
+
+[profile.dev]
+panic = "abort"
