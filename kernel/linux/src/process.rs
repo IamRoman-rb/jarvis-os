@@ -83,6 +83,7 @@ pub struct Process {
     pub mm: Mm,
     fds: Vec<Option<Fd>>,
     fs_base: u64,
+    gs_base: u64,
 }
 
 fn err(e: i64) -> Flow {
@@ -137,6 +138,7 @@ impl Process {
             mm: Mm::new(),
             fds: Vec::new(),
             fs_base: 0,
+            gs_base: 0,
         };
         p.load_segments(file, &program, sys)?;
         // Un programa dinámico arranca por su intérprete (`ld.so`), que carga las bibliotecas y
@@ -713,6 +715,17 @@ impl Process {
             // rseq: glibc lo prueba al arrancar y sigue sin él.
             nr::RSEQ => Err(ENOSYS),
             nr::ARCH_PRCTL => match a[0] {
+                0x1001 => {
+                    // ARCH_SET_GS: Linux no usa GS en el espacio de usuario, así que queda libre
+                    // para el programa. `vino` pone ahí el TEB de un programa de Windows (ADR 0018).
+                    self.gs_base = a[1];
+                    sys.set_gs(a[1]);
+                    ok(0)
+                }
+                0x1004 => {
+                    self.copy_out(a[1], &self.gs_base.to_le_bytes(), sys)?;
+                    ok(0)
+                }
                 0x1002 => {
                     // ARCH_SET_FS: el puntero al bloque de TLS del hilo.
                     self.fs_base = a[1];
@@ -1079,6 +1092,15 @@ impl Process {
             return Err(EINVAL);
         }
         let fixed = flags & (abi::map::FIXED | abi::map::FIXED_NOREPLACE) != 0;
+        // MAP_FIXED_NOREPLACE: en esa dirección o nada (EEXIST si ya hay algo), sin pisar. `vino`
+        // lo usa para poner un `.exe` en su dirección preferida.
+        if flags & abi::map::FIXED_NOREPLACE != 0
+            && self
+                .mm
+                .overlaps(addr, addr.saturating_add(page_up(len).ok_or(EINVAL)?))
+        {
+            return Err(EEXIST);
+        }
         // Un archivo mapeado en privado: su contenido se copia (no hay memoria compartida).
         let content = if flags & abi::map::ANONYMOUS == 0 {
             let h = self.get(fd)?;

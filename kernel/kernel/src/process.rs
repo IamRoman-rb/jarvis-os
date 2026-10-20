@@ -286,6 +286,9 @@ impl System for KernelSystem {
     fn set_fs(&mut self, base: u64) {
         x86_64::registers::model_specific::FsBase::write(x86_64::VirtAddr::new(base));
     }
+    fn set_gs(&mut self, base: u64) {
+        x86_64::registers::model_specific::GsBase::write(x86_64::VirtAddr::new(base));
+    }
     fn realtime_ns(&mut self) -> u64 {
         tls::unix_ns().unwrap_or(0)
     }

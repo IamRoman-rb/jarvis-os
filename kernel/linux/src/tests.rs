@@ -22,6 +22,7 @@ struct Fake {
     input: Vec<Vec<u8>>,
     logs: Vec<String>,
     fs: u64,
+    gs: u64,
     sent: Vec<u8>,
     net_ops: Vec<String>,
 }
@@ -80,6 +81,9 @@ impl System for Fake {
     }
     fn set_fs(&mut self, base: u64) {
         self.fs = base;
+    }
+    fn set_gs(&mut self, base: u64) {
+        self.gs = base;
     }
     fn realtime_ns(&mut self) -> u64 {
         1_790_000_000_000_000_000
@@ -360,6 +364,27 @@ fn memoria_brk_mmap_y_mprotect() {
     // mprotect a nada: una página de guarda.
     assert_eq!(call(&mut p, &mut sys, nr::MPROTECT, &[big, 4096, 0]), 0);
     assert!(!p.fault(big, false, false, &mut sys));
+    // MAP_FIXED_NOREPLACE: no pisa lo que ya está (EEXIST); en un hueco, va donde se pidió.
+    let noreplace = 0x22 | 0x10_0000;
+    assert_eq!(
+        call(
+            &mut p,
+            &mut sys,
+            nr::MMAP,
+            &[big, 4096, 3, noreplace, u64::MAX, 0]
+        ),
+        -EEXIST
+    );
+    let at = 0x1_4000_0000;
+    assert_eq!(
+        call(
+            &mut p,
+            &mut sys,
+            nr::MMAP,
+            &[at, 8192, 3, noreplace, u64::MAX, 0]
+        ) as u64,
+        at
+    );
     // munmap: la página se libera y la dirección deja de valer.
     assert_eq!(call(&mut p, &mut sys, nr::MUNMAP, &[big, 1 << 30]), 0);
     assert!(!sys.pages.contains_key(&(big + (1 << 29))));
@@ -401,6 +426,11 @@ fn identidad_tiempo_azar_y_llamadas_que_faltan() {
     assert_eq!(p.copy_in(ts, 16, &mut sys).unwrap(), [0xAB; 16]);
     assert_eq!(call(&mut p, &mut sys, nr::ARCH_PRCTL, &[0x1002, 0x7000]), 0);
     assert_eq!(sys.fs, 0x7000);
+    // ARCH_SET_GS / ARCH_GET_GS: la base de GS (el TEB de los programas de `vino`).
+    assert_eq!(call(&mut p, &mut sys, nr::ARCH_PRCTL, &[0x1001, 0x9000]), 0);
+    assert_eq!(sys.gs, 0x9000);
+    assert_eq!(call(&mut p, &mut sys, nr::ARCH_PRCTL, &[0x1004, ts]), 0);
+    assert_eq!(p.copy_in(ts, 8, &mut sys).unwrap(), 0x9000u64.to_le_bytes());
     assert_eq!(call(&mut p, &mut sys, 9999, &[]), -ENOSYS);
     assert!(sys.logs[0].contains("9999"), "{:?}", sys.logs);
     let mut a = [0u64; 6];

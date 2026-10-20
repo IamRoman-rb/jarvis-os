@@ -133,7 +133,7 @@ impl Mm {
     }
 
     /// ¿Hay algo en `[start, end)`?
-    fn overlaps(&self, start: u64, end: u64) -> bool {
+    pub fn overlaps(&self, start: u64, end: u64) -> bool {
         self.vmas.iter().any(|v| v.start < end && start < v.end)
     }
 
