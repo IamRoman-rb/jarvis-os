@@ -57,10 +57,14 @@ nada de Windows vive adentro. El escritorio y las apps siguen como están.
 
 ## Qué no entra todavía
 
-Lo mismo que en el ADR 0016: 32 bits (WoW64), .NET, ventanas (GDI/USER), varios hilos
-(`CreateThread` devuelve error hasta que el kernel tenga `clone`), instaladores, excepciones (SEH
-y C++: el programa termina con un aviso) y DLL de terceros (las que vienen al lado del `.exe`; el
-parser ya lee exports y reenvíos). `scanf`, el registro de Windows y `system()` tampoco.
+Al principio: 32 bits (WoW64), .NET, ventanas (GDI/USER), instaladores, `scanf`, el registro de
+Windows y `system()`. Después se fueron sumando, sin tocar el kernel salvo por `clone`/`futex`:
+las DLL de terceros (con `DllMain` y `LoadLibrary`), los **hilos** (`CreateThread`/`_beginthreadex`
+sobre `clone` y `futex`, con el TEB, el TLS y la sincronización de Windows), **Python de Windows**
+con su biblioteca estándar, y el **SEH de C** (`__try`/`__except`/`__finally`, con un desenrollador
+de pila x64 propio que lee las tablas `.pdata`). Quedan las excepciones de C++ (throw/catch, que
+usan el protocolo de funclets de `__CxxFrameHandler*`: por ahora un throw que cruza marcos termina
+con un aviso), 32 bits, .NET y las ventanas.
 
 ## Consecuencias
 
