@@ -11,7 +11,7 @@
 use std::sync::atomic::Ordering;
 
 use crate::dll;
-use crate::loader;
+use crate::modules;
 use crate::os;
 use crate::pe::{self, LoadError, prot};
 use crate::state::{self, PROCESS_HEAP, STD_ERR, STD_IN, STD_OUT};
@@ -23,7 +23,6 @@ struct Start {
     entry: u64,
     peb: u64,
     base: u64,
-    callbacks: Vec<u64>,
 }
 
 /// Carga `file` (el `.exe` en `path`) y lo corre con `args` (`args[0]` es el programa). No
@@ -35,31 +34,8 @@ pub fn run(
 ) -> Result<std::convert::Infallible, LoadError> {
     let img = pe::parse(file)?;
     let size = img.size_of_image as usize;
-    let base = os::map(img.image_base, size, prot::READ | prot::WRITE, true)
-        .or_else(|| {
-            if img.relocs.is_empty() {
-                None
-            } else {
-                os::map(0, size, prot::READ | prot::WRITE, false)
-            }
-        })
-        .ok_or(LoadError::Broken(
-            "no hay memoria para el programa (o no se puede mover de su dirección)",
-        ))?;
-    // SAFETY: `mmap` acaba de dar `size` bytes de lectura y escritura en `base`, que son de
-    // `vino` y nadie más los usa.
-    let mem = unsafe { std::slice::from_raw_parts_mut(base as *mut u8, size) };
-    loader::copy_sections(file, &img, mem)?;
-    loader::relocate(&img, mem, base)?;
-    loader::bind(&img, mem, &mut |d, s| dll::resolve(d, s))?;
-    let tls = loader::tls(&img, mem)?;
-    for (rva, len, p) in loader::protections(&img) {
-        let start = base + (rva as u64 & !0xfff);
-        let end = (base + rva as u64 + len as u64).next_multiple_of(4096);
-        // Las secciones no siempre empiezan y terminan en una página: si dos comparten una, la
-        // segunda le suma sus permisos (por eso se aplican en orden y con la unión).
-        let _ = os::protect(start, (end - start) as usize, p | prot::READ);
-    }
+    // El programa y, en cadena, las DLL que trae (ver `modules`).
+    let base = modules::load_image(path, file, false)?;
 
     // La pila de Windows: lo que pide el programa (1 MiB, lo normal), con un piso de 8 MiB
     // porque las páginas recién se asignan al usarlas (no cuesta nada reservar de más).
@@ -67,16 +43,6 @@ pub fn run(
     let stack = os::map(0, stack_size, prot::READ | prot::WRITE, false)
         .ok_or(LoadError::Broken("no hay memoria para la pila"))?;
     let stack_top = stack + stack_size as u64;
-
-    // El TLS (`__declspec(thread)`): un bloque con el molde y el índice 0 en `_tls_index`.
-    let tls_array = Box::leak(vec![0u64; 4].into_boxed_slice());
-    let mut callbacks = Vec::new();
-    if let Some(t) = tls {
-        let block = Box::leak(t.template.into_boxed_slice());
-        tls_array[0] = block.as_ptr() as u64;
-        mem[t.index_rva as usize..t.index_rva as usize + 4].copy_from_slice(&0u32.to_le_bytes());
-        callbacks = t.callbacks;
-    }
 
     let image_path = win::to_windows(path);
     let command_line = win::command_line(args);
@@ -102,7 +68,7 @@ pub fn run(
             stack_limit: stack,
             pid,
             tid: pid,
-            tls_array: tls_array.as_ptr() as u64,
+            tls_array: modules::tls_array(),
             heap: PROCESS_HEAP,
             std_handles: [STD_IN, STD_OUT, STD_ERR],
             image_path: &image_path,
@@ -132,7 +98,6 @@ pub fn run(
         entry: base + img.entry_rva as u64,
         peb: addrs.peb,
         base,
-        callbacks,
     }));
     // Alineada a 16: después del `call`, el programa ve la pila como la deja cualquier llamada.
     let top = stack_top & !0xf;
@@ -151,11 +116,14 @@ pub fn run(
     }
 }
 
-/// Ya en la pila de Windows: TLS, punto de entrada y salida.
+/// Ya en la pila de Windows: `DllMain` de las DLL, TLS, punto de entrada y salida.
 extern "C" fn on_windows_stack(start: *mut Start) -> ! {
     // SAFETY: es el `Start` que dejó `run` (vive para siempre).
     let s = unsafe { &*start };
-    for &cb in &s.callbacks {
+    if let Err(why) = modules::init_pending(true) {
+        dll::fatal(&why);
+    }
+    for cb in modules::tls_callbacks(s.base) {
         // PIMAGE_TLS_CALLBACK(DllHandle, Reason, Reserved); DLL_PROCESS_ATTACH = 1.
         // SAFETY: es una función del programa, de la lista de callbacks de TLS.
         let f: unsafe extern "win64" fn(u64, u32, u64) =

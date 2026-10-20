@@ -210,6 +210,7 @@ pub mod error {
     pub const DIR_NOT_EMPTY: u32 = 145;
     pub const ALREADY_EXISTS: u32 = 183;
     pub const ENVVAR_NOT_FOUND: u32 = 203;
+    pub const DLL_INIT_FAILED: u32 = 1114;
     pub const BROKEN_PIPE: u32 = 109;
 }
 

@@ -5,3 +5,5 @@ usuario:hola-rust-win-mt.exe -> /Programas/windows/hola-rust-win-mt.exe
 usuario:hola-win.exe -> /Programas/windows/hola-win.exe
 usuario:hola-win-mt.exe -> /Programas/windows/hola-win-mt.exe
 usuario:falta-win.exe -> /Programas/windows/falta-win.exe
+usuario:saludo.dll -> /Programas/windows/saludo.dll
+usuario:usa-dll.exe -> /Programas/windows/usa-dll.exe

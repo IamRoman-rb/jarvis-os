@@ -119,14 +119,9 @@ pub fn resolve(dll: &str, sym: &Symbol) -> u64 {
         (Some(d), Symbol::Name(n)) => find(d, n),
         _ => None,
     };
-    found.map(|a| a as u64).unwrap_or_else(|| {
-        let short = dll.trim_end_matches(".dll").trim_end_matches(".DLL");
-        let what = match sym {
-            Symbol::Name(n) => format!("{}!{n}", short.to_ascii_uppercase()),
-            Symbol::Ordinal(o) => format!("{}!#{o}", short.to_ascii_uppercase()),
-        };
-        missing::stub_for(what)
-    })
+    found
+        .map(|a| a as u64)
+        .unwrap_or_else(|| missing::stub_for(missing::label(dll, sym, None)))
 }
 
 // --- Los HMODULE de las DLL builtin ---------------------------------------------------------
@@ -282,6 +277,20 @@ pub mod missing {
             row!(v, 31);
             v
         })
+    }
+
+    /// `KERNEL32!Foo`, `WS2_32!#23`; con `why` si falta la DLL entera.
+    pub fn label(dll: &str, sym: &Symbol, why: Option<&str>) -> String {
+        let file = dll.rsplit(['\\', '/']).next().unwrap_or(dll);
+        let short = file.split('.').next().unwrap_or(file).to_ascii_uppercase();
+        let what = match sym {
+            Symbol::Name(n) => format!("{short}!{n}"),
+            Symbol::Ordinal(o) => format!("{short}!#{o}"),
+        };
+        match why {
+            Some(w) => format!("{what} ({w})"),
+            None => what,
+        }
     }
 
     /// La función que avisa que falta `name` (la misma si se pide dos veces).

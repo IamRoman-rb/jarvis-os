@@ -19,7 +19,7 @@ use std::time::Duration;
 use super::{BOOT_MARKER, BOOT_TIMEOUT, Result, STEP, Session, target_dir, workspace_root};
 
 /// Los `.exe` de prueba: (nombre, de dónde sale).
-pub const PROGRAMS: [(&str, &str); 5] = [
+pub const PROGRAMS: [(&str, &str); 7] = [
     (
         "hola-rust-win.exe",
         "Rust, con el CRT en DLL (vcruntime140 y ucrtbase)",
@@ -34,6 +34,14 @@ pub const PROGRAMS: [(&str, &str); 5] = [
         "C, /MT (el CRT adentro: solo usa kernel32)",
     ),
     ("falta-win.exe", "C, /MD, usa una función que vino no tiene"),
+    (
+        "saludo.dll",
+        "DLL de C propia: DllMain, exports y TLS adentro de la DLL",
+    ),
+    (
+        "usa-dll.exe",
+        "C, usa saludo.dll por import y con LoadLibrary",
+    ),
 ];
 
 fn prebuilt_dir() -> PathBuf {
@@ -136,17 +144,36 @@ pub fn build_programs() -> Result<()> {
     let work = target_dir().join("usuario-win-c");
     fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let c = |f: &str| src.join(f).display().to_string();
-    let script = format!(
-        "@call \"{}\" >nul\r\ncd /d \"{}\"\r\n\
-         cl /nologo /O1 /MD \"{}\" /Fe:hola-win.exe || exit /b 1\r\n\
-         cl /nologo /O1 /MT \"{}\" /Fe:hola-win-mt.exe || exit /b 1\r\n\
-         cl /nologo /O1 /MD \"{}\" /Fe:falta-win.exe || exit /b 1\r\n",
+    // (opciones de cl, fuentes, salida)
+    let jobs = [
+        ("/MD", "hola-win.c", "hola-win.exe"),
+        ("/MT", "hola-win.c", "hola-win-mt.exe"),
+        ("/MD", "falta-win.c", "falta-win.exe"),
+        ("/MD /LD", "saludo.c", "saludo.dll"),
+        // saludo.lib la deja la línea anterior: con ella se enlazan los imports de la DLL.
+        ("/MD", "usa-dll.c saludo.lib", "usa-dll.exe"),
+    ];
+    let mut script = format!(
+        "@call \"{}\" >nul\r\ncd /d \"{}\"\r\n",
         vcvars()?.display(),
-        work.display(),
-        c("hola-win.c"),
-        c("hola-win.c"),
-        c("falta-win.c"),
+        work.display()
     );
+    for (opts, srcs, out) in jobs {
+        let files: Vec<String> = srcs
+            .split(' ')
+            .map(|f| {
+                if f.ends_with(".c") {
+                    format!("\"{}\"", c(f))
+                } else {
+                    f.to_string()
+                }
+            })
+            .collect();
+        script.push_str(&format!(
+            "cl /nologo /O1 {opts} {} /Fe:{out} || exit /b 1\r\n",
+            files.join(" ")
+        ));
+    }
     let bat = work.join("compilar.bat");
     fs::write(&bat, script).map_err(|e| e.to_string())?;
     let status = Command::new("cmd")
@@ -157,7 +184,7 @@ pub fn build_programs() -> Result<()> {
     if !status.success() {
         return Err("falló la compilación de los programas de C (cl.exe)".into());
     }
-    for name in ["hola-win.exe", "hola-win-mt.exe", "falta-win.exe"] {
+    for (_, _, name) in jobs {
         fs::copy(work.join(name), bin.join(name)).map_err(|e| format!("{name}: {e}"))?;
     }
     for (name, what) in PROGRAMS {
@@ -219,6 +246,15 @@ pub fn steps(s: &mut Session) -> Result<()> {
         s.wait_for("atexit: chau (3)", STEP)?;
         s.wait_for("TERMINAL_FIN 0", STEP)?;
     }
+    // Un programa con su propia DLL: se busca al lado del .exe, se inicia (DllMain) y también se
+    // carga con LoadLibrary.
+    s.type_text("wine /Programas/windows/usa-dll.exe")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("dll: DllMain ok, 2+3=5, tls=6", STEP)?;
+    s.wait_for("LoadLibrary: ok, GetProcAddress: 42", STEP)?;
+    s.wait_for("ruta de la DLL: ok", STEP)?;
+    s.wait_for("no-existe.dll: NULL ok", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
     // Lo que falta se dice (y el programa termina), en vez de colgarse.
     s.type_text("wine /Programas/windows/falta-win.exe")?;
     s.monitor("sendkey ret")?;

@@ -22,7 +22,9 @@ use std::sync::OnceLock;
 use std::time::{Instant, UNIX_EPOCH};
 
 use super::{dll_of, dll_of_handle, file_name, find, module_handle};
+use crate::modules;
 use crate::os;
+use crate::pe::Symbol;
 use crate::state::{
     self, CURRENT_PROCESS, CURRENT_THREAD, FindItem, INVALID_HANDLE, Object, PROCESS_HEAP, state,
 };
@@ -1551,7 +1553,8 @@ fn module_by_name(name: &str) -> Option<u64> {
     if n == exe || format!("{n}.exe") == exe {
         return Some(base);
     }
-    dll_of(&n).map(module_handle)
+    // Una DLL de verdad ya cargada, o una de las nuestras.
+    modules::find_loaded(&n).or_else(|| dll_of(&n).map(module_handle))
 }
 
 unsafe extern "win64" fn GetModuleHandleW(name: *const u16) -> u64 {
@@ -1576,7 +1579,10 @@ unsafe extern "win64" fn GetModuleHandleA(name: *const u8) -> u64 {
 
 unsafe extern "win64" fn GetModuleHandleExW(flags: u32, name: *const u16, out: *mut u64) -> Bool {
     const FROM_ADDRESS: u32 = 4;
-    let h = if flags & FROM_ADDRESS != 0 || name.is_null() {
+    let h = if flags & FROM_ADDRESS != 0 {
+        // `name` es una dirección adentro del módulo.
+        modules::module_at(name as u64).map_or(0, |(b, _)| b)
+    } else if name.is_null() {
         state().image_base
     } else {
         GetModuleHandleW(name)
@@ -1592,7 +1598,9 @@ fn module_path(h: u64) -> Option<String> {
     if h == 0 || h == s.image_base {
         return Some(s.image_path.clone());
     }
-    dll_of_handle(h).map(|d| format!(r"C:\Windows\System32\{}", file_name(d)))
+    drop(s);
+    modules::path_of(h)
+        .or_else(|| dll_of_handle(h).map(|d| format!(r"C:\Windows\System32\{}", file_name(d))))
 }
 
 unsafe extern "win64" fn GetModuleFileNameW(h: u64, buf: *mut u16, size: u32) -> u32 {
@@ -1632,15 +1640,39 @@ unsafe extern "win64" fn GetModuleFileNameA(h: u64, buf: *mut u8, size: u32) -> 
     n as u32
 }
 
+/// `LoadLibrary`: una de las nuestras, o una DLL de verdad del disco (que se inicia ya).
 fn load_library(name: &str) -> u64 {
-    match dll_of(name.rsplit(['\\', '/']).next().unwrap_or(name)) {
-        Some(d) => module_handle(d),
-        None => {
-            // Una DLL que no es de las nuestras (de terceros, o de Windows que no tenemos):
-            // `vino` todavía no carga DLL de archivos.
+    match modules::load(name, &dir_of(name)) {
+        Ok(modules::Found::Builtin(d)) => module_handle(d),
+        Ok(modules::Found::Native(base)) => match modules::init_pending(false) {
+            Ok(()) => base,
+            Err(why) => {
+                let _ = write_console(
+                    2,
+                    format!(
+                        "vino: {why}
+"
+                    )
+                    .as_bytes(),
+                );
+                state::set_last_error(error::DLL_INIT_FAILED);
+                0
+            }
+        },
+        Err(_) => {
             state::set_last_error(error::MOD_NOT_FOUND);
             0
         }
+    }
+}
+
+/// La carpeta de una ruta pedida (si trae una), para buscar ahí primero.
+fn dir_of(name: &str) -> String {
+    let unix = win::to_unix(name);
+    match unix.rfind('/') {
+        Some(0) => "/".into(),
+        Some(i) => unix[..i].into(),
+        None => ".".into(),
     }
 }
 
@@ -1661,14 +1693,21 @@ unsafe extern "win64" fn FreeLibrary(_h: u64) -> Bool {
 }
 
 unsafe extern "win64" fn GetProcAddress(h: u64, name: *const u8) -> u64 {
-    // Por ordinal (un "puntero" chico): no hay ordinales en las DLL nuestras.
-    let found = if (name as usize) < 0x1_0000 {
-        None
+    // Por ordinal: un "puntero" chico (las DLL nuestras no tienen ordinales).
+    let sym = if (name as usize) < 0x1_0000 {
+        Symbol::Ordinal(name as u16)
     } else {
-        let n = String::from_utf8_lossy(win::cstr(name)).into_owned();
-        dll_of_handle(h).and_then(|d| find(d, &n))
+        Symbol::Name(String::from_utf8_lossy(win::cstr(name)).into_owned())
     };
-    found.map(|f| f as u64).unwrap_or_else(|| {
+    let found = if modules::is_module(h) {
+        modules::export_address(h, &sym)
+    } else {
+        match (&sym, dll_of_handle(h)) {
+            (Symbol::Name(n), Some(d)) => find(d, n).map(|f| f as u64),
+            _ => None,
+        }
+    };
+    found.unwrap_or_else(|| {
         state::set_last_error(error::PROC_NOT_FOUND);
         0
     })

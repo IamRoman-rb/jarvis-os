@@ -14,7 +14,8 @@ fn usage() -> ExitCode {
 }
 
 fn imports(path: &str, file: &[u8]) -> ExitCode {
-    let img = match pe::parse(file) {
+    // Un programa o una DLL: las dos tienen imports.
+    let img = match pe::parse(file).or_else(|_| pe::parse_dll(file)) {
         Ok(i) => i,
         Err(e) => {
             eprintln!("vino: {path}: {e}");

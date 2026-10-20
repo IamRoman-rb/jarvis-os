@@ -20,6 +20,7 @@
 
 pub mod dll;
 pub mod loader;
+pub mod modules;
 pub mod os;
 pub mod pe;
 pub mod printf;

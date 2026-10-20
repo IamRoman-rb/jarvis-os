@@ -159,15 +159,7 @@ unsafe extern "win64" fn RtlUnwind(_f: u64, _ip: u64, _rec: u64, _rv: u64) -> ! 
 }
 
 unsafe extern "win64" fn RtlPcToFileHeader(pc: u64, base: *mut u64) -> u64 {
-    let s = state::state();
-    let (b, size) = (s.image_base, s.image_size);
-    drop(s);
-    // Solo hay un módulo de verdad: el programa.
-    let r = if b != 0 && pc >= b && pc < b + size {
-        b
-    } else {
-        0
-    };
+    let r = crate::modules::module_at(pc).map_or(0, |(b, _)| b);
     *base = r;
     r
 }
