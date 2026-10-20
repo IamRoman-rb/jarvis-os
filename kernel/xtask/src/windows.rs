@@ -1,0 +1,246 @@
+//! Programas de Windows en JARVIS-OS (ADR 0018): `vino` y los `.exe` de prueba.
+//!
+//! - `vino` (kernel/vino/) es un programa de Linux: se compila para musl como los de
+//!   `kernel/usuario/` y va a `target/usuario/vino` (lo instala `apt install vino`).
+//! - Los `.exe` de prueba se compilan con Visual Studio (`cargo xtask windows`, solo en Windows)
+//!   y quedan **en el repositorio** (`kernel/usuario-win/bin/`), como los `.deb` de los tests de
+//!   apt: la CI corre en Linux y no tiene el compilador de Microsoft. `cargo xtask usuario` los
+//!   copia a `target/usuario/` (`apt install programas-windows`).
+//! - `cargo xtask vino`: arranca JARVIS-OS, instala todo y corre cada `.exe` (también es parte de
+//!   `cargo xtask test`).
+
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::thread;
+use std::time::Duration;
+
+use super::{BOOT_MARKER, BOOT_TIMEOUT, Result, STEP, Session, target_dir, workspace_root};
+
+/// Los `.exe` de prueba: (nombre, de dónde sale).
+pub const PROGRAMS: [(&str, &str); 5] = [
+    (
+        "hola-rust-win.exe",
+        "Rust, con el CRT en DLL (vcruntime140 y ucrtbase)",
+    ),
+    (
+        "hola-rust-win-mt.exe",
+        "Rust, con el CRT de Microsoft adentro (+crt-static)",
+    ),
+    ("hola-win.exe", "C, /MD (el CRT en DLL)"),
+    (
+        "hola-win-mt.exe",
+        "C, /MT (el CRT adentro: solo usa kernel32)",
+    ),
+    ("falta-win.exe", "C, /MD, usa una función que vino no tiene"),
+];
+
+fn prebuilt_dir() -> PathBuf {
+    workspace_root().join("usuario-win").join("bin")
+}
+
+/// Compila `vino` y lo deja con los `.exe` de prueba en `out` (`target/usuario/`).
+pub fn build_into(out: &Path) -> Result<()> {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let build_dir = target_dir().join("vino-build");
+    let status = Command::new(cargo)
+        .current_dir(workspace_root().join("vino"))
+        .env_remove("RUSTFLAGS")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .args([
+            "build",
+            "--release",
+            "--target",
+            "x86_64-unknown-linux-musl",
+            "--target-dir",
+        ])
+        .arg(&build_dir)
+        .status()
+        .map_err(|e| format!("no pude ejecutar cargo: {e}"))?;
+    if !status.success() {
+        return Err("falló la compilación de vino (kernel/vino)".into());
+    }
+    let from = build_dir.join("x86_64-unknown-linux-musl/release/vino");
+    fs::copy(&from, out.join("vino")).map_err(|e| format!("{}: {e}", from.display()))?;
+    for (name, _) in PROGRAMS {
+        let from = prebuilt_dir().join(name);
+        fs::copy(&from, out.join(name)).map_err(|e| {
+            format!(
+                "{}: {e} (se generan con `cargo xtask windows`, en Windows con Visual Studio)",
+                from.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// `vcvars64.bat` de Visual Studio (el que deja listo `cl.exe`), con `vswhere`.
+fn vcvars() -> Result<PathBuf> {
+    let vswhere =
+        PathBuf::from(r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe");
+    let out = Command::new(&vswhere)
+        .args(["-latest", "-products", "*", "-property", "installationPath"])
+        .output()
+        .map_err(|e| format!("no encontré Visual Studio ({}): {e}", vswhere.display()))?;
+    let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let bat = Path::new(&dir).join(r"VC\Auxiliary\Build\vcvars64.bat");
+    if !bat.exists() {
+        return Err(format!(
+            "no encontré {}: instalá \"Desarrollo para el escritorio con C++\" en Visual Studio",
+            bat.display()
+        ));
+    }
+    Ok(bat)
+}
+
+/// `cargo xtask windows`: compila los `.exe` de prueba a `kernel/usuario-win/bin/`.
+pub fn build_programs() -> Result<()> {
+    if !cfg!(windows) {
+        return Err("los .exe de prueba se compilan en Windows (con Visual Studio)".into());
+    }
+    let src = workspace_root().join("usuario-win");
+    let bin = prebuilt_dir();
+    fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    for (flags, dir, name) in [
+        ("", "usuario-win-md", "hola-rust-win.exe"),
+        (
+            "-C target-feature=+crt-static",
+            "usuario-win-mt",
+            "hola-rust-win-mt.exe",
+        ),
+    ] {
+        let build_dir = target_dir().join(dir);
+        let status = Command::new(&cargo)
+            .current_dir(&src)
+            .env("RUSTFLAGS", flags)
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .args([
+                "build",
+                "--release",
+                "--target",
+                "x86_64-pc-windows-msvc",
+                "--target-dir",
+            ])
+            .arg(&build_dir)
+            .status()
+            .map_err(|e| format!("no pude ejecutar cargo: {e}"))?;
+        if !status.success() {
+            return Err("falló la compilación de kernel/usuario-win".into());
+        }
+        let from = build_dir.join("x86_64-pc-windows-msvc/release/hola-rust-win.exe");
+        fs::copy(&from, bin.join(name)).map_err(|e| format!("{}: {e}", from.display()))?;
+    }
+    // Los de C: un .bat que prepara el entorno de Visual Studio y llama a cl.
+    let work = target_dir().join("usuario-win-c");
+    fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let c = |f: &str| src.join(f).display().to_string();
+    let script = format!(
+        "@call \"{}\" >nul\r\ncd /d \"{}\"\r\n\
+         cl /nologo /O1 /MD \"{}\" /Fe:hola-win.exe || exit /b 1\r\n\
+         cl /nologo /O1 /MT \"{}\" /Fe:hola-win-mt.exe || exit /b 1\r\n\
+         cl /nologo /O1 /MD \"{}\" /Fe:falta-win.exe || exit /b 1\r\n",
+        vcvars()?.display(),
+        work.display(),
+        c("hola-win.c"),
+        c("hola-win.c"),
+        c("falta-win.c"),
+    );
+    let bat = work.join("compilar.bat");
+    fs::write(&bat, script).map_err(|e| e.to_string())?;
+    let status = Command::new("cmd")
+        .arg("/c")
+        .arg(&bat)
+        .status()
+        .map_err(|e| format!("no pude ejecutar cmd: {e}"))?;
+    if !status.success() {
+        return Err("falló la compilación de los programas de C (cl.exe)".into());
+    }
+    for name in ["hola-win.exe", "hola-win-mt.exe", "falta-win.exe"] {
+        fs::copy(work.join(name), bin.join(name)).map_err(|e| format!("{name}: {e}"))?;
+    }
+    for (name, what) in PROGRAMS {
+        let size = fs::metadata(bin.join(name)).map(|m| m.len()).unwrap_or(0);
+        println!("{name:22} {:>4} KB  {what}", size / 1024);
+    }
+    Ok(())
+}
+
+/// Lo que se prueba en QEMU, con la Terminal ya abierta (lo usan `vino` y `test`).
+pub fn steps(s: &mut Session) -> Result<()> {
+    s.type_text("apt install vino programas-windows")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("APT_INSTALADO programas-windows", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("cd /Documentos")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // Rust con la biblioteca estándar entera: argumentos, entorno, colecciones, archivos,
+    // carpetas, la hora y la entrada. Con el CRT en DLL y con el CRT adentro.
+    for exe in ["hola-rust-win.exe", "hola-rust-win-mt.exe"] {
+        s.type_text(&format!("wine /Programas/windows/{exe} uno dos"))?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("TERMINAL_WINDOWS /Programas/windows/", STEP)?;
+        s.wait_for("Hola desde Rust en Windows! 3 argumentos", STEP)?;
+        s.wait_for("arg: dos", STEP)?;
+        s.wait_for("archivo: 3 lineas", STEP)?;
+        s.wait_for("carpeta: 1 archivo(s)", STEP)?;
+        s.wait_for("hora: ok", STEP)?;
+        s.wait_for("Escribi algo:", STEP)?;
+        s.type_text("vino")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("Leido: vino", STEP)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+    }
+    // C con printf, archivos, matemática, atexit y la API de Windows directa; con /MD y /MT.
+    // `./programa.exe` también lo corre vino.
+    for exe in ["hola-win.exe", "hola-win-mt.exe"] {
+        s.type_text(&format!(
+            "cp /Programas/windows/{exe} . && ./{exe} a \"b c\""
+        ))?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("Hola desde Windows! argc=3", STEP)?;
+        s.wait_for("argv[2] = b c", STEP)?;
+        s.wait_for("memoria ok, calloc suma 0", STEP)?;
+        s.wait_for(
+            "enteros: -42     7|7    |00007 3000000000 ff FF 1234567890123",
+            STEP,
+        )?;
+        s.wait_for("reales: 3.14   -2.500 1.234568e+04 0.0001", STEP)?;
+        s.wait_for("raiz de 2 = 1.414214, seno(1) = 0.8415, 2^10 = 1024", STEP)?;
+        s.wait_for("archivo: 2 lineas", STEP)?;
+        s.wait_for("GetModuleFileNameA: ok", STEP)?;
+        s.wait_for("WriteConsoleA ok", STEP)?;
+        s.wait_for("Como te llamas?", STEP)?;
+        s.type_text("Roman")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("Hola, Roman!", STEP)?;
+        s.wait_for("atexit: chau (3)", STEP)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+    }
+    // Lo que falta se dice (y el programa termina), en vez de colgarse.
+    s.type_text("wine /Programas/windows/falta-win.exe")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("antes", STEP)?;
+    s.wait_for("TERMINAL_FIN 3", STEP)?;
+    s.saw_or_wait("falta KERNEL32!GetSystemPowerStatus", STEP)?;
+    Ok(())
+}
+
+/// `cargo xtask vino`: solo la parte de Windows (más rápido que `cargo xtask test`).
+pub fn test(image: &Path, disk: &Path) -> Result<()> {
+    super::puente::start();
+    let mut s = Session::start(image, disk)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    let r = steps(&mut s);
+    thread::sleep(Duration::from_secs(1));
+    s.screenshot(&target_dir().join("jarvis-os-vino.png"))?;
+    s.quit();
+    r?;
+    println!("ok: vino corrió los programas de Windows (Rust y C, con el CRT en DLL y adentro)");
+    Ok(())
+}

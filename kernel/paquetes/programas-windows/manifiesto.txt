@@ -1,0 +1,7 @@
+# Programas de Windows de prueba (kernel/usuario-win/, compilados con Visual Studio): se corren
+# con vino (wine programa.exe, o ./programa.exe).
+usuario:hola-rust-win.exe -> /Programas/windows/hola-rust-win.exe
+usuario:hola-rust-win-mt.exe -> /Programas/windows/hola-rust-win-mt.exe
+usuario:hola-win.exe -> /Programas/windows/hola-win.exe
+usuario:hola-win-mt.exe -> /Programas/windows/hola-win-mt.exe
+usuario:falta-win.exe -> /Programas/windows/falta-win.exe

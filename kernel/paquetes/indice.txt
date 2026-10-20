@@ -13,3 +13,5 @@ programas-linux|1.0|Programas de Linux de verdad (K11): hola-linux, eco, pruebas
 js|1.0|Interprete de JavaScript (motor Boa): js, js archivo.js o js -e codigo. Un programa de Linux (K11)||6 MB
 musica|1.0|Dos canciones para la app Musica (WAV: IMA ADPCM y PCM). Suenan por la placa de sonido (K12)||360 KB
 videos|1.0|Un video de ejemplo (AVI MJPEG con audio) para el Visor (K12)||840 KB
+vino|1.0|Corre programas de Windows de 64 bits (de consola), como Wine: vino programa.exe o wine programa.exe||900 KB
+programas-windows|1.0|Programas de Windows de prueba (Rust y C, compilados con Visual Studio), para correr con vino|vino|700 KB

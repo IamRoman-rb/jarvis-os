@@ -187,7 +187,8 @@ pub fn file_type(path: &str, is_dir: bool) -> Option<FileType> {
 /// Con qué se abre `path` y el nombre de la app (para los mensajes: "Abrí X en ...").
 pub fn launch_for(apps: &DefaultApps, path: &str, is_dir: bool) -> (Launch, &'static str) {
     let lower = path.to_ascii_lowercase();
-    // Lo que no se configura: los scripts se ejecutan, los programas de Windows se explican.
+    // Lo que no se configura: los scripts se ejecutan y los programas de Windows corren con
+    // `wine` (es decir, `vino`), que dice qué es y por qué si no puede correrlo.
     if lower.ends_with(".sh") {
         return (Launch::Terminal(Some(format!("sh '{path}'"))), "Terminal");
     }
@@ -195,7 +196,7 @@ pub fn launch_for(apps: &DefaultApps, path: &str, is_dir: bool) -> (Launch, &'st
         .iter()
         .any(|e| lower.ends_with(e))
     {
-        let cmd = format!("file '{path}' && wine '{path}'");
+        let cmd = format!("wine '{path}'");
         return (Launch::Terminal(Some(cmd)), "Terminal");
     }
     if [".zip", ".tar", ".gz", ".7z", ".rar"]
@@ -247,6 +248,11 @@ mod tests {
         assert_eq!(
             open("/s/x.sh", false),
             Launch::Terminal(Some("sh '/s/x.sh'".into()))
+        );
+        // Un programa de Windows corre con vino (ADR 0018).
+        assert_eq!(
+            open("/Descargas/Setup.EXE", false),
+            Launch::Terminal(Some("wine '/Descargas/Setup.EXE'".into()))
         );
     }
 

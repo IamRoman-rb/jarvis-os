@@ -1,9 +1,8 @@
 //! ¿Qué es este archivo? Reconoce programas de Windows (`.exe`, formato PE), de Linux (ELF),
 //! paquetes `.deb`, imágenes, comprimidos y texto, mirando sus primeros bytes (como `file`).
 //!
-//! Los programas se pueden **descargar e inspeccionar**, pero todavía no **ejecutar**: para eso
-//! el kernel necesita espacio de usuario, un cargador de programas y las llamadas al sistema que
-//! esos programas esperan (Win32 o Linux). Ver ADR 0005.
+//! Los de Linux para x86-64 los corre el kernel (K11, ADR 0010); los de Windows de 64 bits,
+//! `vino`, que es otro programa de Linux (ADR 0018). El resto se puede descargar e inspeccionar.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -312,11 +311,26 @@ pub fn runnable(b: &[u8]) -> bool {
     matches!(detect(b), Kind::Elf(e) if e.bits == 64 && e.machine == "x86-64")
 }
 
+/// ¿Es un programa de Windows que corre con `vino`? De 64 bits para x86-64, que no sea una
+/// DLL ni de .NET (`vino` verifica el resto y dice qué funciones de Windows le faltan).
+pub fn windows_runnable(b: &[u8]) -> bool {
+    matches!(detect(b), Kind::Pe(p) if p.bits == 64 && p.machine == "x86-64" && !p.dll && !p.dotnet)
+}
+
 /// Lo que se muestra al intentar ejecutar un programa que JARVIS-OS no puede correr.
 pub fn why_not(b: &[u8]) -> Option<String> {
     let k = detect(b);
     let (what, needs): (String, String) = match &k {
         Kind::Pe(p) => {
+            let needs = if p.dll {
+                "es una biblioteca (DLL): la usan los programas, no se ejecuta sola".into()
+            } else if p.dotnet {
+                "es de .NET y necesita su entorno, que JARVIS-OS no tiene".into()
+            } else if p.machine != "x86-64" {
+                format!("es para {} y vino corre los de 64 bits (x86-64)", p.machine)
+            } else {
+                return None;
+            };
             let mut w = describe(b);
             if !p.imports.is_empty() {
                 let list: Vec<&str> = p.imports.iter().take(8).map(|s| s.as_str()).collect();
@@ -326,11 +340,7 @@ pub fn why_not(b: &[u8]) -> Option<String> {
                     if p.imports.len() > 8 { ", ..." } else { "" }
                 ));
             }
-            (
-                w,
-                "necesita la API de Windows (Win32: esas DLL), que es lo que hace Wine en Linux"
-                    .into(),
-            )
+            (w, needs)
         }
         Kind::Elf(e) if e.bits != 64 || e.machine != "x86-64" => (
             describe(b),
@@ -350,9 +360,9 @@ pub fn why_not(b: &[u8]) -> Option<String> {
         _ => return None,
     };
     Some(format!(
-        "{what}\nJARVIS-OS todavía no puede ejecutarlo: {needs}. Los programas de Linux\n\
-         para x86-64 sí corren. Mientras tanto: `file`, `xxd` y `strings` para\n\
-         inspeccionarlo, y `apt install` para programas de JARVIS-OS."
+        "{what}\nJARVIS-OS no puede ejecutarlo: {needs}. Corren los programas de Linux\n\
+         para x86-64 y, con vino, los de Windows de 64 bits. Para inspeccionarlo: `file`,\n\
+         `xxd` y `strings`."
     ))
 }
 
@@ -420,7 +430,18 @@ mod tests {
         );
         assert_eq!(p.imports, ["KERNEL32.dll"]);
         assert!(describe(&exe).starts_with("PE32+ de Windows: programa de consola"));
-        assert!(why_not(&exe).unwrap().contains("Win32"));
+        // Corre con vino (ADR 0018): no hay "por qué no".
+        assert!(windows_runnable(&exe));
+        assert!(why_not(&exe).is_none());
+        // Una DLL y uno de 32 bits, no.
+        let mut dll = exe.clone();
+        dll[0x84 + 19] |= 0x20;
+        assert!(!windows_runnable(&dll));
+        assert!(why_not(&dll).unwrap().contains("biblioteca (DLL)"));
+        let mut x86 = exe.clone();
+        x86[0x84..0x86].copy_from_slice(&0x14cu16.to_le_bytes());
+        assert!(!windows_runnable(&x86));
+        assert!(why_not(&x86).unwrap().contains("64 bits"));
     }
 
     #[test]

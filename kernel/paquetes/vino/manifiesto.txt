@@ -1,0 +1,3 @@
+# vino: corre programas de Windows de 64 bits (de consola), como Wine (ADR 0018).
+# Es un programa de Linux compilado desde kernel/vino/.
+usuario:vino -> /Programas/bin/vino
