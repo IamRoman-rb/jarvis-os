@@ -427,7 +427,7 @@ unsafe extern "win64" fn RtlUnwindEx(
                 module_base + h.routine as u64,
                 record as u64,
                 frame,
-                context as u64,
+                ctx.as_ptr() as u64,
                 &mut disp as *mut _ as u64,
             );
         }
@@ -491,6 +491,18 @@ const EXCEPTION_CONTINUE_EXECUTION: u32 = 0xffff_ffff;
 unsafe fn dispatch(record: *mut u8, context: *mut u8) -> ! {
     let mut regs = context_regs(context);
     let code = (record as *const u32).read_unaligned();
+    let dbg = std::env::var_os("VINO_SEH").is_some();
+    if dbg {
+        eprintln!("vino_seh: lanzada 0x{code:08X} en rip={:#x}", regs.rip);
+    }
+    // Las excepciones de C++ (throw/catch) usan el protocolo de "funclets" de __CxxFrameHandler*,
+    // que vino todavía no maneja: mejor decirlo que desenrollar mal. El SEH de C (__try/__except)
+    // sí anda, y las de C++ no cruzan a acá si el programa las atrapa sin propagarlas.
+    if code == CPP_EXCEPTION {
+        crate::dll::fatal(
+            "el programa lanzó una excepción de C++ (throw): vino todavía no las propaga",
+        );
+    }
     let mut frames = 0;
     loop {
         frames += 1;
@@ -541,6 +553,13 @@ unsafe fn dispatch(record: *mut u8, context: *mut u8) -> ! {
             };
             // EXCEPTION_RECORD.flags para la búsqueda (sin EH_UNWINDING).
             (record.add(4) as *mut u32).write_unaligned(0);
+            if dbg {
+                eprintln!(
+                    "vino_seh:  marco pc={:#x} rva={rva:#x} frame={frame:#x} handler={:#x}",
+                    pc,
+                    module_base + h.routine as u64
+                );
+            }
             let d = call_handler(
                 module_base + h.routine as u64,
                 record as u64,
@@ -548,6 +567,9 @@ unsafe fn dispatch(record: *mut u8, context: *mut u8) -> ! {
                 ctx.as_ptr() as u64,
                 &mut disp as *mut _ as u64,
             );
+            if dbg {
+                eprintln!("vino_seh:   → disposición {d:#x}");
+            }
             match d {
                 EXCEPTION_CONTINUE_SEARCH => {}
                 EXCEPTION_CONTINUE_EXECUTION => {
