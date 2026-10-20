@@ -23,6 +23,8 @@ pub mod kernel32;
 pub mod lowio;
 pub mod ntdll;
 pub mod sistema;
+pub mod sync;
+pub mod threads;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -95,10 +97,13 @@ fn table() -> &'static HashMap<(Dll, &'static str), usize> {
         for (d, list) in [
             (Dll::Kernel32, kernel32::exports()),
             (Dll::Kernel32, sistema::exports()),
+            (Dll::Kernel32, sync::exports()),
+            (Dll::Kernel32, threads::exports()),
             (Dll::Ntdll, ntdll::exports()),
             (Dll::Crt, crt::exports()),
             (Dll::Crt, lowio::exports()),
             (Dll::Crt, crt2::exports()),
+            (Dll::Crt, threads::crt_exports()),
             (Dll::Version, extra::version_exports()),
             (Dll::Bcrypt, extra::bcrypt_exports()),
             (Dll::Advapi32, extra::advapi32_exports()),

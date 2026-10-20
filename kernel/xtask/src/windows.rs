@@ -20,7 +20,7 @@ use std::time::Duration;
 use super::{BOOT_MARKER, BOOT_TIMEOUT, Result, STEP, Session, target_dir, workspace_root};
 
 /// Los `.exe` de prueba: (nombre, de dónde sale).
-pub const PROGRAMS: [(&str, &str); 7] = [
+pub const PROGRAMS: [(&str, &str); 9] = [
     (
         "hola-rust-win.exe",
         "Rust, con el CRT en DLL (vcruntime140 y ucrtbase)",
@@ -42,6 +42,11 @@ pub const PROGRAMS: [(&str, &str); 7] = [
     (
         "usa-dll.exe",
         "C, usa saludo.dll por import y con LoadLibrary",
+    ),
+    ("hilos-win.exe", "Rust, hilos: Mutex, Condvar, canales, TLS"),
+    (
+        "hilos-c-win.exe",
+        "C, hilos: CreateThread, CRITICAL_SECTION, eventos, semáforos",
     ),
 ];
 
@@ -140,6 +145,11 @@ pub fn build_programs() -> Result<()> {
         }
         let from = build_dir.join("x86_64-pc-windows-msvc/release/hola-rust-win.exe");
         fs::copy(&from, bin.join(name)).map_err(|e| format!("{}: {e}", from.display()))?;
+        if flags.is_empty() {
+            let from = build_dir.join("x86_64-pc-windows-msvc/release/hilos-win.exe");
+            fs::copy(&from, bin.join("hilos-win.exe"))
+                .map_err(|e| format!("{}: {e}", from.display()))?;
+        }
     }
     // Los de C: un .bat que prepara el entorno de Visual Studio y llama a cl.
     let work = target_dir().join("usuario-win-c");
@@ -153,6 +163,7 @@ pub fn build_programs() -> Result<()> {
         ("/MD /LD", "saludo.c", "saludo.dll"),
         // saludo.lib la deja la línea anterior: con ella se enlazan los imports de la DLL.
         ("/MD", "usa-dll.c saludo.lib", "usa-dll.exe"),
+        ("/MD", "hilos-win.c", "hilos-c-win.exe"),
     ];
     let mut script = format!(
         "@call \"{}\" >nul\r\ncd /d \"{}\"\r\n",
@@ -255,6 +266,24 @@ pub fn steps(s: &mut Session) -> Result<()> {
     s.wait_for("LoadLibrary: ok, GetProcAddress: 42", STEP)?;
     s.wait_for("ruta de la DLL: ok", STEP)?;
     s.wait_for("no-existe.dll: NULL ok", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // Hilos de Windows sobre hilos de Linux (clone + futex en el kernel).
+    s.type_text("wine /Programas/windows/hilos-win.exe")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("win mutex: 4000, tls: [10, 11, 12, 13]", STEP)?;
+    s.wait_for("win condvar ok", STEP)?;
+    s.wait_for("win paralelo: ok", STEP)?;
+    s.wait_for("HILOS_WIN_OK", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("wine /Programas/windows/hilos-c-win.exe")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for(
+        "c suma: 4000, atomico: 4000, codigos: 1000, propio main: 0",
+        STEP,
+    )?;
+    s.wait_for("antes del evento: esperando", STEP)?;
+    s.wait_for("evento y semaforo: ok, codigo 7", STEP)?;
+    s.wait_for("HILOS_C_OK", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
     // Lo que falta se dice (y el programa termina), en vez de colgarse.
     s.type_text("wine /Programas/windows/falta-win.exe")?;

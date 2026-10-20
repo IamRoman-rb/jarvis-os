@@ -42,6 +42,10 @@ pub struct Module {
     pub entry: u64,
     pub dll: bool,
     pub tls_callbacks: Vec<u64>,
+    /// El molde de su TLS y su índice (cada hilo nuevo recibe una copia).
+    pub tls: Option<(usize, Vec<u8>)>,
+    /// `DisableThreadLibraryCalls`: no avisarle de los hilos.
+    pub no_thread_calls: bool,
     pub inited: bool,
 }
 
@@ -276,13 +280,16 @@ pub fn load_image(unix_path: &str, file: &[u8], dll: bool) -> Result<u64, LoadEr
         },
         dll,
         tls_callbacks: Vec::new(),
+        tls: None,
+        no_thread_calls: false,
         inited: !dll,
     });
     loader::bind(&img, mem, &mut |d, s| resolve_import(d, s, &dir))?;
     if let Some(t) = loader::tls(&img, mem)? {
         let i = TLS_NEXT.fetch_add(1, Ordering::Relaxed);
-        if i < TLS_SLOTS {
-            let block = Box::leak(t.template.into_boxed_slice());
+        let template = (i < TLS_SLOTS).then(|| t.template.clone());
+        if let Some(tpl) = &template {
+            let block = Box::leak(tpl.clone().into_boxed_slice());
             // SAFETY: el arreglo tiene TLS_SLOTS lugares y vive hasta el final.
             unsafe { *(tls_array() as *mut u64).add(i) = block.as_ptr() as u64 };
             let at = t.index_rva as usize;
@@ -290,6 +297,7 @@ pub fn load_image(unix_path: &str, file: &[u8], dll: bool) -> Result<u64, LoadEr
         }
         if let Some(m) = modules().iter_mut().find(|m| m.base == base) {
             m.tls_callbacks = t.callbacks;
+            m.tls = template.map(|tpl| (i, tpl));
         }
     }
     for (rva, len, p) in loader::protections(&img) {
@@ -316,6 +324,61 @@ pub fn tls_callbacks(base: u64) -> Vec<u64> {
         .find(|m| m.base == base)
         .map(|m| m.tls_callbacks.clone())
         .unwrap_or_default()
+}
+
+/// El arreglo de TLS de un hilo nuevo: una copia del molde de cada módulo.
+pub fn new_thread_tls() -> u64 {
+    let array = Box::leak(vec![0u64; TLS_SLOTS].into_boxed_slice());
+    for m in modules().iter() {
+        if let Some((i, template)) = &m.tls {
+            array[*i] = Box::leak(template.clone().into_boxed_slice()).as_ptr() as u64;
+        }
+    }
+    array.as_ptr() as u64
+}
+
+/// Avisa a los módulos que un hilo empieza (`DLL_THREAD_ATTACH`) o termina (`DLL_THREAD_DETACH`):
+/// sus callbacks de TLS y el `DllMain` de las DLL (salvo las que pidieron no saberlo).
+pub fn thread_notify(reason: u32) {
+    let list: Vec<(u64, u64, Vec<u64>, bool)> = modules()
+        .iter()
+        .filter(|m| m.inited)
+        .map(|m| {
+            (
+                m.base,
+                m.entry,
+                m.tls_callbacks.clone(),
+                m.dll && !m.no_thread_calls,
+            )
+        })
+        .collect();
+    for (base, entry, callbacks, call_main) in list {
+        for cb in callbacks {
+            // SAFETY: un callback de TLS del módulo: PIMAGE_TLS_CALLBACK(DllHandle, Reason, 0).
+            let f: unsafe extern "win64" fn(u64, u32, u64) =
+                unsafe { std::mem::transmute(cb as usize) };
+            // SAFETY: ídem.
+            unsafe { f(base, reason, 0) };
+        }
+        if call_main && entry != 0 {
+            // SAFETY: `DllMain` de la DLL.
+            let f: unsafe extern "win64" fn(u64, u32, u64) -> i32 =
+                unsafe { std::mem::transmute(entry as usize) };
+            // SAFETY: ídem.
+            unsafe { f(base, reason, 0) };
+        }
+    }
+}
+
+/// `DisableThreadLibraryCalls(h)`.
+pub fn disable_thread_calls(base: u64) -> bool {
+    match modules().iter_mut().find(|m| m.base == base) {
+        Some(m) => {
+            m.no_thread_calls = true;
+            true
+        }
+        None => false,
+    }
 }
 
 /// Llama `DllMain(base, DLL_PROCESS_ATTACH, …)` (y sus callbacks de TLS) de las DLL que todavía

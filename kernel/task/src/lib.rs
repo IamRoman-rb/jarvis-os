@@ -32,7 +32,7 @@ use alloc::vec::Vec;
 /// Cuántas tareas puede haber a la vez. Es un arreglo fijo a propósito: el planificador corre
 /// dentro de la interrupción del timer, y ahí no se puede pedir memoria (el heap tiene un lock
 /// que la tarea interrumpida podría tener tomado).
-pub const MAX_TASKS: usize = 16;
+pub const MAX_TASKS: usize = 64;
 
 /// Cuánto puede correr una tarea antes de dejarle la CPU a otra de su misma prioridad.
 pub const QUANTUM_MS: u64 = 10;

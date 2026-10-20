@@ -99,7 +99,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         _wsetlocale,
         ___lc_locale_name_func,
         __lc_codepage,
-        _beginthread,
     ]
 }
 
@@ -783,11 +782,6 @@ unsafe extern "win64" fn _spawnv() -> isize {
 }
 unsafe extern "win64" fn _cwait() -> isize {
     set_errno(10); // ECHILD
-    -1
-}
-/// `_beginthread` sin hilos en el kernel: falla (−1) con `EAGAIN` ("no hay recursos").
-unsafe extern "win64" fn _beginthread(_f: u64, _stack: u32, _arg: u64) -> isize {
-    set_errno(11);
     -1
 }
 

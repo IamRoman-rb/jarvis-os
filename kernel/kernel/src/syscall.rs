@@ -24,6 +24,7 @@ use crate::gdt;
 
 /// Los registros del programa al entrar, en el orden en que los apila la entrada.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Frame {
     pub rax: u64,
     pub rdi: u64,
@@ -74,6 +75,7 @@ global_asm!(
     // 16 palabras: rsp sigue alineado a 16, como pide la ABI antes de un `call`.
     "mov rdi, rsp",
     "call jarvis_syscall",
+    "jarvis_syscall_exit:",
     "cli",
     "pop rax",
     "pop rdi",
@@ -92,6 +94,12 @@ global_asm!(
     "pop r11",
     "pop rsp",
     "sysretq",
+    // resume_user(frame [rdi]): un hilo nuevo vuelve al programa con esos registros, como si
+    // volviera de `syscall`.
+    ".global jarvis_resume_user",
+    "jarvis_resume_user:",
+    "mov rsp, rdi",
+    "jmp jarvis_syscall_exit",
     // enter_user(rip [rdi], rsp [rsi], cs [rdx], ss [rcx]): el primer salto al programa.
     ".global jarvis_enter_user",
     "jarvis_enter_user:",
@@ -122,6 +130,7 @@ global_asm!(
 unsafe extern "C" {
     fn jarvis_syscall_entry();
     fn jarvis_enter_user(rip: u64, rsp: u64, cs: u64, ss: u64) -> !;
+    fn jarvis_resume_user(frame: *const Frame) -> !;
 }
 
 /// Habilita `syscall` y SSE para los programas. Una vez, al arrancar (después de `gdt::init`).
@@ -165,6 +174,16 @@ pub fn enter_user(rip: u64, rsp: u64) -> ! {
     }
 }
 
+/// Un hilo nuevo (`clone`) entra al anillo 3 con los registros de `frame`. No vuelve.
+pub fn resume_user(frame: &Frame) -> ! {
+    if frame.rip >= 0x0000_8000_0000_0000 {
+        crate::process::kill_current(139, "direccion de retorno invalida");
+    }
+    // SAFETY: la tarea corre con el espacio del proceso (CR3) y su pila del kernel; `frame` está
+    // en esa pila (no se usa nada más después: el salto no vuelve) y su `rip` es canónico.
+    unsafe { jarvis_resume_user(frame) }
+}
+
 /// Lo llama la entrada con los registros del programa. `rax` vuelve con el resultado.
 #[unsafe(no_mangle)]
 extern "C" fn jarvis_syscall(frame: &mut Frame) {
@@ -173,7 +192,7 @@ extern "C" fn jarvis_syscall(frame: &mut Frame) {
     let args = [
         frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
     ];
-    frame.rax = crate::process::syscall(frame.rax, args) as u64;
+    frame.rax = crate::process::syscall(frame.rax, args, frame) as u64;
     // `sysret` con una dirección no canónica fallaría en el anillo 0: el programa se termina.
     if frame.rip >= 0x0000_8000_0000_0000 {
         crate::process::kill_current(139, "direccion de retorno invalida");

@@ -56,6 +56,22 @@ mod imp {
         unsafe { syscall(SYS_ARCH_PRCTL, ARCH_SET_GS, base as c_long) == 0 }
     }
 
+    /// El número de este hilo para el kernel (`gettid`).
+    pub fn gettid() -> u32 {
+        // SAFETY: gettid no tiene argumentos ni efectos.
+        unsafe { syscall(186) as u32 }
+    }
+
+    /// Termina el hilo actual (no el proceso) sin volver: `pthread_exit` de musl.
+    pub fn thread_exit() -> ! {
+        unsafe extern "C" {
+            fn pthread_exit(value: *mut c_void) -> !;
+        }
+        // SAFETY: lo llama un hilo creado con `std::thread` (un pthread de musl), que no
+        // vuelve a usar nada de su pila.
+        unsafe { pthread_exit(core::ptr::null_mut()) }
+    }
+
     pub fn random(buf: &mut [u8]) -> bool {
         let mut done = 0;
         while done < buf.len() {
@@ -93,6 +109,19 @@ mod imp {
     }
     pub fn set_gs(_base: u64) -> bool {
         false
+    }
+    pub fn gettid() -> u32 {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(1000);
+        thread_local! {
+            static ID: u32 = NEXT.fetch_add(1, Ordering::Relaxed);
+        }
+        ID.with(|i| *i)
+    }
+    pub fn thread_exit() -> ! {
+        loop {
+            std::thread::park();
+        }
     }
     pub fn random(buf: &mut [u8]) -> bool {
         // Solo para los tests del anfitrión: no es azar de verdad.

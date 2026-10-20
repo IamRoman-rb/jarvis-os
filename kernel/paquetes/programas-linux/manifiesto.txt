@@ -3,3 +3,4 @@ usuario:hola-linux -> /Programas/bin/hola-linux
 usuario:eco -> /Programas/bin/eco
 usuario:pruebas -> /Programas/bin/pruebas
 usuario:red -> /Programas/bin/red
+usuario:hilos -> /Programas/bin/hilos

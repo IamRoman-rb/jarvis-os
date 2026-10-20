@@ -142,7 +142,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         GetCurrentProcess,
         GetCurrentProcessId,
         GetCurrentThread,
-        GetCurrentThreadId,
         GetCommandLineW,
         GetCommandLineA,
         GetModuleHandleW,
@@ -156,8 +155,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         LoadLibraryExA,
         FreeLibrary,
         GetProcAddress,
-        CreateThread,
-        ExitThread,
         GetExitCodeProcess,
         GetStartupInfoW,
         GetStartupInfoA,
@@ -165,7 +162,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         IsProcessorFeaturePresent,
         IsThreadAFiber,
         SetThreadStackGuarantee,
-        GetThreadId,
         SetThreadDescription,
         GetProcessAffinityMask,
         GetSystemInfo,
@@ -203,58 +199,12 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         QueryPerformanceFrequency,
         GetTickCount,
         GetTickCount64,
-        Sleep,
-        SleepEx,
-        SwitchToThread,
         // TLS y FLS
         TlsAlloc,
         TlsFree,
         TlsGetValue,
         TlsSetValue,
-        FlsAlloc,
-        FlsFree,
-        FlsGetValue,
-        FlsSetValue,
         // Sincronización (un solo hilo)
-        InitializeCriticalSection,
-        InitializeCriticalSectionEx,
-        InitializeCriticalSectionAndSpinCount,
-        EnterCriticalSection,
-        LeaveCriticalSection,
-        TryEnterCriticalSection,
-        DeleteCriticalSection,
-        InitializeSRWLock,
-        AcquireSRWLockExclusive,
-        AcquireSRWLockShared,
-        ReleaseSRWLockExclusive,
-        ReleaseSRWLockShared,
-        TryAcquireSRWLockExclusive,
-        TryAcquireSRWLockShared,
-        InitializeConditionVariable,
-        SleepConditionVariableSRW,
-        SleepConditionVariableCS,
-        WakeConditionVariable,
-        WakeAllConditionVariable,
-        InitOnceBeginInitialize,
-        InitOnceComplete,
-        InitOnceExecuteOnce,
-        WaitOnAddress,
-        WakeByAddressSingle,
-        WakeByAddressAll,
-        CreateMutexA,
-        CreateMutexW,
-        CreateMutexExW,
-        ReleaseMutex,
-        CreateEventA,
-        CreateEventW,
-        CreateEventExW,
-        SetEvent,
-        ResetEvent,
-        CreateSemaphoreW,
-        ReleaseSemaphore,
-        WaitForSingleObject,
-        WaitForSingleObjectEx,
-        WaitForMultipleObjects,
         InitializeSListHead,
         // Texto e idioma
         lstrlenW,
@@ -627,6 +577,7 @@ unsafe extern "win64" fn CreateFileA(
 }
 
 unsafe extern "win64" fn CloseHandle(h: u64) -> Bool {
+    super::sync::forget(h);
     if h == CURRENT_PROCESS || h == CURRENT_THREAD || state().close(h) {
         TRUE
     } else {
@@ -1516,12 +1467,6 @@ unsafe extern "win64" fn GetCurrentProcessId() -> u32 {
 unsafe extern "win64" fn GetCurrentThread() -> u64 {
     CURRENT_THREAD
 }
-unsafe extern "win64" fn GetCurrentThreadId() -> u32 {
-    std::process::id()
-}
-unsafe extern "win64" fn GetThreadId(_h: u64) -> u32 {
-    std::process::id()
-}
 unsafe extern "win64" fn SetThreadDescription(_h: u64, _d: *const u16) -> i32 {
     0
 }
@@ -1711,24 +1656,6 @@ unsafe extern "win64" fn GetProcAddress(h: u64, name: *const u8) -> u64 {
         state::set_last_error(error::PROC_NOT_FOUND);
         0
     })
-}
-
-unsafe extern "win64" fn CreateThread(
-    _sa: u64,
-    _st: usize,
-    _f: u64,
-    _p: u64,
-    _fl: u32,
-    _id: *mut u32,
-) -> u64 {
-    // JARVIS-OS todavía no tiene hilos (`clone`): el programa recibe el error y sigue (si sabe).
-    state::set_last_error(error::NOT_SUPPORTED);
-    0
-}
-
-unsafe extern "win64" fn ExitThread(code: u32) -> ! {
-    // El único hilo es el principal.
-    super::exit(code as i32)
 }
 
 unsafe extern "win64" fn GetExitCodeProcess(_h: u64, code: *mut u32) -> Bool {
@@ -2070,23 +1997,10 @@ unsafe extern "win64" fn GetTickCount64() -> u64 {
     start().elapsed().as_millis() as u64 + 1
 }
 
-unsafe extern "win64" fn Sleep(ms: u32) {
-    std::thread::sleep(std::time::Duration::from_millis(ms as u64));
-}
-
-unsafe extern "win64" fn SleepEx(ms: u32, _alertable: Bool) -> u32 {
-    Sleep(ms);
-    0
-}
-
-unsafe extern "win64" fn SwitchToThread() -> Bool {
-    FALSE
-}
-
 // --- TLS y FLS ------------------------------------------------------------------------------------
 
 fn teb_slot(i: u32) -> Option<*mut u64> {
-    let teb = state::TEB.load(std::sync::atomic::Ordering::Relaxed);
+    let teb = state::teb();
     (teb != 0 && i < 64)
         .then(|| (teb as usize + crate::teb::off::TEB_TLS_SLOTS + i as usize * 8) as *mut u64)
 }
@@ -2139,184 +2053,8 @@ unsafe extern "win64" fn TlsSetValue(i: u32, v: u64) -> Bool {
     }
 }
 
-unsafe extern "win64" fn FlsAlloc(_callback: u64) -> u32 {
-    let mut s = state();
-    s.fls.push(Some(0));
-    (s.fls.len() - 1) as u32
-}
+// --- Listas "interlocked" (la sincronización de verdad está en sync.rs) ---------------------------
 
-unsafe extern "win64" fn FlsFree(i: u32) -> Bool {
-    match state().fls.get_mut(i as usize) {
-        Some(v) => {
-            *v = None;
-            TRUE
-        }
-        None => fail(error::INVALID_PARAMETER),
-    }
-}
-
-unsafe extern "win64" fn FlsGetValue(i: u32) -> u64 {
-    let v = state().fls.get(i as usize).copied().flatten();
-    match v {
-        Some(v) => {
-            state::set_last_error(0);
-            v
-        }
-        None => {
-            state::set_last_error(error::INVALID_PARAMETER);
-            0
-        }
-    }
-}
-
-unsafe extern "win64" fn FlsSetValue(i: u32, v: u64) -> Bool {
-    match state().fls.get_mut(i as usize) {
-        Some(slot @ Some(_)) => {
-            *slot = Some(v);
-            TRUE
-        }
-        _ => fail(error::INVALID_PARAMETER),
-    }
-}
-
-// --- Sincronización (un solo hilo: nunca hay que esperar a otro) ---------------------------------
-
-unsafe extern "win64" fn InitializeCriticalSection(cs: *mut u8) {
-    std::ptr::write_bytes(cs, 0, 40);
-}
-unsafe extern "win64" fn InitializeCriticalSectionEx(cs: *mut u8, _spin: u32, _flags: u32) -> Bool {
-    std::ptr::write_bytes(cs, 0, 40);
-    TRUE
-}
-unsafe extern "win64" fn InitializeCriticalSectionAndSpinCount(cs: *mut u8, _spin: u32) -> Bool {
-    std::ptr::write_bytes(cs, 0, 40);
-    TRUE
-}
-unsafe extern "win64" fn EnterCriticalSection(_cs: *mut u8) {}
-unsafe extern "win64" fn LeaveCriticalSection(_cs: *mut u8) {}
-unsafe extern "win64" fn TryEnterCriticalSection(_cs: *mut u8) -> Bool {
-    TRUE
-}
-unsafe extern "win64" fn DeleteCriticalSection(_cs: *mut u8) {}
-unsafe extern "win64" fn InitializeSRWLock(l: *mut u64) {
-    *l = 0;
-}
-unsafe extern "win64" fn AcquireSRWLockExclusive(_l: *mut u64) {}
-unsafe extern "win64" fn AcquireSRWLockShared(_l: *mut u64) {}
-unsafe extern "win64" fn ReleaseSRWLockExclusive(_l: *mut u64) {}
-unsafe extern "win64" fn ReleaseSRWLockShared(_l: *mut u64) {}
-unsafe extern "win64" fn TryAcquireSRWLockExclusive(_l: *mut u64) -> u8 {
-    1
-}
-unsafe extern "win64" fn TryAcquireSRWLockShared(_l: *mut u64) -> u8 {
-    1
-}
-unsafe extern "win64" fn InitializeConditionVariable(c: *mut u64) {
-    *c = 0;
-}
-/// Esperar a que otro hilo avise: con un solo hilo nunca pasaría, así que vence el plazo.
-unsafe extern "win64" fn SleepConditionVariableSRW(_c: u64, _l: u64, _ms: u32, _f: u32) -> Bool {
-    fail(1460) // ERROR_TIMEOUT
-}
-unsafe extern "win64" fn SleepConditionVariableCS(_c: u64, _cs: u64, _ms: u32) -> Bool {
-    fail(1460)
-}
-unsafe extern "win64" fn WakeConditionVariable(_c: u64) {}
-unsafe extern "win64" fn WakeAllConditionVariable(_c: u64) {}
-
-/// `INIT_ONCE`: 0 = sin empezar, 2 = listo.
-unsafe extern "win64" fn InitOnceBeginInitialize(
-    once: *mut u64,
-    _flags: u32,
-    pending: *mut Bool,
-    ctx: *mut u64,
-) -> Bool {
-    *pending = Bool::from(*once != 2);
-    if !ctx.is_null() {
-        *ctx = 0;
-    }
-    TRUE
-}
-
-unsafe extern "win64" fn InitOnceComplete(once: *mut u64, _flags: u32, _ctx: u64) -> Bool {
-    *once = 2;
-    TRUE
-}
-
-unsafe extern "win64" fn InitOnceExecuteOnce(
-    once: *mut u64,
-    f: u64,
-    param: u64,
-    ctx: *mut u64,
-) -> Bool {
-    if *once == 2 {
-        return TRUE;
-    }
-    let f: unsafe extern "win64" fn(*mut u64, u64, *mut u64) -> Bool =
-        std::mem::transmute(f as usize);
-    let r = f(once, param, ctx);
-    if r != 0 {
-        *once = 2;
-    }
-    r
-}
-
-unsafe extern "win64" fn WaitOnAddress(_a: u64, _c: u64, _size: usize, _ms: u32) -> Bool {
-    TRUE
-}
-unsafe extern "win64" fn WakeByAddressSingle(_a: u64) {}
-unsafe extern "win64" fn WakeByAddressAll(_a: u64) {}
-
-fn sync_handle() -> u64 {
-    state::set_last_error(0);
-    state().insert(Object::Sync)
-}
-
-unsafe extern "win64" fn CreateMutexA(_sa: u64, _owner: Bool, _name: u64) -> u64 {
-    sync_handle()
-}
-unsafe extern "win64" fn CreateMutexW(_sa: u64, _owner: Bool, _name: u64) -> u64 {
-    sync_handle()
-}
-unsafe extern "win64" fn CreateMutexExW(_sa: u64, _name: u64, _f: u32, _a: u32) -> u64 {
-    sync_handle()
-}
-unsafe extern "win64" fn ReleaseMutex(_h: u64) -> Bool {
-    TRUE
-}
-unsafe extern "win64" fn CreateEventA(_sa: u64, _m: Bool, _i: Bool, _n: u64) -> u64 {
-    sync_handle()
-}
-unsafe extern "win64" fn CreateEventW(_sa: u64, _m: Bool, _i: Bool, _n: u64) -> u64 {
-    sync_handle()
-}
-unsafe extern "win64" fn CreateEventExW(_sa: u64, _n: u64, _f: u32, _a: u32) -> u64 {
-    sync_handle()
-}
-unsafe extern "win64" fn SetEvent(_h: u64) -> Bool {
-    TRUE
-}
-unsafe extern "win64" fn ResetEvent(_h: u64) -> Bool {
-    TRUE
-}
-unsafe extern "win64" fn CreateSemaphoreW(_sa: u64, _i: i32, _m: i32, _n: u64) -> u64 {
-    sync_handle()
-}
-unsafe extern "win64" fn ReleaseSemaphore(_h: u64, _n: i32, prev: *mut i32) -> Bool {
-    if !prev.is_null() {
-        *prev = 0;
-    }
-    TRUE
-}
-unsafe extern "win64" fn WaitForSingleObject(_h: u64, _ms: u32) -> u32 {
-    0 // WAIT_OBJECT_0
-}
-unsafe extern "win64" fn WaitForSingleObjectEx(_h: u64, _ms: u32, _a: Bool) -> u32 {
-    0
-}
-unsafe extern "win64" fn WaitForMultipleObjects(_n: u32, _h: u64, _all: Bool, _ms: u32) -> u32 {
-    0
-}
 unsafe extern "win64" fn InitializeSListHead(head: *mut u8) {
     std::ptr::write_bytes(head, 0, 16);
 }

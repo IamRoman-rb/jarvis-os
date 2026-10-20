@@ -8,8 +8,6 @@
 //! 4. Cambiar a la pila nueva, llamar a los callbacks de TLS y al punto de entrada:
 //!    `mainCRTStartup(PEB*)`. Si vuelve, su resultado es el código de salida.
 
-use std::sync::atomic::Ordering;
-
 use crate::dll;
 use crate::modules;
 use crate::os;
@@ -92,7 +90,9 @@ pub fn run(
     if !os::set_gs(addrs.teb) {
         return Err(LoadError::Broken("el kernel no dejó poner el TEB en GS"));
     }
-    state::TEB.store(addrs.teb, Ordering::Relaxed);
+    state::set_teb(addrs.teb);
+    dll::threads::set_process(addrs.peb, img.stack_reserve);
+    dll::threads::set_main_stack(stack, stack_top);
 
     let start = Box::leak(Box::new(Start {
         entry: base + img.entry_rva as u64,

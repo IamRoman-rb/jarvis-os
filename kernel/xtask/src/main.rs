@@ -270,7 +270,7 @@ fn build() -> Result<PathBuf> {
 
 /// Los programas de Linux de `kernel/usuario/` (K11): se compilan para musl (estáticos) y quedan
 /// en `target/usuario/`, de donde los sirve el puente (`http://paquetes.jarvis/usuario/`).
-const USER_PROGRAMS: [&str; 5] = ["hola-linux", "eco", "pruebas", "red", "js"];
+const USER_PROGRAMS: [&str; 6] = ["hola-linux", "eco", "pruebas", "red", "js", "hilos"];
 
 fn build_user() -> Result<PathBuf> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -1198,6 +1198,13 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.type_text("pruebas")?;
     s.monitor("sendkey ret")?;
     s.wait_for("PRUEBAS_OK", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // K15: hilos de verdad (clone + futex): Mutex, Condvar, canales, TLS y sleep en paralelo.
+    s.type_text("hilos")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("mutex: 4000 (esperado 4000), tls: [0, 1, 2, 3]", STEP)?;
+    s.wait_for("dormir en paralelo: ok", STEP)?;
+    s.wait_for("HILOS_OK", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
     // La entrada de una tubería llega como su entrada estándar.
     s.type_text("echo hola mundo | eco")?;

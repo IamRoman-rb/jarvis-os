@@ -52,6 +52,8 @@ pub const EV_PROC: u32 = 1 << 3;
 pub const EV_PROC_REPLY: u32 = 1 << 4;
 /// La controladora USB tiene eventos (K13).
 pub const EV_USB: u32 = 1 << 5;
+/// Un `futex` de algún proceso se despertó (K15: hilos).
+pub const EV_FUTEX: u32 = 1 << 6;
 
 /// El planificador. Se toma siempre con las interrupciones deshabilitadas (en las tareas, con
 /// `without_interrupts`; en los manejadores ya lo están), así nunca está tomado cuando llega una

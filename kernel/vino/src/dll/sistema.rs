@@ -24,7 +24,6 @@ macro_rules! exports {
 
 pub fn exports() -> Vec<(&'static str, usize)> {
     let mut v = exports![
-        GetCurrentThreadStackLimits,
         GetActiveProcessorCount,
         GetActiveProcessorGroupCount,
         GetMaximumProcessorCount,
@@ -43,7 +42,6 @@ pub fn exports() -> Vec<(&'static str, usize)> {
         GetVolumePathNameW,
         GetVolumeInformationW,
         GetLocaleInfoA,
-        CreateSemaphoreA,
         AddDllDirectory,
         RemoveDllDirectory,
         SetDefaultDllDirectories,
@@ -97,15 +95,13 @@ pub fn exports() -> Vec<(&'static str, usize)> {
 }
 
 /// Devuelven FALSE / NULL / 0.
-const NOT_SUPPORTED: [&str; 46] = [
+const NOT_SUPPORTED: [&str; 40] = [
     "CreateProcessW",
     "CreateProcessA",
     "OpenProcess",
     "OpenThread",
-    "ResumeThread",
     "SuspendThread",
     "TerminateThread",
-    "GetExitCodeThread",
     "CreatePipe",
     "PeekNamedPipe",
     "SetNamedPipeHandleState",
@@ -125,10 +121,6 @@ const NOT_SUPPORTED: [&str; 46] = [
     "UpdateProcThreadAttribute",
     "DeleteProcThreadAttributeList",
     "GetNumaNodeProcessorMask",
-    "CreateWaitableTimerExW",
-    "CreateWaitableTimerW",
-    "SetWaitableTimerEx",
-    "SetWaitableTimer",
     "OpenFileMappingW",
     "OpenEventW",
     "OpenMutexW",
@@ -165,18 +157,6 @@ unsafe extern "win64" fn not_supported_handle() -> u64 {
 }
 
 // --- Sistema ------------------------------------------------------------------------------------
-
-unsafe extern "win64" fn GetCurrentThreadStackLimits(low: *mut u64, high: *mut u64) {
-    let teb = state::TEB.load(std::sync::atomic::Ordering::Relaxed);
-    if teb == 0 {
-        *low = 0;
-        *high = 0;
-        return;
-    }
-    let t = teb as *const u64;
-    *high = *t.add(1); // StackBase
-    *low = *t.add(2); // StackLimit
-}
 
 unsafe extern "win64" fn GetActiveProcessorCount(_group: u16) -> u32 {
     1
@@ -315,10 +295,6 @@ unsafe extern "win64" fn GetDiskFreeSpaceExW(
 unsafe extern "win64" fn GetLocaleInfoA(_l: u32, _t: u32, _b: u64, _n: i32) -> i32 {
     state::set_last_error(error::INVALID_PARAMETER);
     0
-}
-unsafe extern "win64" fn CreateSemaphoreA(_sa: u64, _i: i32, _m: i32, _n: u64) -> u64 {
-    state::set_last_error(0);
-    state().insert(Object::Sync)
 }
 /// Carpetas extra donde buscar DLL: se aceptan (el cookie es el número de la carpeta).
 unsafe extern "win64" fn AddDllDirectory(_dir: *const u16) -> u64 {
@@ -793,8 +769,8 @@ unsafe extern "win64" fn GetConsoleTitleW(buf: *mut u16, n: u32) -> u32 {
     win::put_wide(buf, n, "Terminal")
 }
 /// Sin hilos que avisar, no hay nada que apagar.
-unsafe extern "win64" fn DisableThreadLibraryCalls(_h: u64) -> Bool {
-    1
+unsafe extern "win64" fn DisableThreadLibraryCalls(h: u64) -> Bool {
+    Bool::from(crate::modules::disable_thread_calls(h))
 }
 unsafe extern "win64" fn WTSGetActiveConsoleSessionId() -> u32 {
     1
