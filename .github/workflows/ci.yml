@@ -47,5 +47,12 @@ jobs:
           cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
       - name: Tests (FAT32 contra fatfs, escritorio, red con loopback, gráficos)
         run: cargo test
+      - name: vino (programas de Windows, ADR 0018) en el anfitrión
+        working-directory: kernel/vino
+        run: |
+          cargo fmt --check
+          cargo test
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --release --target x86_64-unknown-linux-musl -- -D warnings
       - name: De punta a punta en QEMU (teclado, mouse, ventanas, disco y red)
         run: cargo xtask test

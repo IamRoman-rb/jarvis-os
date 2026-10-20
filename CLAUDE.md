@@ -6,7 +6,7 @@ de JARVIS (Claude vía Agent SDK, en Python) corre en el host y el kernel le va 
 red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y navegador, la 0004;
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
 idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta; espacio de usuario y programas
-de Linux, la 0010, propuesta; hardware real, la 0011; Wi-Fi, la 0012; JARVIS modificando el sistema desde adentro, la 0013; sin navegador propio, la 0014; gestos con la cámara, la 0015). Roadmap y arquitectura del kernel:
+de Linux, la 0010, propuesta; hardware real, la 0011; Wi-Fi, la 0012; JARVIS modificando el sistema desde adentro, la 0013; sin navegador propio, la 0014; gestos con la cámara, la 0015; antivirus, la 0017; el kernel habla solo Linux y los programas de Windows los corre `vino`, la 0018, que reemplaza a la 0016). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -43,6 +43,13 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
     - usuario/     programas de Linux de prueba (otro workspace, para x86_64-unknown-linux-musl):
                    hola-linux, eco, pruebas, red y js (JavaScript con el motor Boa).
                    `cargo xtask usuario` → target/usuario/
+    - vino/        programas de Windows (K15, ADR 0018), como Wine: un programa de Linux más
+                   (otro workspace, musl). Cargador de PE (pe.rs, loader.rs), TEB/PEB (teb.rs), las
+                   DLL "builtin" en Rust con `extern "win64"` (dll/: kernel32, ntdll, crt, extra),
+                   printf del CRT (printf.rs) y el arranque (run.rs, solo Linux). `cargo test` en el
+                   anfitrión; `cargo xtask usuario` lo compila
+    - usuario-win/ programas de Windows de prueba (Rust y C) y sus .exe compilados en bin/ (van en
+                   el repo: la CI no tiene Visual Studio). `cargo xtask windows` los regenera
     - net/         red: smoltcp (TCP/IP), DHCP, DNS, descargas HTTP; genérico sobre `phy::Device`
     - sync/        sincronización de /Sincronizado: emparejado (HKDF), cifrado (ChaCha20-Poly1305),
                    estado por archivo con relojes de Lamport y conflictos; no_std, sin disco ni red
@@ -91,8 +98,12 @@ Kernel (desde kernel/):
                     NAT con acceso al localhost de la PC; --iso la arma y la monta)
 - ISO:              cargo xtask iso [--probar|--abrir] (El Torito, UEFI 64 bits; sin disco → modo en vivo
                     con el asistente de instalación, FAT32 en RAM)
-- Programas Linux:  cargo xtask usuario (compila kernel/usuario/ → target/usuario/; run y test lo hacen
-                    solos). En JARVIS-OS: apt install programas-linux js ; hola-linux ; js
+- Programas Linux:  cargo xtask usuario (compila kernel/usuario/ y vino → target/usuario/; run y test lo
+                    hacen solos). En JARVIS-OS: apt install programas-linux js ; hola-linux ; js
+- Programas Windows: cargo xtask vino (solo la parte de Windows de `test`: instala vino y corre los .exe
+                    de prueba) ; cargo xtask windows (regenera usuario-win/bin/, en Windows con
+                    Visual Studio). En JARVIS-OS: apt install vino programas-windows ;
+                    wine /Programas/windows/hola-win.exe ; vino --imports x.exe (qué le falta)
 - Monitores:        cargo xtask pantallas (dos monitores, capturas por salida); JARVIS_MONITORES=N en run/test
 - Captura:          cargo xtask screenshot     (escritorio, apps y menús en target/: miralas si tocás la UI)
 - Vista previa web: JARVIS_URL=https://… cargo test -p jarvis-desktop --test vista_previa -- --ignored
@@ -102,7 +113,9 @@ Kernel (desde kernel/):
                     JARVIS_URL=config:N abre la Configuración)
 - Lint:             cargo fmt --all && cargo clippy --workspace --exclude jarvis-kernel --all-targets -- -D warnings
                     && cargo clippy -p jarvis-kernel --target x86_64-unknown-none -- -D warnings
-                    (y en usuario/: cargo fmt && cargo clippy --release -- -D warnings)
+                    (y en usuario/: cargo fmt && cargo clippy --release -- -D warnings; en vino/:
+                    cargo fmt && cargo test && cargo clippy --all-targets -- -D warnings && cargo clippy
+                    --release --target x86_64-unknown-linux-musl -- -D warnings)
 Cerebro (desde la raíz):
 - uv sync --extra voice ; uv run pytest ; uv run ruff check . ; uv run mypy
   (un `uv sync` sin `--extra voice` desinstala la voz; `cargo xtask run` la reinstala sola)
@@ -161,9 +174,13 @@ Cerebro (desde la raíz):
     Los comandos nuevos van en desktop/src/term/cmds.rs (y en `NAMES`, para `help` y Tab) con un
     test en desktop/tests/terminal.rs. Un paquete nuevo: carpeta en kernel/paquetes/ con su
     manifiesto y un renglón en indice.txt; que el test de apt lo instale.
-18. Programas de Windows/Linux: no se simula que corren. Los de Linux estáticos para x86-64 corren
-    de verdad en el anillo 3 (K11, ADR 0010); los dinámicos, los de Windows y los paquetes se
-    descargan e inspeccionan. Una llamada al sistema nueva va en linux/src/process.rs con su test
+18. Programas de Windows/Linux: no se simula que corren. El kernel habla **solo la ABI de Linux**
+    (ADR 0018): nada específico de Windows va en el kernel. Los de Linux para x86-64 corren de
+    verdad en el anillo 3 (K11, ADR 0010); los de Windows de 64 bits los corre `vino` (kernel/vino/),
+    que es un programa de Linux más. Una función de Windows nueva va en vino/src/dll/ (con su
+    nombre de Windows, `extern "win64"`, en la lista `exports!`) y con su test en el anfitrión; lo
+    que falta lo dice vino ("falta KERNEL32!Foo"), no se inventa. Una llamada al sistema nueva va
+    en linux/src/process.rs con su test
     en linux/src/tests.rs; lo que no existe devuelve ENOSYS y se anota (PROCESO_LOG). Los
     procesos no tocan el disco ni la pantalla: se lo piden al escritorio (desktop/src/procs.rs).
     Los textos al usuario usan solo caracteres de Latin-1 (la
