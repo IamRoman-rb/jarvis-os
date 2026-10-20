@@ -5,6 +5,8 @@ Red y navegador: [ADR 0004](adr/0004-red-y-navegador-propio.md). Terminal, paque
 otros sistemas: [ADR 0005](adr/0005-terminal-paquetes-y-programas.md). Motor web, firewall, snap,
 winget e idiomas: [ADR 0006](adr/0006-motor-web-firewall-tiendas-e-idiomas.md). Conexiones largas,
 Brave remoto, sincronización e ISO: [ADR 0007](adr/0007-brave-remoto-y-sincronizacion.md).
+El kernel habla solo la ABI de Linux; los programas de Windows los corre `vino`, un programa de
+Linux más: [ADR 0018](adr/0018-linux-puro-y-vino.md).
 
 **Brave en JARVIS-OS**: YouTube con JavaScript, en una ventana maximizada con la barra de arriba
 (íconos, ventanas abiertas, CPU, memoria, disco, red, IP y hora):
@@ -336,6 +338,20 @@ roman@jarvis:~$ file /Descargas/7z2408-x64.exe
 `winget search` busca en `kernel/paquetes/winget.txt`; con el Id exacto, `show` e `install` van
 al repositorio real. Los instaladores no se ejecutan (ADR 0005); hasta 32 MB por descarga.
 
+### `vino` (programas de Windows, K15)
+
+```
+roman@jarvis:~$ apt install vino programas-windows
+roman@jarvis:~$ wine /Programas/windows/hola-win.exe uno "dos tres"    # o vino, o ./hola-win.exe
+roman@jarvis:~$ vino --imports /Descargas/algo.exe                      # qué pide y qué le falta
+```
+
+Corre programas de Windows de 64 bits de consola, como Wine en Linux: `vino` es un programa de
+Linux (ADR 0018) que carga el `.exe`, le arma el TEB y le da las DLL de Windows escritas en Rust.
+La salida va a la Terminal y lo que se tipea es su entrada. Si el programa usa algo que `vino` no
+tiene, lo dice: `vino: falta KERNEL32!GetSystemPowerStatus`. Doble clic en un `.exe` en Archivos
+hace lo mismo. Los de 32 bits, .NET y con ventanas todavía no.
+
 ### Firewall: `ufw`
 
 ```
@@ -424,13 +440,44 @@ firmware UEFI (OVMF en QEMU)
 | `image` (`jarvis-image`) | Imágenes (K10): inflate (DEFLATE + zlib) y PNG propios (todos los tipos de color y profundidades, paletas, `tRNS`, Adam7, CRC y Adler-32), JPEG con `zune-jpeg` (progresivos incluidos), topes de tamaño y achicado por promedio. | 13 tests, los de PNG **cruzados contra la crate `png`** (todas las combinaciones de color, bits y filtro; entrelazado; cortado en cada byte) y los de JPEG contra `image`; y `cargo xtask test` (el visor abre un PNG y un JPEG progresivo en el kernel) |
 | `mem` (`jarvis-mem`) | Memoria: allocator de marcos físicos (mapa de bits), tablas de páginas de 4 niveles (mapear, traducir, desmapear, recorrer; páginas de 4 KiB, 2 MiB y 1 GiB) y segmentos del ELF del kernel para W^X. Sobre un trait `PhysMem`. | 8 tests sobre una RAM de mentira (copiar una jerarquía da las mismas traducciones) y `cargo xtask test` (el kernel arranca con sus tablas y verifica W^X) |
 | `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
-| `linux` (`jarvis-linux`) | La ABI de Linux x86_64 (K11): cargador de ELF (estáticos y static-pie), pila inicial con el vector auxiliar, zonas de memoria (brk, mmap, mprotect, páginas al primer uso) y ~90 llamadas al sistema (archivos, directorios, consola, tiempo, azar, sockets TCP, señales mínimas). Sobre un trait `System`. | 20 tests: un proceso de mentira de punta a punta (cargar, archivos, directorios, memoria, punteros del kernel → EFAULT, sockets) y `cargo xtask test` (programas de verdad, compilados con musl) |
+| `linux` (`jarvis-linux`) | La ABI de Linux x86_64 (K11): cargador de ELF (estáticos y static-pie), pila inicial con el vector auxiliar, zonas de memoria (brk, mmap con `MAP_FIXED_NOREPLACE`, mprotect, páginas al primer uso) y ~90 llamadas al sistema (archivos, directorios, consola, tiempo, azar, sockets TCP, señales mínimas, `arch_prctl` con FS y GS). Sobre un trait `System`. | 22 tests: un proceso de mentira de punta a punta (cargar, archivos, directorios, memoria, punteros del kernel → EFAULT, sockets) y `cargo xtask test` (programas de verdad, compilados con musl) |
+| `vino` (otro workspace) | Programas de Windows (K15, ADR 0018), como Wine: un programa de Linux (musl) con el cargador de PE32+ (secciones, relocalizaciones, imports, api sets, TLS), el TEB/PEB en GS y las DLL "builtin" en Rust `extern "win64"`: `kernel32`, `ntdll`, el CRT de Microsoft (`ucrtbase`/`msvcrt`/`vcruntime140`, con su `printf`), azar y `MessageBox`. Lo que falta, lo avisa. | 30 tests en el anfitrión (PE, cargador, TEB, printf como el CRT, archivos y texto con la API de Windows llamada de verdad, `qsort` con una función `win64`) y `cargo xtask vino` / `test` (cuatro `.exe` de verdad: Rust y C, con el CRT en DLL y adentro, y uno al que le falta una función) |
 | `drivers` (`jarvis-drivers`) | Hardware real (K13, ADR 0011), la mitad que interpreta: tablas fijas de ACPI, entradas del IOAPIC y mensajes MSI, GPT (leer, crear, disco vacío), comandos AHCI/ATA y NVMe, descriptores de e1000, RTL8139, RTL8168 y AMD PCnet, USB (descriptores, TRB y contextos de xHCI, HID, Bulk-Only + SCSI), verbos y grafo de HDA, sensores de temperatura; la placa Wi-Fi RTL8821CE (K14, `rtw88`: encendido, efuse, carga del firmware, comandos H2C, tablas de Realtek con condiciones, canales, potencia, descriptores) y el ramdisk del arranque. Sin `unsafe`. | Tests con tablas y descriptores armados byte por byte; la GPT **cruzada contra la crate `gpt`** en los dos sentidos; la RTL8821CE contra una **placa simulada** (bits que se borran solos, el DMA interno, el efuse, la radio, el firmware que arranca). En QEMU, `cargo xtask test-hardware` (AHCI + e1000e + HDA, NVMe + RTL8139, todo por USB) y `cargo xtask test-instalar` |
 | `wifi` (`jarvis-wifi`) | Wi-Fi (K14, ADR 0012), lo que no toca la placa: tramas 802.11 (encabezado, datos ↔ Ethernet, beacons, sondeo, autenticación, asociación), elemento RSN, PMK y PTK, el saludo de 4 vías y el de grupo de la estación, CCMP con contadores contra repeticiones, y la estación entera (sin E/S): buscar redes, conectarse, datos, pérdida de beacons y reintentos. | 20 tests: vectores del estándar (PBKDF2 del anexo J, AES Key Wrap del RFC 3394), 6 **cruzados** contra un punto de acceso en Python con `cryptography` (`wifi/tests/datos/generar.py`: los mensajes 2 y 4 y las tramas cifradas coinciden byte a byte) y 8 de la estación contra puntos de acceso de mentira en un aire simulado |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K15: Linux puro y `vino`
+
+- **Wine no es un emulador, y `vino` tampoco.** Un `.exe` de x86-64 ya es código de la misma
+  CPU: no hay que traducir instrucciones. Lo que cambia es **a quién llama** el programa: en vez
+  del kernel, llama funciones de DLL. Si esas funciones las pone otro (Wine, `vino`) y hablan con
+  el kernel que hay (Linux, JARVIS-OS), el programa no se entera. Por eso el kernel no necesita
+  saber nada de Windows: le alcanza con `mmap`, `mprotect` y `arch_prctl`.
+- **GS es el único "favor" que pide Windows.** El código de Windows lee su TEB en `gs:[…]` (el
+  último error en `gs:[0x68]`, el TLS en `gs:[0x58]`, el límite de la pila en `gs:[0x10]`). Linux
+  no usa GS en el espacio de usuario (el TLS de musl va en FS), así que `arch_prctl(ARCH_SET_GS)`
+  lo deja libre para el programa. El kernel solo tiene que guardar y restaurar GS al cambiar de
+  tarea, igual que FS.
+- **La convención de llamada se elige por función.** Rust compila `extern "win64" fn` en Linux:
+  argumentos en rcx, rdx, r8, r9, 32 bytes de sombra, xmm6–15 conservados. Las DLL de `vino` son
+  funciones normales con esa marca; el cargador escribe su dirección en la IAT y listo.
+- **`printf` de Windows recibe la `va_list` del que llama.** En la UCRT, `printf` está en el
+  encabezado y llama a `__stdio_common_vfprintf` con un puntero a los argumentos en la pila: 8
+  bytes por argumento, los `double` como sus 64 bits. El `printf` viejo de `msvcrt` sí tiene
+  argumentos variables: una función `naked` guarda los cuatro registros en la sombra (que los deja
+  pegados a los demás argumentos) y salta a `vprintf`.
+- **Lo que falta se tiene que poder nombrar.** Si todos los imports desconocidos apuntaran a la
+  misma función, el aviso no podría decir cuál fue. Con genéricos (`stub::<N>`) el compilador
+  genera 512 funciones distintas, y cada import faltante recibe una con su nombre anotado.
+- **El primer bug fue de `vino`, no del programa.** El `.exe` imprimía sus argumentos y moría en
+  la dirección 0. La dirección de retorno en la pila apuntaba a `ProcessPrng` de `vino`: la función
+  `getrandom` del musl que trae Rust era un símbolo débil sin resolver (0). Ahora `vino` usa
+  `syscall(SYS_getrandom)`, como ya hacía con `arch_prctl`.
+- **Qué queda**: hilos (`CreateThread` necesita `clone` en el kernel), excepciones (desenrollar
+  la pila leyendo `.pdata`), DLL de terceros, 32 bits y ventanas (un servidor gráfico).
 
 ### K14: Wi-Fi
 
@@ -994,7 +1041,8 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K14 terminados (15 de 15 hitos). Lo último: el Wi-Fi (K14, ADR 0012).
+**Dónde estamos:** K0–K15 terminados (16 de 16 hitos). Lo último: JARVIS-OS habla solo Linux y
+los programas de Windows corren con `vino` (K15, ADR 0018). Antes, el Wi-Fi (K14, ADR 0012).
 La RTL8821CE de la PC de Roman tiene driver (port de rtw88, con el firmware de Realtek en el
 ramdisk del arranque), una estación que busca redes en 2,4 y 5 GHz, se conecta con WPA2, usa
 802.11n/ac y se reconecta sola, y una sección Wi-Fi en Configuración → Red. También: el volumen
@@ -1020,6 +1068,8 @@ puntos de acceso de mentira, y el registro del arranque dice qué pasó).
 | **K12** ✅ | Audio y video: salida por virtio-sound con su propia tarea ✅; mezclador, WAV e IMA ADPCM propios ✅; la voz de JARVIS suena en JARVIS-OS y la envolvente de la esfera sale del audio que suena ✅; Música con archivos y el sintetizador ✅; videos AVI (MJPEG + audio) en el Visor ✅. HDA queda para K13 (hardware real) | Drivers de audio, códecs |
 | **K13** ✅ | Hardware real (ADR 0011): ACPI (tablas propias y AML), APIC y MSI ✅; discos SATA (AHCI) y NVMe con GPT ✅; placas de red e1000/e1000e, RTL8139, RTL8168 y AMD PCnet (la de VirtualBox) ✅; USB (xHCI): teclado, mouse, pendrives y hubs ✅; sonido HDA ✅; sensores de temperatura (Intel, AMD, ACPI) y registro del arranque ✅; instalador desde el pendrive o la ISO a un disco vacío, con asistente (usuario, contraseña y presentación de JARVIS) ✅; discos y lectoras IDE ✅. La suspensión S3 queda para cuando haya un driver de video (ver "Lo que se aprendió") | Drivers reales |
 | **K14** ✅ | **Wi-Fi** (ADR 0012), en 4 etapas: 1) tramas 802.11, RSN, WPA2-PSK (PMK, PTK, saludos de 4 vías y de grupo) y CCMP en `jarvis-wifi`, cruzados contra Python ✅; 2) driver de la RTL8821CE (port de rtw88: encendido, efuse, firmware por la página reservada, tablas de Realtek, canales, potencia, antena sin Bluetooth) y su firmware en el ramdisk del arranque ✅; 3) la estación (buscar, autenticar, asociar, saludo, datos cifrados), cable y Wi-Fi juntos con DHCP al cambiar de conexión, y Wi-Fi en Configuración → Red ✅; 4) 5 GHz (con los canales de radar solo escuchando), 802.11n/ac con WMM y reconexión con espera ✅. Falta verificarlo en la PC. El ahorro de energía queda para después | Redes inalámbricas, criptografía de enlace, firmware de dispositivos |
+
+| **K15** ✅ | **Linux puro y `vino`** (ADR 0018, reemplaza a la 0016): el kernel habla solo la ABI de Linux (`arch_prctl` con GS, `MAP_FIXED_NOREPLACE`; sale el parser de PE) ✅; `vino`, un programa de Linux que corre `.exe` de 64 bits de consola como Wine: cargador de PE, TEB/PEB, DLL builtin (`kernel32`, `ntdll`, el CRT de Microsoft) ✅; `wine`/`./x.exe`/doble clic, `apt install vino` ✅; cuatro `.exe` de prueba (Rust y C, CRT en DLL y adentro) corren en QEMU ✅. Hilos, excepciones, DLL de terceros, 32 bits y ventanas, después | Formatos ejecutables, ABI y convenciones de llamada, compatibilidad de sistemas |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),
 la especificación de virtio y la especificación "Microsoft FAT32 File System".

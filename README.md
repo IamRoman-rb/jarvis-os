@@ -21,7 +21,7 @@ HTTP, HTML, CSS, cajas, flex y grid).*
 
 | Parte | Qué hay | Dónde |
 |---|---|---|
-| Kernel | K0–K14 ✅ (15 de 15 hitos): HUD, FAT32, ventanas, red y navegador propios, terminal con `apt`, firewall, idiomas, Brave remoto, sincronización, paginación, multitarea, TLS, programas de Linux, audio y video, hardware real (ACPI, SATA/NVMe, USB, HDA, instalador) y Wi-Fi (RTL8821CE, WPA2, 2,4 y 5 GHz, 802.11n/ac; falta probarlo en la PC) | [docs/kernel.md](docs/kernel.md) |
+| Kernel | K0–K15 ✅ (16 de 16 hitos): HUD, FAT32, ventanas, red y navegador propios, terminal con `apt`, firewall, idiomas, Brave remoto, sincronización, paginación, multitarea, TLS, programas de Linux, audio y video, hardware real (ACPI, SATA/NVMe, USB, HDA, instalador) Wi-Fi (RTL8821CE, WPA2, 2,4 y 5 GHz, 802.11n/ac; falta probarlo en la PC) y programas de Windows con `vino`, como Wine (el kernel habla solo Linux) | [docs/kernel.md](docs/kernel.md) |
 | Cerebro | Agente con Claude (Agent SDK), tools con permisos de 3 niveles, auditoría, voz local ("JARVIS, …": Whisper + Piper) | `src/jarvis/` |
 | Puente kernel ↔ cerebro | K7 ✅ (ADR 0008): la consola y la voz de JARVIS-OS hablan con `jarvis serve` en el anfitrión | `src/jarvis/service/` |
 
@@ -54,6 +54,7 @@ kernel/            workspace Rust
                    navegador con motor de maquetación (no_std, testeable en el host)
   net/             red: TCP/IP (smoltcp), DHCP, DNS, descargas HTTP (no_std, testeable)
   kernel/          el kernel: arranque, interrupciones y drivers
+  vino/            programas de Windows, como Wine: un programa de Linux más (ADR 0018)
   xtask/           imagen booteable, disco virtual, QEMU, puente (HTTPS, paquetes, imágenes), tests
   paquetes/        repositorio de apt, tienda de snaps y lista de winget
   rootfs/          contenido inicial del disco virtual
@@ -69,5 +70,6 @@ CLAUDE.md          instrucciones para desarrollar con Claude Code
 - [ADR 0004](docs/adr/0004-red-y-navegador-propio.md): red y navegador propios (por qué no Brave) y el puente HTTPS temporal.
 - [ADR 0005](docs/adr/0005-terminal-paquetes-y-programas.md): terminal propia, `apt` con paquetes de JARVIS-OS, y por qué los `.exe` se descargan pero todavía no se ejecutan.
 - [ADR 0006](docs/adr/0006-motor-web-firewall-tiendas-e-idiomas.md): motor de maquetación propio (y por qué no hay JavaScript todavía), firewall sobre el `Outbox`, `snap`, `winget` e idiomas.
+- [ADR 0018](docs/adr/0018-linux-puro-y-vino.md): el kernel habla solo Linux; los programas de Windows los corre `vino`, una app como Wine que es un programa de Linux más.
 - ADR 0002: el cerebro usa el Claude Agent SDK, aislado y con una sola compuerta de permisos (llega con el [PR #1](https://github.com/IamRoman-rb/jarvis-os/pull/1)).
 - [Investigación inicial](docs/investigacion.md): la capa JARVIS, la sincronización y Android siguen vigentes.

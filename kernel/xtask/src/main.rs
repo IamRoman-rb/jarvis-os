@@ -9,6 +9,8 @@
 //! - `disk`        crea el disco virtual `target/disco.img` si no existe (`--reset` lo regenera)
 //! - `brave`       el puente de Brave solo (`--instalar` lo instala con winget, `--red --token X`
 //!   lo abre a la red local, `--probar URL` hace de kernel y guarda la página en un PNG)
+//! - `vino`        solo la parte de programas de Windows de `test` (ADR 0018)
+//! - `windows`     compila los `.exe` de prueba con Visual Studio (ver `windows.rs`)
 
 use std::env;
 use std::fs;
@@ -28,6 +30,7 @@ mod iso;
 mod puente;
 mod sincro;
 mod vbox;
+mod windows;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -47,6 +50,10 @@ fn main() -> ExitCode {
         "test-hardware" => build().and_then(|img| test_hardware(&img)),
         "test-instalar" => build().and_then(|img| test_install(&img)),
         "usuario" => build_user().map(|d| println!("programas de Linux: {}", d.display())),
+        "windows" => windows::build_programs(),
+        "vino" => build_user()
+            .and_then(|_| build())
+            .and_then(|img| windows::test(&img, &fresh_disk("disco-vino.img")?)),
         "screenshot" => build().and_then(|img| screenshot(&img, &fresh_disk("disco-captura.img")?)),
         "vdi" => build().and_then(|img| vdi(&img)),
         "vbox" if env::args().any(|a| a == "--iso") => build()
@@ -66,7 +73,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino|windows|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -280,6 +287,8 @@ fn build_user() -> Result<PathBuf> {
         let from = build_dir.join("x86_64-unknown-linux-musl/release").join(p);
         fs::copy(&from, out.join(p)).map_err(|e| format!("{}: {e}", from.display()))?;
     }
+    // vino y los programas de Windows de prueba (ADR 0018).
+    windows::build_into(&out)?;
     Ok(out)
 }
 
@@ -1221,6 +1230,8 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("42007", STEP)?;
     s.monitor("sendkey ctrl-d")?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // K15: programas de Windows con vino, un programa de Linux más (ADR 0018).
+    windows::steps(&mut s)?;
     // K10: un PNG y un JPEG progresivo del repositorio, sin convertir: los decodifica el
     // kernel (el visor, con jarvis-image).
     for file in ["fondos/aurora.png", "pruebas/aurora-progresivo.jpg"] {

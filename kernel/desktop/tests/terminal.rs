@@ -119,6 +119,16 @@ fn serve(t: &mut Driver) {
                     url: r.url.clone(),
                     body,
                 })
+            } else if r.url.ends_with("viejo.exe") {
+                // Uno de 32 bits (x86): vino no lo corre.
+                let mut b = tiny_exe();
+                b[0x84..0x86].copy_from_slice(&0x14cu16.to_le_bytes());
+                Ok(HttpResponse {
+                    status: 200,
+                    content_type: "application/octet-stream".into(),
+                    url: r.url.clone(),
+                    body: b,
+                })
             } else if r.url.ends_with("programa.exe") || r.url.ends_with("7z2408-x64.exe") {
                 assert_eq!(r.kind, FetchKind::Download);
                 Ok(HttpResponse {
@@ -479,8 +489,9 @@ fn apt_instala_programas_del_repositorio_y_los_desinstala() {
     assert!(fatfs_exists(t.d, "/Programas/bin/neofetch"));
 }
 
+/// ADR 0018: un `.exe` lo corre `vino`, un programa de Linux más (como `binfmt_misc` con Wine).
 #[test]
-fn wget_descarga_un_exe_que_se_puede_inspeccionar_pero_no_ejecutar() {
+fn los_programas_de_windows_corren_con_vino() {
     let mut t = Driver::new();
     open_terminal(&mut t);
     run(&mut t, "cd /Documentos");
@@ -488,9 +499,52 @@ fn wget_descarga_un_exe_que_se_puede_inspeccionar_pero_no_ejecutar() {
     assert!(out.contains("guardado"), "{out}");
     assert!(out.contains("PE32+ de Windows"), "{out}");
     assert!(run(&mut t, "file programa.exe").contains("programa de consola"));
+    // Sin vino, se dice cómo conseguirlo.
     let out = run(&mut t, "./programa.exe");
-    assert!(out.contains("todavía no puede ejecutarlo"), "{out}");
-    assert!(fatfs_exists(t.d, "/Documentos/programa.exe"));
+    assert!(out.contains("apt install vino"), "{out}");
+    assert!(t.d.take_requests().spawn.is_empty());
+    assert!(fatfs_exists_in(&mut t, "/Documentos/programa.exe"));
+
+    assert!(run(&mut t, "apt install vino programas-windows").contains("Listo"));
+    assert!(fatfs_exists_in(&mut t, "/Programas/bin/vino"));
+    assert!(fatfs_exists_in(&mut t, "/Programas/windows/hola-win.exe"));
+    // `./programa.exe uno` → `vino /Documentos/programa.exe uno`.
+    t.type_text("./programa.exe uno");
+    t.key(Key::Enter);
+    let reqs = t.d.take_requests();
+    assert_eq!(reqs.spawn.len(), 1);
+    let sp = &reqs.spawn[0];
+    assert_eq!(sp.path, "/Programas/bin/vino");
+    assert_eq!(sp.argv, ["vino", "/Documentos/programa.exe", "uno"]);
+    assert!(
+        sp.image.starts_with(b"\x7fELF"),
+        "lo que corre es vino (Linux)"
+    );
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l == "TERMINAL_WINDOWS /Documentos/programa.exe")
+    );
+    t.d.proc_event(jarvis_desktop::procs::ProcEvent::Exited {
+        pid: sp.pid,
+        code: 0,
+        why: None,
+    });
+    // `wine` es el mismo vino.
+    t.type_text("wine programa.exe dos");
+    t.key(Key::Enter);
+    let sp = t.d.take_requests().spawn.remove(0);
+    assert_eq!(sp.argv, ["vino", "/Documentos/programa.exe", "dos"]);
+    t.d.proc_event(jarvis_desktop::procs::ProcEvent::Exited {
+        pid: sp.pid,
+        code: 0,
+        why: None,
+    });
+    // Uno de 32 bits no: se explica por qué, sin lanzar nada.
+    run(&mut t, "wget http://ejemplo.com/viejo.exe");
+    let out = run(&mut t, "wine viejo.exe");
+    assert!(out.contains("vino corre los de 64 bits"), "{out}");
+    assert!(t.d.take_requests().spawn.is_empty());
 }
 
 #[test]

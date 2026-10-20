@@ -77,6 +77,8 @@ struct UserContext {
     /// Tope de la pila del kernel de la tarea (rsp0 y la pila de `syscall`).
     kstack: u64,
     fs: u64,
+    /// La base de GS: el TEB de un programa de Windows (ADR 0016). El kernel no usa GS.
+    gs: u64,
     fpu: Fxsave,
 }
 
@@ -91,6 +93,7 @@ static CONTEXTS: Contexts = Contexts(UnsafeCell::new(
             cr3: 0,
             kstack: 0,
             fs: 0,
+            gs: 0,
             fpu: Fxsave([0; 512]),
         }
     }; MAX_TASKS],
@@ -116,11 +119,12 @@ fn fresh_fpu() -> Fxsave {
 /// # Safety
 /// Interrupciones deshabilitadas, un solo núcleo, `from` y `to` < MAX_TASKS.
 unsafe fn switch_user_context(from: TaskId, to: TaskId) {
-    use x86_64::registers::model_specific::FsBase;
+    use x86_64::registers::model_specific::{FsBase, GsBase};
     // SAFETY: lo garantiza quien llama (ver arriba): nadie más toca CONTEXTS a la vez.
     let c = unsafe { &mut *CONTEXTS.0.get() };
     if c[from].user {
         c[from].fs = FsBase::read().as_u64();
+        c[from].gs = GsBase::read().as_u64();
         // SAFETY: el área es de la tarea `from`, alineada a 16 y de 512 bytes.
         unsafe {
             core::arch::asm!("fxsave64 [{}]", in(reg) c[from].fpu.0.as_mut_ptr(), options(nostack))
@@ -144,6 +148,7 @@ unsafe fn switch_user_context(from: TaskId, to: TaskId) {
         crate::gdt::set_kernel_stack(t.kstack);
         JARVIS_SYSCALL_STACK.store(t.kstack, Ordering::Relaxed);
         FsBase::write(x86_64::VirtAddr::new(t.fs));
+        GsBase::write(x86_64::VirtAddr::new(t.gs));
         // SAFETY: el área la llenó `fxsave` (o `fresh_fpu`) y está alineada.
         unsafe { core::arch::asm!("fxrstor64 [{}]", in(reg) t.fpu.0.as_ptr(), options(nostack)) };
     }
@@ -264,6 +269,7 @@ fn spawn_with(
             c.user = user_cr3 != 0;
             c.cr3 = user_cr3;
             c.fs = 0;
+            c.gs = 0;
             if c.user {
                 c.fpu = fresh_fpu();
             }

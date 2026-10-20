@@ -1371,6 +1371,7 @@ impl Shell {
                     }
                 }
             }
+            // `wine` es otro nombre de `vino` (ADR 0018), el de Linux de siempre.
             "wine" => {
                 let Some(f) = argv.get(1) else {
                     e.push_str("wine: decime qué programa (.exe)\n");
@@ -1381,6 +1382,9 @@ impl Shell {
                     return Res::Code(1);
                 };
                 match fs.read_prefix(&p, 4 * 1024 * 1024) {
+                    Ok(b) if binfmt::windows_runnable(&b) => {
+                        return self.run_windows(&argv[1..], &p, stdin, ctx, e);
+                    }
                     Ok(b) => {
                         e.push_str(
                             &binfmt::why_not(&b).unwrap_or_else(|| {
@@ -2041,6 +2045,9 @@ impl Shell {
         if binfmt::runnable(&data) {
             return self.spawn_program(argv, &path, stdin, ctx, e);
         }
+        if binfmt::windows_runnable(&data) {
+            return self.run_windows(argv, &path, stdin, ctx, e);
+        }
         if let Some(why) = binfmt::why_not(&data) {
             e.push_str(&why);
             e.push('\n');
@@ -2062,6 +2069,48 @@ impl Shell {
                 Res::Code(126)
             }
         }
+    }
+
+    /// Un programa de Windows (`exe` con sus argumentos en `argv`): lo corre `vino`, un programa
+    /// de Linux más, como hace `binfmt_misc` con Wine en Linux (ADR 0018). El antivirus revisa
+    /// el `.exe` (a `vino` lo revisa `spawn_program`).
+    fn run_windows<D: BlockDevice>(
+        &mut self,
+        argv: &[String],
+        exe: &str,
+        stdin: Option<&str>,
+        ctx: &mut Ctx<'_, D>,
+        e: &mut String,
+    ) -> Res {
+        let Some(vino) = self.find_program("vino", ctx) else {
+            e.push_str(&format!(
+                "{}: es un programa de Windows. Para correrlo hace falta vino:\n  apt install vino\n",
+                argv[0]
+            ));
+            return Res::Code(127);
+        };
+        let Some(fs) = Self::fs(ctx, e) else {
+            return Res::Code(1);
+        };
+        let image = match fs.read_file(exe) {
+            Ok(d) => d,
+            Err(err) => {
+                e.push_str(&format!("{}: {err}\n", argv[0]));
+                return Res::Code(126);
+            }
+        };
+        let now = ctx.timestamp();
+        if let Some(fs) = ctx.fs.as_deref_mut()
+            && let Err(why) = ctx.antivirus.may_run(fs, exe, &image, now)
+        {
+            e.push_str(&format!("{}: {why}\n", argv[0]));
+            ctx.log.push(format!("ANTIVIRUS_BLOQUEO {exe}"));
+            return Res::Code(126);
+        }
+        ctx.log.push(format!("TERMINAL_WINDOWS {exe}"));
+        let mut args = alloc::vec!["vino".to_string(), exe.to_string()];
+        args.extend(argv[1..].iter().cloned());
+        self.spawn_program(&args, &vino, stdin, ctx, e)
     }
 
     /// Un programa de Linux (K11): se lee entero y se le pide al kernel que lo corra. La shell

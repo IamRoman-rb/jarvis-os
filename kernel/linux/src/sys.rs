@@ -96,6 +96,8 @@ pub trait System: Pages {
     fn map_page(&mut self, page: u64, prot: u32) -> bool;
     /// La base del registro FS (el TLS del programa: `arch_prctl`).
     fn set_fs(&mut self, base: u64);
+    /// La base del registro GS (el TEB de un programa de Windows).
+    fn set_gs(&mut self, base: u64);
     /// Nanosegundos desde 1970 (UTC).
     fn realtime_ns(&mut self) -> u64;
     /// Nanosegundos desde que arrancó el sistema.
