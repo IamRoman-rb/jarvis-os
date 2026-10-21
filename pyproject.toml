@@ -13,6 +13,7 @@ dependencies = [
     "platformdirs",
     "typer",
     "aiosqlite",
+    "numpy>=2",
 ]
 
 [project.optional-dependencies]
@@ -53,7 +54,10 @@ packages = ["src/jarvis"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
-extend-exclude = ["docs", "design"]  # los bloques de código de los docs son bocetos
+extend-exclude = [
+    "docs", "design",  # los bloques de código de los docs son bocetos
+    "kernel/usuario-win/python",  # corre en el Python de Windows bajo vino, tal cual
+]
 
 [tool.ruff.lint]
 select = [
@@ -80,7 +84,7 @@ packages = ["jarvis"]
 # módulos no están instalados.
 [[tool.mypy.overrides]]
 module = [
-    "numpy", "sounddevice", "openwakeword", "openwakeword.*", "faster_whisper", "piper",
+    "sounddevice", "openwakeword", "openwakeword.*", "faster_whisper", "piper",
     "cv2", "mediapipe",
 ]
 ignore_missing_imports = true
