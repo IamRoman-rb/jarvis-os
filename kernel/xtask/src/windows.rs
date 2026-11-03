@@ -48,7 +48,10 @@ pub const PROGRAMS: [(&str, &str); 10] = [
         "hilos-c-win.exe",
         "C, hilos: CreateThread, CRITICAL_SECTION, eventos, semáforos",
     ),
-    ("excep-win.exe", "C, excepciones estructuradas: __try/__except/__finally"),
+    (
+        "excep-win.exe",
+        "C, excepciones estructuradas: __try/__except/__finally",
+    ),
 ];
 
 fn prebuilt_dir() -> PathBuf {
