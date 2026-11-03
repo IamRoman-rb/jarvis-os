@@ -88,7 +88,7 @@ class ClaudeBrain:
             model=self._config.modelo,
             # De Claude Code, solo leer la web (policy/levels.py): JARVIS actúa con las suyas.
             tools=builtin_tools(),
-            mcp_servers={"jarvis": build_server(self._kernel)},
+            mcp_servers={"jarvis": build_server(self._gate)},
             # Solo las de nivel 1 se aprueban solas; las de 2 y 3 caen en can_use_tool.
             allowed_tools=auto_approved(),
             can_use_tool=self._can_use_tool,

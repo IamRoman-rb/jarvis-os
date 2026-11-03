@@ -7,6 +7,7 @@ confirmación en la pantalla de JARVIS (docs/permisos.md).
 
 from __future__ import annotations
 
+import time
 from typing import Any, Protocol
 
 from jarvis.policy.audit import audit
@@ -176,22 +177,39 @@ class Gate:
         audit("aprobada" if ok else "rechazada", bare(tool), args, nivel=level)
         return ok
 
+    async def execute(self, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
+        """Ejecuta una tool ya permitida y anota cómo terminó. Todas las ejecuciones pasan por
+        acá (Claude por el handler MCP; el simulado y el consejo por `run`), así la auditoría
+        tiene el resultado de cada acción, no solo la decisión."""
+        name = bare(tool)
+        start = time.monotonic()
+        ok, data = await self.kernel.call(name, args)
+        extra: dict[str, Any] = {"ok": ok, "ms": round((time.monotonic() - start) * 1000)}
+        # De lo que contestó, solo el largo (puede ser el contenido de un archivo); si falló,
+        # el principio del error, para saber qué pasó.
+        extra["largo"] = len(data)
+        if not ok:
+            extra["error"] = data[:200]
+        audit("ejecutada", name, args, **extra)
+        return ok, data
+
     async def run(self, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
-        """Permiso + ejecución (lo usa el cerebro simulado; con Claude, el SDK llama a
-        `permit` desde `can_use_tool` y después al handler de la tool)."""
+        """Permiso + ejecución (lo usan el cerebro simulado y el consejo; con Claude, el SDK
+        llama a `permit` desde `can_use_tool` y después al handler, que llama a `execute`)."""
         if not await self.permit(tool, args):
             return False, "El usuario rechazó la acción."
-        return await self.kernel.call(bare(tool), args)
+        return await self.execute(tool, args)
 
 
-def build_server(kernel: Kernel) -> Any:
-    """El servidor MCP "jarvis" con todas las tools, en el mismo proceso."""
+def build_server(gate: Gate) -> Any:
+    """El servidor MCP "jarvis" con todas las tools, en el mismo proceso. Los handlers corren
+    después de que el SDK aprobó la tool (nivel 1, o `can_use_tool` → `Gate.permit`)."""
     from claude_agent_sdk import create_sdk_mcp_server, tool
 
     def make(name: str, desc: str, schema: dict[str, type]) -> Any:
         @tool(name, desc, schema)
         async def handler(args: dict[str, Any]) -> dict[str, Any]:
-            ok, data = await kernel.call(name, args)
+            ok, data = await gate.execute(name, args)
             return {"content": [{"type": "text", "text": data}], "is_error": not ok}
 
         return handler

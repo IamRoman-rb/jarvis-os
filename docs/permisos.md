@@ -68,3 +68,34 @@ Igual que el de proyectos, con dos excepciones para comandos sueltos (sin `;`, `
 | `graphify query/path/explain`, `git status/diff/log/show` (sin `--output` ni `-o`) | 1 |
 | `cargo test/check/clippy/build/fmt`, `uv run pytest/ruff/mypy` | 2 |
 | Cualquier otro | 3 |
+
+## Auditoría
+
+Cada tool deja renglones en `auditoria.jsonl`, en la carpeta de logs del usuario
+(`Config.log_dir()`; en Windows, `%LOCALAPPDATA%\jarvis\jarvis\Logs`), un JSON por renglón:
+
+| Evento | Cuándo | Campos además de `ts`, `tool` y `args` |
+|---|---|---|
+| `intento` | el modelo pidió la tool (hook `PreToolUse`, solo con Claude) | — |
+| `aprobada` / `rechazada` | la decisión del Gate (`tools/system.py`) | `nivel`, o `motivo` si no tiene nivel |
+| `ejecutada` | JARVIS-OS (o el anfitrión) la corrió | `ok`, `ms`, `largo` de la respuesta y, si falló, `error` (200 caracteres) |
+
+Todas las ejecuciones pasan por `Gate.execute`: con Claude, desde el handler MCP; con el
+cerebro simulado y el consejo, desde `Gate.run`. El agente de proyectos anota lo suyo como
+`proyecto:<tool>` (`projects.py`).
+
+El registro sirve para saber qué pasó, no para guardar los datos de Roman (`policy/audit.py`):
+
+- `contenido` (lo que se escribe en un archivo) y `dato` (lo que se recuerda) se anotan solo
+  por su largo: `"<142 caracteres>"`. De lo que devuelve una tool, solo el largo.
+- Los secretos reconocibles se tapan con `***`: claves `sk-ant-…`, `Bearer …` y
+  `TOKEN=`/`api_key:`/`password=`… (también `JARVIS_CEREBRO_TOKEN=…`).
+- Los textos de más de 500 caracteres se recortan, salvo `comando`: el comando queda entero,
+  como se le mostró a Roman al confirmarlo.
+- Al pasar 5 MB, el archivo pasa a `auditoria.1.jsonl` (se pisa el anterior) y empieza uno
+  nuevo.
+
+Los tests escriben su auditoría en un archivo propio (`tests/conftest.py`), nunca en el de
+Roman. Los de `tests/policy/test_prompt_injection.py` prueban, con un modelo crédulo que
+obedece lo que lee, que nada de nivel 2 o 3 pasa sin confirmación y que una tool que no es de
+JARVIS se rechaza sin preguntar.

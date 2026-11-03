@@ -1,6 +1,8 @@
 """`jarvis serve` con el cerebro simulado: token, respuestas de a pedazos y cancelar."""
 
 import asyncio
+import json
+from pathlib import Path
 
 from jarvis.agent.brain import ScriptedBrain
 from jarvis.protocol import decode, encode
@@ -66,7 +68,9 @@ async def test_un_renglon_invalido_corta_sin_romper_el_servicio() -> None:
     assert await asyncio.wait_for(reader.read(), 5) == b""
 
 
-async def test_una_accion_la_ejecuta_el_kernel_y_la_confirmacion_la_decide_roman() -> None:
+async def test_una_accion_la_ejecuta_el_kernel_y_la_confirmacion_la_decide_roman(
+    audit_file: Path,
+) -> None:
     reader, writer = await connect()
     await read(reader)
     writer.write(encode({"t": "pedido", "id": 2, "texto": "abrí el navegador y buscá rust"}))
@@ -79,7 +83,18 @@ async def test_una_accion_la_ejecuta_el_kernel_y_la_confirmacion_la_decide_roman
         text += str(m["delta"])
     assert text.startswith("Hecho (buscar_web)")
 
-    writer.write(encode({"t": "pedido", "id": 3, "texto": "borrá /Documentos/tesis.txt"}))
+    # Nivel 2: Roman confirma y recién ahí JARVIS-OS lo hace.
+    writer.write(encode({"t": "pedido", "id": 3, "texto": "creá /Documentos/a.txt con hola"}))
+    msg = await read(reader)
+    assert msg["t"] == "confirmar" and msg["nivel"] == 2
+    writer.write(encode({"t": "confirmacion", "llamada": msg["llamada"], "ok": True}))
+    msg = await read(reader)
+    assert msg["t"] == "accion" and msg["tool"] == "escribir_archivo"
+    writer.write(encode({"t": "resultado", "llamada": msg["llamada"], "ok": True, "datos": "ok"}))
+    while (m := await read(reader))["t"] != "fin":
+        pass
+
+    writer.write(encode({"t": "pedido", "id": 4, "texto": "borrá /Documentos/tesis.txt"}))
     msg = await read(reader)
     assert msg["t"] == "confirmar" and msg["nivel"] == 3
     writer.write(encode({"t": "confirmacion", "llamada": msg["llamada"], "ok": False}))
@@ -89,6 +104,21 @@ async def test_una_accion_la_ejecuta_el_kernel_y_la_confirmacion_la_decide_roman
         text += str(m["delta"])
     assert text.startswith("No lo hice")
     writer.close()
+
+    # La auditoría cuenta la historia entera: decisión y resultado de cada acción.
+    lines = audit_file.read_text(encoding="utf-8").splitlines()  # noqa: ASYNC240
+    log = [json.loads(line) for line in lines]
+    assert [(e["evento"], e["tool"]) for e in log] == [
+        ("aprobada", "buscar_web"),
+        ("ejecutada", "buscar_web"),
+        ("aprobada", "escribir_archivo"),
+        ("ejecutada", "escribir_archivo"),
+        ("rechazada", "a_papelera"),
+    ]
+    assert log[2]["nivel"] == 2 and log[4]["nivel"] == 3
+    written = log[3]
+    assert written["ok"] is True
+    assert written["args"] == {"ruta": "/Documentos/a.txt", "contenido": "<4 caracteres>"}
 
 
 async def test_abrir_un_proyecto_muestra_el_avance_y_pide_confirmar(tmp_path) -> None:  # type: ignore[no-untyped-def]
