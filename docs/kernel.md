@@ -852,7 +852,12 @@ firmware UEFI (OVMF en QEMU)
   con dos máquinas simuladas.
 - **Cifrado autenticado en vez de TLS**: las dos puntas comparten el código de emparejado, así que
   alcanza con HKDF (código → id de grupo + clave) y ChaCha20-Poly1305 con un nonce de id de
-  máquina + contador; un contador repetido se descarta. El kernel compila sin SSE/AVX: las crates
+  máquina + contador; un contador repetido se descarta. El contador **no puede volver atrás**,
+  ni siquiera al reiniciar sin hora: repetir un nonce con la misma clave deja ver el XOR de dos
+  mensajes y permite falsificar otros. La hora no alcanza (puede faltar o atrasar), así que cada
+  sesión reserva un bloque de 2³² contadores y lo anota en `/Sistema/sync.db` (línea `nonce`)
+  *antes* de cifrar el primero; la próxima empieza después (`wire::reserve`). Si no se puede
+  guardar, no se cifra. El kernel compila sin SSE/AVX: las crates
   de cifrado van con sus versiones por software (`--cfg chacha20_force_soft` en `.cargo/config.toml`;
   la de AVX2 hacía fallar a LLVM).
 - **El relé no guarda nada**: reenvía a quien esté conectado. Un manifiesto mandado antes de que la

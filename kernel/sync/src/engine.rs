@@ -101,6 +101,9 @@ pub struct Engine {
     pub machine: u32,
     pub name: String,
     pub clock: u64,
+    /// Hasta qué contador del cifrado pudo llegar esta máquina (la última reserva de
+    /// [`crate::wire::reserve`]); la próxima sesión empieza después.
+    pub nonce_floor: u64,
     pub entries: BTreeMap<String, Entry>,
 }
 
@@ -123,6 +126,7 @@ impl Engine {
             machine,
             name: name.to_string(),
             clock: 0,
+            nonce_floor: 0,
             entries: BTreeMap::new(),
         }
     }
@@ -335,8 +339,8 @@ impl Engine {
     /// El estado como texto, para `/Sistema/sync.db`.
     pub fn save(&self) -> String {
         let mut s = format!(
-            "jarvis-sync 1\nmaquina {}\nnombre {}\nreloj {}\n",
-            self.machine, self.name, self.clock
+            "jarvis-sync 1\nmaquina {}\nnombre {}\nreloj {}\nnonce {}\n",
+            self.machine, self.name, self.clock, self.nonce_floor
         );
         for (p, e) in &self.entries {
             s.push_str(&format!(
@@ -365,6 +369,12 @@ impl Engine {
         let mut e = Engine::new(machine, name);
         e.clock = clock;
         for l in lines {
+            // Las bases de antes no tienen esta línea (queda en 0) y las versiones de antes la
+            // saltean (no tiene 8 campos).
+            if let Some(n) = l.strip_prefix("nonce ") {
+                e.nonce_floor = n.parse().ok()?;
+                continue;
+            }
             let f: Vec<&str> = l.splitn(8, '\t').collect();
             if f.len() != 8 {
                 continue;

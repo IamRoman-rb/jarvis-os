@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use jarvis_sync::engine::conflict_name;
-use jarvis_sync::wire::Sealer;
+use jarvis_sync::wire::{BLOCK, Sealer};
 use jarvis_sync::{Action, Engine, Group, hash};
 
 const CODE: &str = "ABCDE-FGHJK-LMNPQ-RSTUV";
@@ -21,7 +21,7 @@ impl Machine {
     fn new(id: u32, name: &str) -> Machine {
         Machine {
             engine: Engine::new(id, name),
-            sealer: Sealer::new(&Group::from_code(CODE).unwrap(), id, 0),
+            sealer: Sealer::new(&Group::from_code(CODE).unwrap(), id, 0, BLOCK),
             files: BTreeMap::new(),
             trash: Vec::new(),
             tick: 0,
@@ -52,13 +52,13 @@ impl Machine {
                 let data = self.files.get(&p).cloned().unwrap_or_default();
                 self.engine.change(&p, &data)
             })
-            .map(|m| self.sealer.seal(&m))
+            .map(|m| self.sealer.seal(&m).expect("hay contadores reservados"))
             .collect()
     }
 
     fn hello(&mut self) -> Vec<Vec<u8>> {
         let m = self.engine.manifest();
-        vec![self.sealer.seal(&m)]
+        vec![self.sealer.seal(&m).expect("hay contadores reservados")]
     }
 
     fn receive(&mut self, msgs: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
@@ -216,11 +216,24 @@ fn el_estado_se_guarda_y_se_recupera() {
     a.write("carpeta/con espacios.txt", "x");
     let m = a.scan();
     settle(&mut a, &mut b, m, vec![]);
+    a.engine.nonce_floor = 123_456_789_000;
     let text = a.engine.save();
     let back = Engine::load(&text).unwrap();
     assert_eq!(back.entries, a.engine.entries);
     assert_eq!(back.clock, a.engine.clock);
     assert_eq!(back.name, "PC1");
+    assert_eq!(
+        back.nonce_floor, 123_456_789_000,
+        "la reserva del cifrado sobrevive"
+    );
+    // Una base de antes (sin la línea `nonce`) se sigue leyendo, con la reserva en 0.
+    let old: String = text
+        .lines()
+        .filter(|l| !l.starts_with("nonce "))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let back = Engine::load(&old).unwrap();
+    assert_eq!((back.nonce_floor, &back.entries), (0, &a.engine.entries));
     // Una ruta que intenta salir de la carpeta se rechaza.
     let mut evil = Engine::new(9, "X");
     evil.entries.clear();

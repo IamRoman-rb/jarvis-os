@@ -24,6 +24,8 @@ const SCAN_EVERY_MS: u64 = 2000;
 pub const MAX_FILE: usize = 8 * 1024 * 1024;
 /// La etiqueta de las conexiones para el firewall.
 pub const APP: &str = "sincronizacion";
+/// Si no se pudo guardar la reserva de contadores del cifrado, cada cuánto se reintenta.
+const RESERVE_RETRY_MS: u64 = 30_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -80,14 +82,17 @@ impl Default for SyncService {
     }
 }
 
-/// Un reloj que crece entre reinicios (para el contador del cifrado): microsegundos
-/// aproximados desde 2000, con los milisegundos desde el arranque para desempatar.
+/// Un reloj que crece entre reinicios: microsegundos aproximados desde 2000, con los
+/// milisegundos desde el arranque para desempatar dentro del mismo segundo (solo < 1 s: si
+/// pesaran más, un reinicio poco después podría dar un número menor). Para el cifrado es solo
+/// una pista: lo que asegura que el contador no vuelva atrás es la reserva guardada en el disco
+/// (ver [`SyncService::reserve_nonces`]).
 fn epoch_us(clock: Option<DateTime>, now_ms: u64) -> u64 {
     let secs = clock.map_or(0, |t| {
         let days = (t.year.saturating_sub(2000) as u64) * 372 + t.month as u64 * 31 + t.day as u64;
         days * 86_400 + t.hour as u64 * 3600 + t.minute as u64 * 60 + t.second as u64
     });
-    secs * 1_000_000 + (now_ms % 1_000_000) * 1000
+    secs * 1_000_000 + (now_ms % 1000) * 1000
 }
 
 fn mtime(t: Timestamp) -> u64 {
@@ -139,7 +144,6 @@ impl SyncService {
             Engine::new(id, name)
         });
         engine.name = name.to_string();
-        self.sealer = Some(Sealer::new(&group, engine.machine, epoch_us(clock, now_ms)));
         self.logs.push(format!(
             "SYNC_GRUPO {} maquina {}",
             &group.id_hex()[..8],
@@ -148,6 +152,36 @@ impl SyncService {
         self.engine = Some(engine);
         self.group = Some(group);
         self.status = Status::Offline;
+        if !self.reserve_nonces(fs, now_ms, clock) {
+            self.next_try = now_ms + RESERVE_RETRY_MS;
+        }
+    }
+
+    /// Reserva contadores para el cifrado y los anota en `/Sistema/sync.db` **antes** de usar
+    /// el primero (ver [`wire::reserve`]): así, aunque JARVIS-OS se reinicie sin hora, la
+    /// sesión siguiente nunca repite un nonce. Si no se puede guardar, no se cifra nada.
+    fn reserve_nonces<D: BlockDevice>(
+        &mut self,
+        fs: &mut FileSystem<D>,
+        now_ms: u64,
+        clock: Option<DateTime>,
+    ) -> bool {
+        self.sealer = None;
+        let Some(engine) = self.engine.as_mut() else {
+            return false;
+        };
+        let (start, limit) = wire::reserve(epoch_us(clock, now_ms), engine.nonce_floor);
+        engine.nonce_floor = limit;
+        let machine = engine.machine;
+        if !self.save(fs, clock) {
+            self.logs.push("SYNC_SIN_RESERVA".into());
+            return false;
+        }
+        let Some(group) = self.group.as_ref() else {
+            return false;
+        };
+        self.sealer = Some(Sealer::new(group, machine, start, limit));
+        true
     }
 
     /// Una vez por segundo: conectar si hace falta y revisar la carpeta.
@@ -160,6 +194,17 @@ impl SyncService {
     ) {
         if self.engine.is_none() {
             return;
+        }
+        if self.sealer.is_none() {
+            // Sin contadores reservados (no se pudo guardar la reserva, o se gastó): sin eso
+            // no hay conexión.
+            if now_ms < self.next_try {
+                return;
+            }
+            if !self.reserve_nonces(fs, now_ms, clock) {
+                self.next_try = now_ms + RESERVE_RETRY_MS;
+                return;
+            }
         }
         if self.stream.is_none() && now_ms >= self.next_try {
             let Some((host, port)) = parse_server(&self.relay) else {
@@ -360,18 +405,34 @@ impl SyncService {
     }
 
     fn seal_and_send(&mut self, id: u32, plain: &[u8], out: &mut Outbox) {
-        if let Some(s) = self.sealer.as_mut() {
-            out.send(id, wire::frame(&s.seal(plain)));
+        let Some(s) = self.sealer.as_mut() else {
+            return;
+        };
+        if let Some(msg) = s.seal(plain) {
+            out.send(id, wire::frame(&msg));
+            return;
         }
+        // Se gastó la reserva (2^32 mensajes): se corta la conexión, el próximo `tick` reserva
+        // otro bloque y, al reconectar, el manifiesto pone al día a la otra máquina.
+        self.logs.push("SYNC_RESERVA_AGOTADA".into());
+        self.sealer = None;
+        if let Some(id) = self.stream.take() {
+            out.close_stream(id);
+        }
+        self.connected = false;
+        self.status = Status::Offline;
+        self.peer = None;
+        self.next_try = 0;
     }
 
-    fn save<D: BlockDevice>(&self, fs: &mut FileSystem<D>, clock: Option<DateTime>) {
-        if let Some(e) = &self.engine {
-            let now = timestamp(clock);
-            if mkdir_all(fs, "/Sistema", now) {
-                let _ = fs.write_file(DB, e.save().as_bytes(), now);
-            }
-        }
+    /// Guarda el estado en `/Sistema/sync.db`; `false` si no se pudo. El caché de sectores es
+    /// write-through (fs/src/cache.rs): lo que se guardó ya está en el disco.
+    fn save<D: BlockDevice>(&self, fs: &mut FileSystem<D>, clock: Option<DateTime>) -> bool {
+        let Some(e) = &self.engine else {
+            return false;
+        };
+        let now = timestamp(clock);
+        mkdir_all(fs, "/Sistema", now) && fs.write_file(DB, e.save().as_bytes(), now).is_ok()
     }
 }
 

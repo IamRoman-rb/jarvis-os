@@ -69,39 +69,60 @@ impl Deframer {
     }
 }
 
+/// Cuántos mensajes se reservan de una vez (ver [`reserve`]).
+pub const BLOCK: u64 = 1 << 32;
+
+/// Los contadores que puede usar una sesión nueva: `(start, limit)`, para
+/// [`Sealer::new`]. Los usados van de `start + 1` a `limit`.
+///
+/// Por qué así: con la misma clave, repetir un nonce de ChaCha20-Poly1305 deja ver el XOR de
+/// los dos mensajes y permite falsificar otros. Toda máquina de un grupo comparte la clave, así
+/// que cada una tiene que usar contadores que nunca repitió, *también después de reiniciarse*.
+/// La hora (`hint`) no alcanza: puede faltar o atrasar. Por eso el llamador guarda `limit` en
+/// el disco **antes** de cifrar nada y, en el próximo arranque, lo pasa como `floor`: aunque
+/// la hora sea 0, la sesión nueva empieza después de todo lo que pudo usar la anterior.
+pub fn reserve(hint: u64, floor: u64) -> (u64, u64) {
+    let start = hint.max(floor);
+    (start, start.saturating_add(BLOCK))
+}
+
 /// Cifra y descifra los mensajes de un grupo.
 pub struct Sealer {
     cipher: ChaCha20Poly1305,
     machine: u32,
     counter: u64,
+    limit: u64,
     seen: BTreeMap<u32, u64>,
 }
 
 impl Sealer {
-    /// `counter` tiene que crecer entre reinicios (por ejemplo, la hora en microsegundos):
-    /// la otra máquina descarta los contadores que ya vio.
-    pub fn new(group: &Group, machine: u32, counter: u64) -> Sealer {
+    /// `(start, limit)` sale de [`reserve`]: cifra con los contadores `start + 1 ..= limit` y,
+    /// después, se niega. La otra máquina descarta los contadores que ya vio.
+    pub fn new(group: &Group, machine: u32, start: u64, limit: u64) -> Sealer {
         Sealer {
             cipher: ChaCha20Poly1305::new(Key::from_slice(&group.key)),
             machine,
-            counter,
+            counter: start,
+            limit,
             seen: BTreeMap::new(),
         }
     }
 
-    pub fn seal(&mut self, plain: &[u8]) -> Vec<u8> {
+    /// El mensaje cifrado, o `None` si se acabaron los contadores reservados (hay que
+    /// reservar otro bloque: nunca se cifra con un contador fuera de la reserva).
+    pub fn seal(&mut self, plain: &[u8]) -> Option<Vec<u8>> {
+        if self.counter >= self.limit {
+            return None;
+        }
         self.counter += 1;
         let mut nonce = [0u8; 12];
         nonce[..4].copy_from_slice(&self.machine.to_le_bytes());
         nonce[4..].copy_from_slice(&self.counter.to_le_bytes());
-        let ct = self
-            .cipher
-            .encrypt(Nonce::from_slice(&nonce), plain)
-            .unwrap_or_default();
+        let ct = self.cipher.encrypt(Nonce::from_slice(&nonce), plain).ok()?;
         let mut out = Vec::with_capacity(12 + ct.len());
         out.extend_from_slice(&nonce);
         out.extend_from_slice(&ct);
-        out
+        Some(out)
     }
 
     /// El mensaje en claro, o `None` si no es de este grupo, fue alterado o es una repetición.
@@ -147,12 +168,16 @@ mod tests {
         assert_eq!(d.next_frame(), Err(TooLong));
     }
 
+    fn sealer(machine: u32, start: u64) -> Sealer {
+        Sealer::new(&group(), machine, start, start + BLOCK)
+    }
+
     #[test]
     fn cifrado_autenticado_y_sin_repeticiones() {
-        let mut a = Sealer::new(&group(), 1, 100);
-        let mut b = Sealer::new(&group(), 2, 0);
-        let m1 = a.seal(b"archivo");
-        let m2 = a.seal(b"otro");
+        let mut a = sealer(1, 100);
+        let mut b = sealer(2, 0);
+        let m1 = a.seal(b"archivo").unwrap();
+        let m2 = a.seal(b"otro").unwrap();
         assert!(!m1.windows(7).any(|w| w == b"archivo"), "va cifrado");
         assert_eq!(b.open(&m1).as_deref(), Some(&b"archivo"[..]));
         assert_eq!(b.open(&m1), None, "repetido");
@@ -160,9 +185,49 @@ mod tests {
         *bad.last_mut().unwrap() ^= 1;
         assert_eq!(b.open(&bad), None, "alterado");
         assert_eq!(b.open(&m2).as_deref(), Some(&b"otro"[..]));
-        let own = a.seal(b"x");
+        let own = a.seal(b"x").unwrap();
         assert_eq!(a.open(&own), None, "los propios se ignoran");
-        let mut stranger = Sealer::new(&Group::from_code("ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ").unwrap(), 3, 0);
-        assert_eq!(b.open(&stranger.seal(b"hola")), None, "otro grupo");
+        let other = Group::from_code("ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ").unwrap();
+        let mut stranger = Sealer::new(&other, 3, 0, BLOCK);
+        assert_eq!(b.open(&stranger.seal(b"hola").unwrap()), None, "otro grupo");
+    }
+
+    fn counter(msg: &[u8]) -> u64 {
+        u64::from_le_bytes(msg[4..12].try_into().unwrap())
+    }
+
+    #[test]
+    fn no_cifra_fuera_de_la_reserva() {
+        let mut a = Sealer::new(&group(), 1, 10, 12);
+        assert_eq!(counter(&a.seal(b"a").unwrap()), 11);
+        assert_eq!(counter(&a.seal(b"b").unwrap()), 12);
+        assert_eq!(a.seal(b"c"), None, "el 13 no estaba reservado");
+        assert_eq!(a.seal(b"c"), None);
+    }
+
+    #[test]
+    fn despues_de_reiniciar_sin_hora_los_contadores_siguen_creciendo() {
+        // Primera sesión, con hora: reserva y gasta algunos.
+        let (start, limit) = reserve(5_000_000, 0);
+        let mut before = Sealer::new(&group(), 1, start, limit);
+        let last = (0..3)
+            .map(|_| counter(&before.seal(b"x").unwrap()))
+            .last()
+            .unwrap();
+        // Se reinicia sin reloj (hint = 0): manda la reserva guardada en el disco.
+        let (start2, limit2) = reserve(0, limit);
+        let mut after = Sealer::new(&group(), 1, start2, limit2);
+        let first = counter(&after.seal(b"y").unwrap());
+        assert!(
+            first > limit && first > last,
+            "{first} tiene que pasar {limit}"
+        );
+        // Y la otra máquina, que vio la sesión anterior, lo acepta.
+        let mut peer = sealer(2, 0);
+        assert!(peer.open(&before.seal(b"z").unwrap()).is_some());
+        assert!(peer.open(&after.seal(b"w").unwrap()).is_some());
+        // Una hora más nueva que la reserva también sirve, sin volver atrás.
+        assert_eq!(reserve(limit + 7, limit).0, limit + 7);
+        assert_eq!(reserve(u64::MAX - 1, 0).1, u64::MAX, "no desborda");
     }
 }
