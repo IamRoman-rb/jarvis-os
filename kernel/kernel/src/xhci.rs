@@ -509,6 +509,9 @@ impl Controller {
             if v & PORT_CCS != 0 && !known {
                 self.attach_root(port);
             } else if v & PORT_CCS == 0 && known {
+                for d in self.devices.iter().filter(|d| d.root_port == port) {
+                    crate::hw::usb_remove(d.slot);
+                }
                 self.devices.retain(|d| d.root_port != port);
                 serial_println!("USB: se desconectó el puerto {port}");
             }
@@ -696,6 +699,13 @@ impl Controller {
         if let Some(d) = self.devices.iter_mut().find(|d| d.slot == slot) {
             d.name = name;
         }
+        // Para el gestor de controladores: la clase del dispositivo o, si la define cada
+        // interfaz (clase 0), la de la primera.
+        let (class, subclass) = match (desc.class, config.interfaces.first()) {
+            (0, Some(i)) => (i.class, i.subclass),
+            (c, _) => (c, 0),
+        };
+        crate::hw::usb_add(slot, desc.vendor, desc.product, class, subclass, root_port);
         if self
             .control(
                 slot,

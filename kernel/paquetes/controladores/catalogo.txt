@@ -1,0 +1,45 @@
+# Catálogo de controladores de JARVIS-OS (ADR 0023): qué hardware tiene driver, y qué firmware
+# necesita. Lo usa `controladores` (y Configuración → Hardware). Viene adentro del sistema y se
+# actualiza con `sudo controladores actualizar` (lo sirve el puente desde kernel/paquetes/).
+#
+#   pci VVVV:DDDD | driver | nombre
+#   pci clase CC:SS:PP | driver | nombre         (PP = * para cualquiera)
+#   usb clase CC | driver | nombre
+#   firmware driver | ruta en el disco | URL (linux-firmware) | SHA-256
+#
+# Los drivers son parte del kernel (no se cargan aparte): un driver nuevo llega con una versión
+# nueva de JARVIS-OS. Lo que sí se baja aparte es el firmware, que es el mismo para todos los
+# sistemas operativos.
+
+pci 8086:100e | e1000 | Intel PRO/1000 (82540EM)
+pci 8086:100f | e1000 | Intel PRO/1000 (82545EM)
+pci 8086:10d3 | e1000e | Intel 82574L
+pci 10ec:8168 | rtl8169 | Realtek RTL8168 Gigabit
+pci 10ec:8161 | rtl8169 | Realtek RTL8111/8168
+pci 10ec:8169 | rtl8169 | Realtek RTL8169
+pci 10ec:8139 | rtl8139 | Realtek RTL8139
+pci 1022:2000 | pcnet | AMD PCnet-FAST III (VirtualBox)
+pci 10ec:c821 | rtw88 | Realtek RTL8821CE Wi-Fi
+pci 1af4:1000 | virtio-net | Red virtio
+pci 1af4:1041 | virtio-net | Red virtio (moderna)
+pci 1af4:1001 | virtio-blk | Disco virtio
+pci 1af4:1042 | virtio-blk | Disco virtio (moderno)
+pci 1af4:1050 | virtio-gpu | Video virtio
+pci 1af4:1059 | virtio-sound | Sonido virtio
+pci clase 01:06:01 | ahci | Controladora SATA (AHCI)
+pci clase 01:08:02 | nvme | Disco NVMe
+pci clase 01:01:* | ide | Controladora IDE
+pci clase 0c:03:30 | xhci | USB 3 (xHCI)
+pci clase 04:03:* | hda | Sonido HD Audio
+pci clase 06:00:* | (no necesita) | Puente del procesador
+pci clase 06:01:* | (no necesita) | Puente ISA
+pci clase 06:04:* | (no necesita) | Puente PCI
+pci clase 06:80:* | (no necesita) | Puente del chipset (ACPI, lo maneja el kernel por ACPI)
+pci clase 0c:05:* | (no necesita) | SMBus (sensores del chipset)
+pci clase 03:00:* | framebuffer | Video (la pantalla de UEFI)
+pci clase 08:80:* | (no necesita) | Periférico del sistema
+usb clase 03 | usb-hid | Teclado o mouse USB
+usb clase 08 | usb-storage | Pendrive o disco USB
+usb clase 09 | usb-hub | Hub USB
+
+firmware rtw88 | /Sistema/firmware/rtw8821c_fw.bin | https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/rtw88/rtw8821c_fw.bin?id=d947e4e8e314e9254a1242dc1a5d9cede2cce33d | 2ef409bc418549fcf294061dd0cae1fc22fd9da79b60524950b25de18732f3f0

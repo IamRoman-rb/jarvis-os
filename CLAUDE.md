@@ -7,7 +7,7 @@ red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y nave
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
 idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta; espacio de usuario y programas
 de Linux, la 0010, propuesta; hardware real, la 0011; Wi-Fi, la 0012; JARVIS modificando el sistema desde adentro, la 0013; sin navegador propio, la 0014; gestos con la cámara, la 0015; antivirus, la 0017; el kernel habla solo Linux y los programas de Windows los corre `vino`, la 0018, que reemplaza a la 0016; el cerebro propio de JARVIS, sin modelos de terceros, la 0019, con sus metas en docs/cerebro-propio.md; usuarios, `sudo` y permisos, la 0020; instalar programas reales con winget y snap, la 0021;
-firewall con listas y antivirus con reglas, la 0024). Roadmap y arquitectura del kernel:
+gestor de controladores, la 0023; firewall con listas y antivirus con reglas, la 0024). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 

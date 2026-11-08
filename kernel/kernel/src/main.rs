@@ -335,6 +335,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let cpu_name = cpu::brand();
     serial_println!("CPU: {}", cpu_name);
     hw::note("Procesador", cpu_name.clone());
+    // El inventario del hardware PCI, para el gestor de controladores (ADR 0023).
+    hw::scan_pci();
     // K13: el sensor de Intel, el Tctl de los Ryzen o las zonas térmicas de ACPI.
     let mut thermal = cpu::Thermal::detect();
     if let Some(t) = &thermal {
@@ -847,6 +849,7 @@ fn run(
             stats.kernel_tasks = tasks;
             stats.context_switches = switches;
             stats.devices = hw::list();
+            stats.hardware = hw::inventory();
             desktop.set_stats(stats.clone());
             if now - last_report >= REPORT_MS {
                 serial_println!(

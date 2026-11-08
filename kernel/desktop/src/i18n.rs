@@ -340,6 +340,7 @@ static EN: &[(&str, &str)] = &[
         "Consola de JARVIS. Escribí \"ayuda\" para ver qué sé hacer.",
         "JARVIS console. Type \"ayuda\" to see what I can do.",
     ),
+    ("Controladores", "Drivers"),
     (
         "Copiando el sistema al disco...",
         "Copying the system to the disk...",
@@ -916,6 +917,7 @@ static EN: &[(&str, &str)] = &[
     ("REPETILA", "REPEAT IT"),
     ("REPRODUCIR", "PLAY"),
     ("RESTAURAR", "RESTORE"),
+    ("REVISAR", "CHECK"),
     ("Red", "Network"),
     ("Red e Internet", "Network & Internet"),
     ("Reiniciar", "Restart"),
@@ -1471,6 +1473,7 @@ static PT: &[(&str, &str)] = &[
         "Consola de JARVIS. Escribí \"ayuda\" para ver qué sé hacer.",
         "Console do JARVIS. Digite \"ayuda\" para ver o que sei fazer.",
     ),
+    ("Controladores", "Drivers"),
     (
         "Copiando el sistema al disco...",
         "Copiando o sistema para o disco...",
@@ -2062,6 +2065,7 @@ static PT: &[(&str, &str)] = &[
     ("REPETILA", "REPITA"),
     ("REPRODUCIR", "TOCAR"),
     ("RESTAURAR", "RESTAURAR"),
+    ("REVISAR", "VERIFICAR"),
     ("Red", "Rede"),
     ("Red e Internet", "Rede e Internet"),
     ("Reiniciar", "Reiniciar"),
@@ -2522,6 +2526,10 @@ static EN_F: &[(&str, &str)] = &[
         "{} of {} · arrows to see more",
     ),
     (
+        "{} dispositivos: qué driver tiene cada uno y qué falta",
+        "{} devices: which driver each one has and what is missing",
+    ),
+    (
         "{} elementos copiados: Ctrl+V los pega en otra carpeta.",
         "{} items copied: Ctrl+V pastes them in another folder.",
     ),
@@ -2716,6 +2724,10 @@ static PT_F: &[(&str, &str)] = &[
     (
         "{} de {} · flechas para ver más",
         "{} de {} · setas para ver mais",
+    ),
+    (
+        "{} dispositivos: qué driver tiene cada uno y qué falta",
+        "{} dispositivos: qual driver cada um tem e o que falta",
     ),
     (
         "{} elementos copiados: Ctrl+V los pega en otra carpeta.",

@@ -235,6 +235,8 @@ pub enum Opt {
     FwList(usize),
     FwUpdateLists,
     FwShowConns,
+    /// Configuración → Hardware: el gestor de controladores (ADR 0023).
+    Drivers,
     /// El antivirus: la protección en tiempo real, actualizar, escanear y la cuarentena.
     AvEnabled,
     AvUpdate,
@@ -409,6 +411,16 @@ impl Settings {
                 Value(String::new()),
             ));
         }
+        let pci = stats.hardware.len();
+        rows.push(Row::new(
+            Opt::Drivers,
+            tr("Controladores"),
+            trf(
+                "{} dispositivos: qué driver tiene cada uno y qué falta",
+                &[&pci.to_string()],
+            ),
+            Button(tr("REVISAR")),
+        ));
         let boot = stats.disks.iter().find(|d| d.boot_medium);
         rows.push(Row::new(
             Opt::Info,
@@ -2364,6 +2376,12 @@ impl Settings {
                 ctx.out
                     .launch
                     .push(Launch::Terminal(Some("ufw show blocked".into())));
+                return;
+            }
+            Opt::Drivers => {
+                ctx.out
+                    .launch
+                    .push(Launch::Terminal(Some("controladores".into())));
                 return;
             }
             Opt::FwShowConns => {

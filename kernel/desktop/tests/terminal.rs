@@ -147,7 +147,9 @@ fn serve(t: &mut Driver) {
 
 /// Respuestas de sitios de verdad (la tienda de snaps, GitHub), para probar sin red.
 fn fake_internet(url: &str) -> Option<Vec<u8>> {
-    let body: &str = if url.starts_with("https://urlhaus.abuse.ch/downloads/hostfile") {
+    let body: &str = if url.contains("linux-firmware.git/plain/rtw88/rtw8821c_fw.bin") {
+        "no es el firmware de verdad"
+    } else if url.starts_with("https://urlhaus.abuse.ch/downloads/hostfile") {
         "# URLhaus Host file\n127.0.0.1\tmalo.example\n127.0.0.1\tdescargas-falsas.net\n"
     } else if url.starts_with("https://api.snapcraft.io/v2/snaps/find") {
         r#"{"results":[{"name":"vlc","revision":{"version":"3.0.20"},"snap":{"publisher":{"username":"videolan","validation":"verified"},"summary":"The ultimate media player","title":"VLC"}}]}"#
@@ -1287,4 +1289,68 @@ fn antivirus_con_reglas_heuristica_y_clamav() {
         )
         .unwrap();
     assert!(run(&mut t, "antivirus importar /Documentos/viejas.hdb").contains("SHA-256"));
+}
+
+/// ADR 0023: el gestor de controladores revisa el inventario contra el catálogo.
+#[test]
+fn controladores_revisa_el_hardware() {
+    use jarvis_desktop::drivers::{Bus, HwDevice};
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let dev = |bus, vendor, device, class, subclass, prog_if, location: &str| HwDevice {
+        bus,
+        vendor,
+        device,
+        class,
+        subclass,
+        prog_if,
+        location: location.into(),
+    };
+    let stats = jarvis_desktop::SystemStats {
+        hardware: vec![
+            dev(Bus::Pci, 0x8086, 0x1237, 0x06, 0x00, 0, "00:00.0"),
+            dev(Bus::Pci, 0x8086, 0x100e, 0x02, 0x00, 0, "00:03.0"),
+            dev(Bus::Pci, 0x10ec, 0xc821, 0x02, 0x80, 0, "02:00.0"),
+            dev(Bus::Pci, 0x10de, 0x2504, 0x03, 0x00, 0, "01:00.0"),
+            dev(Bus::Pci, 0x8086, 0x2723, 0x02, 0x80, 0, "03:00.0"),
+            dev(Bus::Usb, 0x5843, 0x7884, 0x0e, 0x01, 0, "puerto 2"),
+        ],
+        ..Default::default()
+    };
+    t.d.set_stats(stats);
+    let out = run(&mut t, "controladores");
+    assert!(
+        out.contains("pci 8086:100e") && out.contains("ok (driver e1000)"),
+        "{out}"
+    );
+    assert!(out.contains("falta el firmware de rtw88"), "{out}");
+    assert!(
+        out.contains("pci 8086:2723") && out.contains("SIN DRIVER"),
+        "{out}"
+    );
+    assert!(out.contains("Cámara (UVC)"), "{out}");
+    assert!(
+        out.contains("6 dispositivos: 2 sin driver, 1 con firmware para instalar"),
+        "{out}"
+    );
+    assert!(
+        run(&mut t, "lspci")
+            .contains("02:00.0 Red inalámbrica: Realtek RTL8821CE Wi-Fi [10ec:c821]")
+    );
+    assert!(run(&mut t, "lsusb").contains("ID 5843:7884 Web Camera (Cámara (UVC))"));
+    run(&mut t, "controladores reporte");
+    let rep =
+        String::from_utf8(fatfs_read_in(&mut t, "/Documentos/hardware.txt").unwrap()).unwrap();
+    assert!(
+        rep.contains("Red inalámbrica de Intel [pci 8086:2723]"),
+        "{rep}"
+    );
+    // Instalar pide root y verifica el SHA-256 del catálogo: un archivo cambiado no se instala.
+    assert!(run(&mut t, "controladores instalar").contains("root"));
+    let out = run(&mut t, "sudo controladores instalar");
+    assert!(out.contains("no coincide con el SHA-256"), "{out}");
+    assert!(!fatfs_exists_in(
+        &mut t,
+        "/Sistema/firmware/rtw8821c_fw.bin"
+    ));
 }

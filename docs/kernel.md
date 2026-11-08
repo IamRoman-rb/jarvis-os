@@ -293,6 +293,15 @@ roman@jarvis:~$ apt update && apt install neofetch && neofetch
 - **Programas propios**: un archivo en `/Programas/bin` con comandos (uno por línea) es un
   programa: `nano /Programas/bin/saludo`, escribí `echo Hola, $1` y después `saludo Roman`.
 
+### Controladores (ADR 0023)
+
+`controladores` muestra cada dispositivo PCI y USB, qué driver de JARVIS-OS lo atiende y qué
+falta; `sudo controladores instalar` baja de `linux-firmware` el firmware que haga falta (con
+SHA-256) a `/Sistema/firmware/`; `controladores reporte` deja en `/Documentos/hardware.txt` lo que
+no tiene driver, para pedirlo. También `lspci`, `lsusb` y Configuración → Hardware → Controladores.
+Los drivers de Windows o los módulos de Linux no sirven acá (es otro kernel): lo que se instala
+aparte es el firmware.
+
 ### Usuarios, `sudo` y permisos (ADR 0020)
 
 ```

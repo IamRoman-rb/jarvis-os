@@ -1209,6 +1209,12 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey ret")?;
     s.wait_for("FIREWALL_BLOQUEO terminal example.com", STEP)?;
     s.wait_for("TERMINAL_FIN", STEP)?;
+    // ADR 0023: el gestor de controladores con el hardware de QEMU (todo tiene driver: virtio,
+    // xHCI, puentes).
+    s.type_text("controladores")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("CONTROLADORES ", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
     // ADR 0024: en modo "preguntar", una conexión nueva espera la respuesta de un diálogo. (La
     // política nueva vale desde el comando siguiente: la configuración se aplica al terminar.)
     s.type_text("sudo ufw default ask outgoing")?;

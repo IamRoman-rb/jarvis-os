@@ -20,6 +20,7 @@ pub mod cursor;
 pub mod defaults;
 pub mod desktop;
 pub mod display;
+pub mod drivers;
 pub mod files;
 pub mod files_view;
 pub mod firewall;

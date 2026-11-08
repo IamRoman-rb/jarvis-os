@@ -20,6 +20,7 @@
 pub mod apt;
 pub mod binfmt;
 mod cmds;
+pub mod controladores;
 pub mod debian;
 pub mod parse;
 mod regex;
@@ -104,6 +105,8 @@ pub(crate) enum Job {
     Apt(alloc::boxed::Box<apt::AptJob>),
     Snap(alloc::boxed::Box<snap::SnapJob>),
     Winget(alloc::boxed::Box<winget::WingetJob>),
+    /// `controladores instalar|actualizar`: bajando firmware o el catálogo.
+    Drivers(alloc::boxed::Box<controladores::DriversJob>),
     /// `ufw listas actualizar`: bajando las listas de bloqueo.
     Blocklist(alloc::boxed::Box<BlocklistJob>),
     /// `antivirus actualizar`: bajando las firmas y después las reglas.
@@ -130,6 +133,7 @@ impl Job {
             Job::Snap(s) => s.waiting_id(),
             Job::Winget(w) => w.waiting_id(),
             Job::Blocklist(b) => Some(b.id),
+            Job::Drivers(d) => Some(d.id),
             Job::Sleep { .. } | Job::Process { .. } => None,
         }
     }
@@ -1176,6 +1180,7 @@ impl Shell {
             Job::Snap(job) => job.on_response(result, ctx, &mut out),
             Job::Winget(job) => job.on_response(result, ctx, &mut out),
             Job::Blocklist(job) => job.on_response(result, ctx, &mut out),
+            Job::Drivers(job) => job.on_response(result, ctx, &mut out),
             Job::Antivirus { rules: true, .. } => {
                 Some(crate::antivirus::on_rules(result, ctx, &mut out))
             }

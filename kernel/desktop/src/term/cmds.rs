@@ -37,6 +37,10 @@ pub const NAMES: &[(&str, &str)] = &[
         "cambia el dueño: sudo chown roman:roman archivo (-R)",
     ),
     ("clear", "limpia la pantalla (Ctrl+L)"),
+    (
+        "controladores",
+        "hardware y drivers: controladores, sudo controladores instalar, controladores reporte",
+    ),
     ("cp", "copia archivos (-r: carpetas)"),
     ("curl", "baja una dirección a la pantalla (-o archivo)"),
     ("cut", "columnas: cut -d, -f2"),
@@ -72,6 +76,8 @@ pub const NAMES: &[(&str, &str)] = &[
     ("jarvis", "JARVIS lo dice en voz alta: jarvis hola"),
     ("kill", "cierra una ventana por su PID (ver ps)"),
     ("ls", "lista una carpeta (-l -a -h -1)"),
+    ("lspci", "los dispositivos PCI"),
+    ("lsusb", "los dispositivos USB"),
     ("passwd", "cambia la contraseña del usuario"),
     ("man", "ayuda de un comando"),
     ("mkdir", "crea carpetas (-p)"),
@@ -959,6 +965,15 @@ impl Shell {
                 o.push_str(self.effective_user());
                 o.push('\n');
                 0
+            }
+            "lspci" => super::controladores::lspci(ctx, o),
+            "lsusb" => super::controladores::lsusb(ctx, o),
+            "controladores" | "drivers" => {
+                let root = self.euid == crate::perms::ROOT;
+                return match super::controladores::run(argv, root, ctx, o, e) {
+                    Ok(code) => Res::Code(code),
+                    Err(job) => Res::Wait(Job::Drivers(alloc::boxed::Box::new(job))),
+                };
             }
             "groups" => {
                 let uid = self.euid;
