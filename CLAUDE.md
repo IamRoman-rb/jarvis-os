@@ -101,6 +101,9 @@ Kernel (desde kernel/):
 - VirtualBox:       cargo xtask vbox [MÁQUINA] [--iso] [--simulado] [--sin-ventana] (arranca la VM, por
                     defecto "JARVISOS", con el cerebro: token por la línea de comandos de fw_cfg y
                     NAT con acceso al localhost de la PC; --iso la arma y la monta)
+                    cargo xtask vbox-instalar [ide-pcnet|sata-e1000] (crea la VM descartable
+                    "JARVISOS-prueba", instala con el asistente, arranca del disco, inicia sesión y
+                    la borra; nunca toca otra VM). Guía: docs/virtualbox.md
 - ISO:              cargo xtask iso [--probar|--abrir] (El Torito, UEFI 64 bits; sin disco → modo en vivo
                     con el asistente de instalación, FAT32 en RAM)
 - Programas Linux:  cargo xtask usuario (compila kernel/usuario/ y vino → target/usuario/; run y test lo

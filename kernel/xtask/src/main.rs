@@ -68,6 +68,9 @@ fn main() -> ExitCode {
             .and_then(|img| iso::build(&img))
             .and_then(|iso| vbox::run(Some(&iso))),
         "vbox" => vbox::run(None),
+        "vbox-instalar" => build()
+            .and_then(|img| iso::build(&img))
+            .and_then(|iso| vbox::install_test(&iso)),
         "disk" => {
             let reset = env::args().any(|a| a == "--reset");
             disk_image(reset).map(|d| println!("disco: {}", d.display()))
@@ -85,7 +88,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino [--python]|windows|winget|snap|consola [--python]|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino [--python]|windows|winget|snap|consola [--python]|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vbox-instalar [ide-pcnet|sata-e1000]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
