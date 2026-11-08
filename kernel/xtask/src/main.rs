@@ -75,6 +75,7 @@ fn main() -> ExitCode {
         "brave" => brave_cmd(),
         "pantallas" => build().and_then(|img| screens(&img, &fresh_disk("disco-pantallas.img")?)),
         "glibc" => build().and_then(|img| glibc(&img, &fresh_disk("disco-glibc.img")?)),
+        "snap" => build().and_then(|img| snap_real(&img, &fresh_disk("disco-snap.img")?)),
         "winget" => build_user()
             .and_then(|_| build())
             .and_then(|img| windows::winget_real(&img, &fresh_disk("disco-winget.img")?)),
@@ -84,7 +85,7 @@ fn main() -> ExitCode {
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino [--python]|windows|winget|consola [--python]|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino [--python]|windows|winget|snap|consola [--python]|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };
@@ -300,7 +301,41 @@ fn build_user() -> Result<PathBuf> {
     }
     // vino y los programas de Windows de prueba (ADR 0018).
     windows::build_into(&out)?;
+    // Un .snap de verdad con hola-linux (ADR 0021): lo instala `snap install --dangerous`.
+    build_test_snap(&out)?;
     Ok(out)
+}
+
+/// `target/usuario/hola-linux.snap`: un squashfs (xz, como los de Snapcraft) con `meta/snap.yaml`
+/// y `bin/hola-linux`, el programa estático de musl. Base `bare`: no necesita glibc.
+fn build_test_snap(out: &Path) -> Result<()> {
+    use backhand::{FilesystemWriter, NodeHeader};
+    let h = |mode| NodeHeader {
+        permissions: mode,
+        uid: 0,
+        gid: 0,
+        mtime: 0,
+    };
+    let program = fs::read(out.join("hola-linux")).map_err(|e| format!("hola-linux: {e}"))?;
+    let yaml = "name: hola-linux\nversion: '1.0'\nsummary: Hola de prueba (JARVIS-OS)\n\
+                base: bare\nconfinement: strict\napps:\n  hola-linux:\n    command: bin/hola-linux\n\
+                \x20 saludo:\n    command: bin/hola-linux $SAY\n    environment:\n\
+                \x20     SAY: desde-un-snap\n";
+    let mut w = FilesystemWriter::default();
+    let e = |x: backhand::BackhandError| x.to_string();
+    w.push_dir("meta", h(0o755)).map_err(e)?;
+    w.push_dir("bin", h(0o755)).map_err(e)?;
+    w.push_file(
+        std::io::Cursor::new(yaml.as_bytes().to_vec()),
+        "meta/snap.yaml",
+        h(0o644),
+    )
+    .map_err(e)?;
+    w.push_file(std::io::Cursor::new(program), "bin/hola-linux", h(0o755))
+        .map_err(e)?;
+    let mut img = std::io::Cursor::new(Vec::new());
+    w.write(&mut img).map_err(e)?;
+    fs::write(out.join("hola-linux.snap"), img.into_inner()).map_err(|e| e.to_string())
 }
 
 // --- QEMU -------------------------------------------------------------------------------------
@@ -1197,6 +1232,18 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey ret")?;
     s.wait_for("Hola desde Linux! argumentos: [\"uno\", \"dos\"]", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
+    // ADR 0021: un .snap de verdad (squashfs con xz) se desarma en /snap y se corre con las
+    // variables del snap; el `command` de la app tiene un argumento con una variable.
+    s.type_text(
+        "wget -O /Documentos/hola.snap http://paquetes.jarvis/usuario/hola-linux.snap && sudo snap install --dangerous /Documentos/hola.snap",
+    )?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("SNAP_INSTALADO hola-linux 1.0 1", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("hola-linux.saludo")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("Hola desde Linux! argumentos: [\"desde-un-snap\"]", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
     // Archivos, carpetas, 32 MiB de memoria, punto flotante y pila que crece.
     s.type_text("pruebas")?;
     s.monitor("sendkey ret")?;
@@ -1734,6 +1781,43 @@ fn glibc(image: &Path, disk: &Path) -> Result<()> {
     s.quit();
     fin?;
     println!("ok: apt install hello (Debian, glibc) y hello corrió");
+    Ok(())
+}
+
+/// `cargo xtask snap`: un snap de verdad de Snapcraft. `sudo apt install libc6` trae la glibc de
+/// Debian (la base core20 del snap no se baja) y `sudo snap install hello` lo baja de la tienda
+/// real (con su SHA3-384), lo desarma y `hello` / `hello.universe` corren. Necesita internet.
+fn snap_real(image: &Path, disk: &Path) -> Result<()> {
+    puente::start();
+    let mut s = Session::start(image, disk)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    let long = Duration::from_secs(900);
+    let r = (|| -> Result<()> {
+        s.type_text("sudo apt install libc6")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("APT_INSTALADO libc6 ", long)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+        s.type_text("sudo snap install hello")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("SNAP_INSTALADO hello ", long)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+        s.type_text("hello")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("PROCESO_FIN", STEP)?;
+        s.saw_or_wait("Hello, world!", STEP)?;
+        s.type_text("hello.universe")?;
+        s.monitor("sendkey ret")?;
+        s.saw_or_wait("Hello, universe!", STEP)?;
+        Ok(())
+    })();
+    thread::sleep(Duration::from_secs(1));
+    s.screenshot(&target_dir().join("jarvis-os-snap.png"))?;
+    s.quit();
+    r?;
+    println!("ok: snap instaló hello de Snapcraft y corrió con la glibc de Debian");
     Ok(())
 }
 

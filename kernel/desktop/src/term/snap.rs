@@ -11,9 +11,10 @@
 //! Hay dos tiendas:
 //! - **La de JARVIS-OS** (`http://paquetes.jarvis/snaps/`, en `kernel/paquetes/snaps/`): snaps
 //!   que corren en JARVIS-OS (scripts de `jsh`).
-//! - **La de Snapcraft** (`api.snapcraft.io`, la real de Ubuntu): se busca y se ve la
-//!   información, y se pueden bajar (`snap download`). Son programas de Linux: JARVIS-OS
-//!   todavía no puede ejecutarlos (ver ADR 0005).
+//! - **La de Snapcraft** (`api.snapcraft.io`, la real de Ubuntu): `snap install` baja el `.snap`
+//!   (un squashfs), verifica su SHA3-384 contra el que publica la tienda, lo desarma en
+//!   `/snap/<nombre>/<revisión>/` y deja un lanzador por app ([`super::snapcraft`], ADR 0021).
+//!   `snap install --dangerous archivo.snap` instala uno local (sin firma, como en Ubuntu).
 //!
 //! Índice de la tienda de JARVIS-OS:
 //!
@@ -178,9 +179,22 @@ enum Step {
         queue: Vec<(String, String)>,
         refresh: bool,
         stage: InstallStage,
+        /// El canal del que se está instalando ahora.
+        current: String,
     },
     /// `snap download`: información en Snapcraft, después el archivo.
     Download { name: String, stage: u8 },
+}
+
+/// Un snap de Snapcraft elegido para instalar.
+#[derive(Clone, Debug)]
+struct StoreSnap {
+    name: String,
+    channel: String,
+    rev: u32,
+    version: String,
+    sha3: String,
+    publisher: String,
 }
 
 enum InstallStage {
@@ -188,6 +202,8 @@ enum InstallStage {
     /// Preguntando a Snapcraft si existe (para explicar por qué no se puede instalar).
     Probe(String),
     Manifest(SnapEntry),
+    /// Bajando el `.snap` de Snapcraft.
+    Squash(StoreSnap),
     Files {
         entry: SnapEntry,
         files: Vec<(String, String)>,
@@ -201,6 +217,8 @@ pub struct SnapJob {
     waiting: Option<u32>,
     index: Vec<SnapEntry>,
     done: u32,
+    /// `--classic`: se acepta un snap sin confinamiento.
+    classic: bool,
 }
 
 impl SnapJob {
@@ -494,10 +512,12 @@ impl SnapJob {
         ctx: &mut Ctx<'_, D>,
         out: &mut Out,
     ) -> Option<(i32, String)> {
+        let channel_now = self.step_channel();
         let Step::Install {
             queue,
             refresh,
             stage,
+            ..
         } = &mut self.step
         else {
             return None;
@@ -544,23 +564,118 @@ impl SnapJob {
             }
             InstallStage::Probe(name) => {
                 let name = name.clone();
-                if ok.is_some() {
-                    out.err(&format!(
-                        "error: \"{name}\" es un snap de Linux (de la tienda de Snapcraft): JARVIS-OS \
-                         todavía no puede ejecutarlo.\nPara eso falta el espacio de usuario de Linux \
-                         (hito K11: syscalls, cargador ELF, bibliotecas y un servidor gráfico).\n\
-                         Mientras tanto se puede bajar para inspeccionarlo: snap download {name}"
-                    ));
-                    if matches!(name.as_str(), "code" | "code-insiders" | "vscode") {
-                        out.info(
-                            "VS Code tiene versión web: abrí Brave y entrá a vscode.dev \
-                             (sirve para repositorios de GitHub; no ve los archivos de JARVIS-OS).",
-                        );
-                    }
-                } else {
+                let Some(r) = ok else {
                     out.err(&format!("error: snap \"{name}\" no encontrado"));
+                    return Some((1, String::new()));
+                };
+                let channel = queue_channel(&channel_now);
+                let v = json::parse(&String::from_utf8_lossy(&r.body))?;
+                let publisher = v
+                    .path(&["snap", "publisher", "display-name"])
+                    .and_then(Json::str)
+                    .unwrap_or("Snapcraft")
+                    .to_string();
+                let Some(c) = v
+                    .get("channel-map")
+                    .map(Json::arr)
+                    .unwrap_or(&[])
+                    .iter()
+                    .find(|c| {
+                        c.path(&["channel", "architecture"]).and_then(Json::str) == Some("amd64")
+                            && c.path(&["channel", "risk"]).and_then(Json::str)
+                                == Some(channel.as_str())
+                    })
+                    .cloned()
+                else {
+                    out.err(&format!(
+                        "error: \"{name}\" no tiene una versión para amd64 en el canal {channel}"
+                    ));
+                    return Some((1, String::new()));
+                };
+                let size: u64 = c
+                    .path(&["download", "size"])
+                    .and_then(json_number)
+                    .map_or(0, |f| f as u64);
+                if size > MAX_DOWNLOAD {
+                    out.err(&format!(
+                        "error: {name} pesa {}: JARVIS-OS baja hasta {} por vez.",
+                        format_size(size),
+                        format_size(MAX_DOWNLOAD)
+                    ));
+                    return Some((1, String::new()));
                 }
-                return Some((1, String::new()));
+                let confinement = c.get("confinement").and_then(Json::str).unwrap_or("strict");
+                if confinement == "classic" && !self.classic {
+                    out.err(&format!(
+                        "error: el snap \"{name}\" usa confinamiento \"classic\" (puede leer y cambiar \
+                         todo lo que el usuario puede): instalalo con --classic"
+                    ));
+                    return Some((1, String::new()));
+                }
+                let base = c
+                    .get("base")
+                    .and_then(Json::str)
+                    .unwrap_or("core")
+                    .to_string();
+                let rev = c
+                    .get("revision")
+                    .and_then(json_number)
+                    .map_or(0, |n| n as u32);
+                let snap = StoreSnap {
+                    name: name.clone(),
+                    channel: channel.clone(),
+                    rev,
+                    version: c
+                        .get("version")
+                        .and_then(Json::str)
+                        .unwrap_or("?")
+                        .to_string(),
+                    sha3: c
+                        .path(&["download", "sha3-384"])
+                        .and_then(Json::str)
+                        .unwrap_or("")
+                        .to_lowercase(),
+                    publisher,
+                };
+                let Some(url) = c.path(&["download", "url"]).and_then(Json::str) else {
+                    out.err("error: la tienda no dice de dónde bajarlo");
+                    return Some((1, String::new()));
+                };
+                out.info(&format!(
+                    "Bajando \"{name}\" {} (revisión {rev}, base {base}, {}) de Snapcraft...",
+                    snap.version,
+                    format_size(size)
+                ));
+                let url = url.to_string();
+                *stage = InstallStage::Squash(snap);
+                self.get(ctx, &url, FetchKind::Download);
+                return None;
+            }
+            InstallStage::Squash(snap) => {
+                let snap = snap.clone();
+                let Some(r) = ok else {
+                    out.err(&format!("error: no se pudo bajar {}", snap.name));
+                    return Some((1, String::new()));
+                };
+                if !snap.sha3.is_empty() {
+                    let got = hex(&<sha3::Sha3_384 as sha3::Digest>::digest(&r.body));
+                    if got != snap.sha3 {
+                        out.err(&format!(
+                            "error: el snap {} no coincide con el SHA3-384 de la tienda: no se instaló",
+                            snap.name
+                        ));
+                        ctx.log.push(format!("SNAP_HASH_MAL {}", snap.name));
+                        return Some((1, String::new()));
+                    }
+                }
+                let classic = self.classic;
+                match install_store(&r.body, &snap, classic, ctx, out) {
+                    Ok(()) => self.done += 1,
+                    Err(e) => {
+                        out.err(&format!("error: no se pudo instalar {}: {e}", snap.name));
+                        return Some((1, String::new()));
+                    }
+                }
             }
             InstallStage::Manifest(entry) => {
                 let entry = entry.clone();
@@ -644,6 +759,9 @@ impl SnapJob {
             return Some((0, String::new()));
         };
         let entry = pick(&self.index, &name, &channel).cloned();
+        if let Step::Install { current, .. } = &mut self.step {
+            *current = channel.clone();
+        }
         let Step::Install { stage, .. } = &mut self.step else {
             return None;
         };
@@ -654,8 +772,10 @@ impl SnapJob {
                 self.get(ctx, &url, FetchKind::Download);
             }
             None => {
-                // No es de la tienda de JARVIS-OS: ¿existe en Snapcraft?
-                let url = format!("{API}/info/{name}?fields=title");
+                // No es de la tienda de JARVIS-OS: se instala de Snapcraft.
+                let url = format!(
+                    "{API}/info/{name}?fields=download,version,revision,confinement,base,publisher"
+                );
                 *stage = InstallStage::Probe(name);
                 self.get(ctx, &url, FetchKind::Page);
             }
@@ -733,12 +853,13 @@ Uso: snap <comando> [opciones]
 
   find [TEXTO]        busca snaps (tienda de JARVIS-OS y de Snapcraft)
   info NOMBRE         información y canales
-  install NOMBRE      instala (--beta, --edge, --candidate o --channel=beta)
+  install NOMBRE      instala (--beta, --edge, --candidate o --channel=beta; --classic)
+  install --dangerous ARCHIVO.snap   instala un .snap del disco
   list                snaps instalados
   refresh [NOMBRE]    actualiza a la última revisión de su canal
   revert NOMBRE       vuelve a la revisión anterior
   remove NOMBRE       desinstala (va a la Papelera)
-  download NOMBRE     baja un snap de Snapcraft a /Descargas (no se ejecuta todavía)
+  download NOMBRE     baja un snap de Snapcraft a /Descargas (sin instalarlo)
   run NOMBRE [ARGS]   ejecuta un snap
   version             versiones";
 
@@ -774,11 +895,13 @@ pub(crate) fn run<D: BlockDevice>(
             _ => {}
         }
     }
+    let classic = args.iter().any(|a| a == "--classic");
     let job = |step: Step| SnapJob {
         step,
         waiting: None,
         index: Vec::new(),
         done: 0,
+        classic,
     };
     let index_url = format!("{STORE}/indice.txt");
     match cmd {
@@ -813,6 +936,49 @@ pub(crate) fn run<D: BlockDevice>(
             j.get(ctx, &index_url, FetchKind::Page);
             Err(Box::new(j))
         }
+        "install"
+            if rest
+                .first()
+                .is_some_and(|f| f.ends_with(".snap") || f.contains('/')) =>
+        {
+            // Un `.snap` del disco: como en Ubuntu, sin firma hace falta `--dangerous`.
+            let file = rest[0].clone();
+            if !args.iter().any(|a| a == "--dangerous") {
+                e.push_str(&format!(
+                    "error: no se puede verificar \"{file}\" (no viene de la tienda): si confiás en él, \
+                     usá --dangerous\n"
+                ));
+                return Ok(1);
+            }
+            let Some(fs) = ctx.fs.as_deref_mut() else {
+                return Ok(1);
+            };
+            let data = match fs.read_file(&file) {
+                Ok(d) => d,
+                Err(err) => {
+                    e.push_str(&format!("error: {file}: {err}\n"));
+                    return Ok(1);
+                }
+            };
+            let mut out = Out::new();
+            let local = StoreSnap {
+                name: String::new(),
+                channel: "local".into(),
+                rev: 1,
+                version: String::new(),
+                sha3: String::new(),
+                publisher: "local".into(),
+            };
+            let r = install_store(&data, &local, classic, ctx, &mut out);
+            o.push_str(&out.term);
+            match r {
+                Ok(()) => Ok(0),
+                Err(err) => {
+                    e.push_str(&format!("error: no se pudo instalar {file}: {err}\n"));
+                    Ok(1)
+                }
+            }
+        }
         "install" | "refresh" => {
             let refresh = cmd == "refresh";
             if !refresh && rest.is_empty() {
@@ -846,6 +1012,7 @@ pub(crate) fn run<D: BlockDevice>(
                 queue,
                 refresh,
                 stage: InstallStage::Index,
+                current: String::new(),
             });
             j.get(ctx, &index_url, FetchKind::Page);
             Err(Box::new(j))
@@ -905,7 +1072,15 @@ pub(crate) fn run<D: BlockDevice>(
                     code = 1;
                     continue;
                 }
-                for path in [format!("{ROOT}/{name}"), format!("{BIN}/{name}")] {
+                // Sus lanzadores: `nombre` y `nombre.app` (una app que no se llama como el snap).
+                let launchers: Vec<String> = fs
+                    .list(BIN)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|x| x.name == *name || x.name.starts_with(&format!("{name}.")))
+                    .map(|x| format!("{BIN}/{}", x.name))
+                    .collect();
+                for path in core::iter::once(format!("{ROOT}/{name}")).chain(launchers) {
                     if fs.exists(&path) {
                         let _ = FilesApp::move_to_trash(fs, &path, now);
                     }
@@ -984,6 +1159,123 @@ pub(crate) fn run<D: BlockDevice>(
             Ok(1)
         }
     }
+}
+
+/// Un número de la API (a veces viene como texto: `"106496"`).
+fn json_number(v: &Json) -> Option<f64> {
+    match v {
+        Json::Num(n) => n.parse().ok(),
+        other => other.str().and_then(|s| s.parse().ok()),
+    }
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// El canal de un pedido (`""` = stable).
+fn queue_channel(c: &str) -> String {
+    if c.is_empty() {
+        "stable".into()
+    } else {
+        c.to_string()
+    }
+}
+
+impl SnapJob {
+    fn step_channel(&self) -> String {
+        match &self.step {
+            Step::Install { current, .. } => current.clone(),
+            _ => String::new(),
+        }
+    }
+}
+
+/// Instala un `.snap` de Snapcraft (o local) y lo anota como instalado.
+fn install_store<D: BlockDevice>(
+    data: &[u8],
+    snap: &StoreSnap,
+    classic: bool,
+    ctx: &mut Ctx<'_, D>,
+    out: &mut Out,
+) -> Result<(), String> {
+    let done = super::snapcraft::install(data, snap.rev, classic, ctx)?;
+    let now = ctx.timestamp();
+    let fs = ctx.fs.as_deref_mut().ok_or("no hay disco")?;
+    let name = done.yaml.name.clone();
+    if !snap.name.is_empty() && snap.name != name {
+        return Err(format!(
+            "la tienda dijo {} y el snap dice {name}",
+            snap.name
+        ));
+    }
+    let version = if done.yaml.version.is_empty() {
+        snap.version.clone()
+    } else {
+        done.yaml.version.clone()
+    };
+    let current = format!(
+        "{}|{version}|{}|{}\n",
+        snap.rev, snap.channel, done.commands[0]
+    );
+    let _ = fs.write_file(&format!("{ROOT}/{name}/current"), current.as_bytes(), now);
+    let meta = format!("{version}|{}|{}\n", snap.channel, done.commands[0]);
+    let _ = fs.write_file(
+        &format!("{ROOT}/{name}/{}/.snap", snap.rev),
+        meta.as_bytes(),
+        now,
+    );
+    let mut have = installed(fs);
+    have.retain(|s| s.name != name);
+    have.push(Installed {
+        name: name.clone(),
+        version: version.clone(),
+        rev: snap.rev,
+        channel: snap.channel.clone(),
+        publisher: snap.publisher.clone(),
+    });
+    save_installed(fs, &have, now).map_err(|x| x.to_string())?;
+    let glibc = super::snapcraft::has_glibc(fs);
+    out.info(&format!(
+        "{}{name} {version} de {} instalado{} ({} archivos, {}). Comandos: {}{}",
+        ansi::GREEN,
+        snap.publisher,
+        if snap.channel == "local" {
+            " (local)"
+        } else {
+            ""
+        },
+        done.files,
+        format_size(done.bytes),
+        done.commands.join(", "),
+        ansi::RESET
+    ));
+    if done.skipped_links > 0 {
+        out.info(&format!(
+            "{}({} enlaces apuntaban fuera del snap y no se copiaron){}",
+            ansi::DIM,
+            done.skipped_links,
+            ansi::RESET
+        ));
+    }
+    if !glibc && done.yaml.base != "bare" {
+        out.info(&format!(
+            "Este snap usa la base {} (glibc): instalala con sudo apt install libc6",
+            if done.yaml.base.is_empty() {
+                "core"
+            } else {
+                &done.yaml.base
+            }
+        ));
+    }
+    if done.yaml.confinement != "devmode" {
+        out.info(&format!(
+            "{}JARVIS-OS no confina los snaps (no hay AppArmor ni seccomp): corre con tus permisos.{}",
+            ansi::DIM,
+            ansi::RESET
+        ));
+    }
+    Ok(())
 }
 
 /// Lo que se guarda en cada revisión para poder volver a ella (`snap revert`).

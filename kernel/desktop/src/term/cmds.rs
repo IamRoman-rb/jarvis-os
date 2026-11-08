@@ -2645,6 +2645,18 @@ impl Shell {
         }
         let kind = binfmt::detect(&data);
         if matches!(kind, binfmt::Kind::Script | binfmt::Kind::Text)
+            && let Some(l) = super::snapcraft::parse_launcher(&String::from_utf8_lossy(&data))
+        {
+            // Un snap (ADR 0021): el programa con sus variables, sin pasar por un script.
+            let mut args = alloc::vec![l.exec.clone()];
+            args.extend(l.args.iter().cloned());
+            args.extend(argv[1..].iter().cloned());
+            self.extra_env = l.env;
+            let r = self.external(&args, stdin, o, e, ctx, out);
+            self.extra_env.clear();
+            return r;
+        }
+        if matches!(kind, binfmt::Kind::Script | binfmt::Kind::Text)
             && let Some(exe) = winget::launcher_target(&String::from_utf8_lossy(&data))
         {
             // Un programa de Windows instalado con winget: va directo a vino.
@@ -2771,12 +2783,14 @@ impl Shell {
             },
             _ => None,
         };
-        let envp = [
+        let mut envp: Vec<String> = [
             "HOME", "USER", "LOGNAME", "HOSTNAME", "PATH", "SHELL", "TERM", "LANG", "PWD",
         ]
         .iter()
+        .filter(|k| !self.extra_env.iter().any(|(x, _)| x == *k))
         .filter_map(|k| self.var(k).map(|v| format!("{k}={v}")))
         .collect();
+        envp.extend(self.extra_env.iter().map(|(k, v)| format!("{k}={v}")));
         let pid = ctx.out.spawn(crate::procs::SpawnRequest {
             pid: 0,
             path: path.to_string(),

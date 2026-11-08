@@ -28,6 +28,8 @@ jarvis-desktop = { path = "../desktop" }
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 serde_json = "1"
 base64 = "0.22"
+# ADR 0021: arma el .snap de prueba (un squashfs con hola-linux) que instala `cargo xtask test`.
+backhand = { version = "0.20", default-features = false, features = ["xz"] }
 
 [lints]
 workspace = true

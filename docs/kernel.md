@@ -335,8 +335,18 @@ roman@jarvis:~$ snap install saludo && saludo Ana
 roman@jarvis:~$ snap refresh saludo --beta    # al canal beta (revisión 5)
 roman@jarvis:~$ snap revert saludo            # vuelve a la revisión 3
 roman@jarvis:~$ snap list · snap info saludo · snap remove saludo
-roman@jarvis:~$ snap download hello-world     # un .snap de Linux a /Descargas (no se ejecuta)
+roman@jarvis:~$ sudo apt install libc6 && sudo snap install hello && hello   # de Snapcraft, de verdad
+roman@jarvis:~$ sudo snap install --dangerous /Descargas/algo.snap             # un .snap local
+roman@jarvis:~$ snap download hello-world     # solo bajarlo a /Descargas
 ```
+
+Los de **Snapcraft** (la tienda real de Ubuntu) se instalan de verdad (ADR 0021): se baja el
+`.snap`, se verifica su SHA3-384 contra el de la tienda, el squashfs (`kernel/squashfs/`, xz,
+gzip y lz4) se desarma en `/snap/<nombre>/<revisión>/` y queda un comando por app en `/snap/bin`
+(`hello`, `hello.universe`) con `SNAP`, `SNAP_DATA`, `SNAP_USER_DATA` y `LD_LIBRARY_PATH`. La base
+(core20, core22…) la reemplaza la glibc de Debian (`sudo apt install libc6`). No hay
+confinamiento (AppArmor/seccomp): corren con los permisos del usuario. `cargo xtask snap` (con
+internet) instala `hello` de Snapcraft y lo corre.
 
 Cada revisión queda en `/snap/<nombre>/<revisión>/`; `/snap/bin` está en el `PATH`. La tienda es
 `kernel/paquetes/snaps/`: `indice.txt` (`nombre|versión|revisión|canal|editor|resumen|tamaño|comando`)

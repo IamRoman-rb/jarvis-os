@@ -24,6 +24,7 @@ pub mod debian;
 pub mod parse;
 mod regex;
 pub mod snap;
+pub mod snapcraft;
 pub mod winget;
 pub mod zip;
 
@@ -225,6 +226,8 @@ pub struct Shell {
     pub(crate) auth: Option<Auth>,
     /// La máscara de los archivos nuevos (`umask`).
     pub(crate) umask: u16,
+    /// Variables de más para el próximo programa (las de un snap: `SNAP`, `LD_LIBRARY_PATH`…).
+    pub(crate) extra_env: Vec<(String, String)>,
 }
 
 impl Shell {
@@ -284,6 +287,7 @@ impl Shell {
             sudo_until: 0,
             auth: None,
             umask: 0o022,
+            extra_env: Vec::new(),
         }
     }
 

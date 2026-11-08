@@ -1,0 +1,22 @@
+[package]
+name = "jarvis-squashfs"
+description = "Lector de squashfs 4.0 (los paquetes .snap). no_std, testeable en el host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# XZ (la compresión de casi todos los snaps), la misma que usa apt para los .deb.
+xz4rust = { version = "0.2", default-features = false, features = ["alloc", "crc64"] }
+# gzip (zlib): el inflate propio de JARVIS-OS.
+jarvis-image = { path = "../image" }
+# LZ4 (algunos snaps): la misma crate que descomprime los mosaicos de Brave.
+lz4_flex = { version = "0.11", default-features = false }
+
+[dev-dependencies]
+# Test cruzado: arma imágenes squashfs de verdad (xz y gzip) para leerlas con esta crate.
+backhand = { version = "0.20", default-features = false, features = ["xz", "gzip"] }
+
+[lints]
+workspace = true

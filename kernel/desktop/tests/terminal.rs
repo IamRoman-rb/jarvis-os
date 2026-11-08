@@ -150,7 +150,7 @@ fn fake_internet(url: &str) -> Option<Vec<u8>> {
     let body: &str = if url.starts_with("https://api.snapcraft.io/v2/snaps/find") {
         r#"{"results":[{"name":"vlc","revision":{"version":"3.0.20"},"snap":{"publisher":{"username":"videolan","validation":"verified"},"summary":"The ultimate media player","title":"VLC"}}]}"#
     } else if url.starts_with("https://api.snapcraft.io/v2/snaps/info/vlc") {
-        r#"{"name":"vlc","snap":{"summary":"The ultimate media player","publisher":{"display-name":"VideoLAN"}},"channel-map":[]}"#
+        r#"{"name":"vlc","snap":{"summary":"The ultimate media player","publisher":{"display-name":"VideoLAN"}},"channel-map":[{"channel":{"architecture":"amd64","risk":"stable","track":"latest"},"revision":3777,"version":"3.0.20","confinement":"strict","base":"core22","download":{"size":351555584,"url":"https://api.snapcraft.io/api/v1/snaps/download/vlc_3777.snap","sha3-384":"00"}}]}"#
     } else if url.ends_with("/manifests/7/7zip/7zip") {
         r#"[{"name":".validation","type":"file"},{"name":"23.01","type":"dir"},{"name":"24.08","type":"dir"},{"name":"9.20","type":"dir"}]"#
     } else if url.ends_with("/7zip/7zip/24.08/7zip.7zip.locale.en-US.yaml") {
@@ -638,12 +638,9 @@ fn snap_instala_actualiza_de_canal_y_vuelve_atras() {
     let out = run(&mut t, "sudo snap revert saludo");
     assert!(out.contains("revisión 3"), "{out}");
     assert!(!run(&mut t, "saludo").contains("(beta)"));
-    // Uno de Linux (de Snapcraft) no se puede instalar: se explica por qué.
+    // Uno de Snapcraft se busca en la tienda real; vlc pesa más de lo que baja el kernel.
     let out = run(&mut t, "sudo snap install vlc");
-    assert!(
-        out.contains("snap de Linux") && out.contains("snap download vlc"),
-        "{out}"
-    );
+    assert!(out.contains("pesa") && out.contains("32"), "{out}");
     let out = run(&mut t, "sudo snap remove saludo && ls /snap/bin");
     assert!(out.contains("desinstalado"), "{out}");
     assert!(
@@ -1039,4 +1036,109 @@ fn winget_instala_un_zip_portable_y_lo_corre_con_vino() {
         "/Programas/windows/Jarvis.HolaWin"
     ));
     assert!(!run(&mut t, "winget list").contains("Jarvis.HolaWin"));
+}
+
+/// Un `.snap` de verdad (squashfs con xz, armado con `backhand`) con un programa de Linux.
+fn tiny_snap() -> Vec<u8> {
+    use backhand::{FilesystemWriter, NodeHeader};
+    let h = |mode| NodeHeader {
+        permissions: mode,
+        uid: 0,
+        gid: 0,
+        mtime: 0,
+    };
+    let yaml = "name: hola\nversion: '1.0'\nsummary: Hola de prueba\nbase: core22\n\
+                confinement: strict\napps:\n  hola:\n    command: bin/hola\n  saludo:\n\
+                \x20   command: bin/hola -g $SAY\n    environment:\n      SAY: Hola, mundo\n";
+    let mut w = FilesystemWriter::default();
+    w.push_dir("meta", h(0o755)).unwrap();
+    w.push_dir("bin", h(0o755)).unwrap();
+    w.push_dir("usr", h(0o755)).unwrap();
+    w.push_dir("usr/bin", h(0o755)).unwrap();
+    w.push_file(
+        std::io::Cursor::new(yaml.as_bytes().to_vec()),
+        "meta/snap.yaml",
+        h(0o644),
+    )
+    .unwrap();
+    w.push_file(std::io::Cursor::new(tiny_elf(None)), "bin/hola", h(0o755))
+        .unwrap();
+    w.push_symlink("../../bin/hola", "usr/bin/hola-enlace", h(0o777))
+        .unwrap();
+    let mut out = std::io::Cursor::new(Vec::new());
+    w.write(&mut out).unwrap();
+    out.into_inner()
+}
+
+/// ADR 0021: `snap install --dangerous` desarma un squashfs de verdad en /snap/<nombre>/<rev>,
+/// deja un lanzador por app y el programa corre con las variables del snap.
+#[test]
+fn snap_instala_un_squashfs_de_verdad() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    t.d.fs_mut()
+        .unwrap()
+        .write_file(
+            "/Documentos/hola_1.snap",
+            &tiny_snap(),
+            jarvis_fs::Timestamp::EPOCH,
+        )
+        .unwrap();
+    assert!(run(&mut t, "file /Documentos/hola_1.snap").contains("squashfs"));
+    let out = run(&mut t, "snap install /Documentos/hola_1.snap");
+    assert!(out.contains("acceso denegado"), "{out}");
+    let out = run(&mut t, "sudo snap install /Documentos/hola_1.snap");
+    assert!(out.contains("--dangerous"), "{out}");
+    let out = run(
+        &mut t,
+        "sudo snap install --dangerous /Documentos/hola_1.snap",
+    );
+    assert!(out.contains("hola 1.0"), "{out}");
+    assert!(out.contains("Comandos: hola, hola.saludo"), "{out}");
+    assert!(out.contains("sudo apt install libc6"), "{out}");
+    assert!(fatfs_exists_in(&mut t, "/snap/hola/1/bin/hola"));
+    assert!(fatfs_exists_in(&mut t, "/snap/hola/1/meta/snap.yaml"));
+    // El enlace se copió (FAT32 no tiene enlaces).
+    let link = fatfs_read_in(&mut t, "/snap/hola/1/usr/bin/hola-enlace").unwrap();
+    assert!(link.starts_with(b"\x7fELF"));
+    assert!(t.logs().iter().any(|l| l == "SNAP_INSTALADO hola 1.0 1"));
+    assert!(run(&mut t, "snap list").contains("hola"));
+
+    // `hola.saludo uno` → el programa con los argumentos de su `command` y las variables.
+    t.type_text("hola.saludo uno");
+    t.key(Key::Enter);
+    let reqs = t.d.take_requests();
+    let sp = reqs
+        .spawn
+        .last()
+        .unwrap_or_else(|| panic!("{}", screen(&t)));
+    assert_eq!(sp.path, "/snap/hola/1/bin/hola");
+    assert_eq!(
+        sp.argv,
+        ["/snap/hola/1/bin/hola", "-g", "Hola, mundo", "uno"]
+    );
+    assert!(
+        sp.envp.contains(&"SNAP=/snap/hola/1".to_string()),
+        "{:?}",
+        sp.envp
+    );
+    assert!(sp.envp.contains(&"SNAP_REVISION=1".to_string()));
+    assert!(sp.envp.contains(&"SAY=Hola, mundo".to_string()));
+    assert!(
+        sp.envp
+            .iter()
+            .any(|v| v.starts_with("LD_LIBRARY_PATH=/snap/hola/1/lib"))
+    );
+    assert_eq!(sp.uid, 1000);
+    t.d.proc_event(jarvis_desktop::procs::ProcEvent::Exited {
+        pid: sp.pid,
+        code: 0,
+        why: None,
+    });
+
+    // Desinstalar saca los dos lanzadores.
+    let out = run(&mut t, "sudo snap remove hola");
+    assert!(out.contains("Papelera"), "{out}");
+    assert!(!fatfs_exists_in(&mut t, "/snap/bin/hola"));
+    assert!(!fatfs_exists_in(&mut t, "/snap/bin/hola.saludo"));
 }
