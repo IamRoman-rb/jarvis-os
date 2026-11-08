@@ -215,15 +215,25 @@ app.add_typer(voz_app, name="voz")
 
 @voz_app.command("instalar")
 def voz_instalar(si: bool = typer.Option(False, "--si", help="No preguntar.")) -> None:
-    """Baja los modelos de voz (~590 MB en total)."""
+    """Baja los modelos de voz (~730 MB en total)."""
     import urllib.request
 
-    from jarvis.voice.engine import VOICES, WHISPER_MODEL, models_dir, voice_url
+    from jarvis.voice.engine import (
+        KOKORO_BASE,
+        KOKORO_FILES,
+        VOICES,
+        WHISPER_MODEL,
+        kokoro_dir,
+        models_dir,
+        sha256_file,
+        voice_url,
+    )
 
     typer.echo(
         "Voy a bajar:\n"
         f"  - Whisper {WHISPER_MODEL} (voz a texto): ~470 MB, de Hugging Face\n"
-        "  - Piper, las voces jarvis (davefx) y daniela (texto a voz): ~180 MB, de Hugging Face\n"
+        "  - Kokoro-82M (la voz de JARVIS): ~120 MB, de la release de kokoro-onnx en GitHub\n"
+        "  - Piper, las voces de respaldo (davefx y daniela): ~180 MB, de Hugging Face\n"
         f"en {models_dir()} y en la caché de Hugging Face."
     )
     if not si and not typer.confirm("¿Sigo?"):
@@ -234,10 +244,23 @@ def voz_instalar(si: bool = typer.Option(False, "--si", help="No preguntar.")) -
         typer.echo("Primero: uv sync --extra voice", err=True)
         raise typer.Exit(2) from None
     WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-    models_dir().mkdir(parents=True, exist_ok=True)
-    for name, (model, _, _, _) in VOICES.items():
+    kokoro_dir().mkdir(parents=True, exist_ok=True)
+    for name, (digest, size) in KOKORO_FILES.items():
+        dest = kokoro_dir() / name
+        if not dest.exists():
+            typer.echo(f"bajando {name} ({size // 1_000_000} MB)...")
+            part = dest.with_suffix(dest.suffix + ".parte")
+            urllib.request.urlretrieve(KOKORO_BASE + name, part)  # noqa: S310
+            if sha256_file(part) != digest:
+                part.unlink()
+                typer.echo(f"{name}: el SHA-256 no coincide; no lo uso.", err=True)
+                raise typer.Exit(3)
+            part.replace(dest)
+    for name, spec in VOICES.items():
+        if spec.engine != "piper":
+            continue
         for suffix in (".onnx", ".onnx.json"):
-            dest = models_dir() / f"{model}{suffix}"
+            dest = models_dir() / f"{spec.model}{suffix}"
             if not dest.exists():
                 typer.echo(f"bajando {dest.name} (voz {name})...")
                 url = voice_url(name).removesuffix(".onnx") + suffix
@@ -267,12 +290,37 @@ def voz_nivel(segundos: int = 10) -> None:
 
 
 @voz_app.command("decir")
-def voz_decir(texto: str, voz: str = "") -> None:
-    """Dice un texto con la voz de JARVIS (para probar los parlantes y la voz)."""
+def voz_decir(
+    texto: str,
+    voz: str = "",
+    wav: str = "",
+) -> None:
+    """Dice un texto con la voz de JARVIS (para probar los parlantes y la voz). Con `--wav
+    archivo.wav` lo guarda en vez de reproducirlo."""
     from jarvis.config import Config
     from jarvis.voice.engine import Voice
 
-    Voice(voz or Config.load().voz).speak(texto, lambda n: None)
+    voice = Voice(voz or Config.load().voz)
+    if not wav:
+        voice.speak(texto, lambda n: None)
+        return
+    import wave
+
+    pieces: list[bytes] = []
+    rate = 0
+
+    def keep(r: int, pcm: bytes) -> None:
+        nonlocal rate
+        rate = r
+        pieces.append(pcm)
+
+    voice.speak_pcm(texto, keep, paced=False)
+    with wave.open(wav, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(pieces))
+    typer.echo(f"{wav} ({len(b''.join(pieces)) // 2 / max(rate, 1):.1f} s)")
 
 
 @voz_app.command("probar")

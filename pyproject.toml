@@ -23,6 +23,7 @@ voice = [
     "openwakeword",
     "faster-whisper",
     "piper-tts",
+    "kokoro-onnx>=0.6.1",
 ]
 
 # Gestos con la cámara. Se instalan con: uv sync --extra gestures

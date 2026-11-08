@@ -98,10 +98,9 @@ def test_el_efecto_de_ia_no_cambia_el_largo_ni_satura() -> None:
     assert max(abs(x) for x in array.array("h", out)) <= 32767
 
 
-def test_la_voz_cine_tiene_sala_no_satura_y_es_la_de_fabrica() -> None:
-    from jarvis.config import Config
+def test_la_voz_cine_tiene_sala_y_no_satura() -> None:
     from jarvis.voice.audio import cinema_effect
-    from jarvis.voice.engine import DEFAULT_VOICE, VOICES
+    from jarvis.voice.engine import VOICES
 
     # Un golpe corto y después silencio: los reflejos de la sala aparecen en el silencio.
     pcm = tone(30000, 20) + bytes(RATE * 2 // 10)
@@ -110,10 +109,89 @@ def test_la_voz_cine_tiene_sala_no_satura_y_es_la_de_fabrica() -> None:
     assert max(abs(x) for x in out) <= 32767
     tail = out[RATE * 40 // 1000 : RATE * 80 // 1000]
     assert max(abs(x) for x in tail) > 500, "se oye la sala después del golpe"
-    # Más lenta (más grave) que "jarvis", con el mismo modelo: no hay que bajar nada nuevo.
-    assert VOICES["cine"][0] == VOICES["jarvis"][0]
-    assert VOICES["cine"][3] < VOICES["jarvis"][3]
-    assert DEFAULT_VOICE == "cine" and Config().voz == "cine"
+    # Más lenta (más grave) que "piper", con el mismo modelo: no hay que bajar nada nuevo.
+    assert VOICES["cine"].model == VOICES["piper"].model
+    assert VOICES["cine"].speed < VOICES["piper"].speed
+
+
+def test_la_de_fabrica_es_kokoro_con_respaldo_en_piper() -> None:
+    from jarvis.config import Config
+    from jarvis.voice.engine import DEFAULT_VOICE, FALLBACK_VOICE, KOKORO_FILES, VOICES
+
+    assert DEFAULT_VOICE == "jarvis" == Config().voz
+    jarvis = VOICES["jarvis"]
+    assert (jarvis.engine, jarvis.model, jarvis.effect, jarvis.lang) == (
+        "kokoro",
+        "em_alex",
+        "dsp",
+        "es",
+    )
+    assert VOICES["jarvis-en"].model.startswith("bm_")
+    assert VOICES[FALLBACK_VOICE].engine == "piper"
+    # Cada archivo de Kokoro con su SHA-256 (64 hex) y su tamaño.
+    for digest, size in KOKORO_FILES.values():
+        assert len(digest) == 64 and int(digest, 16) >= 0 and size > 1_000_000
+
+
+def test_oraciones_para_empezar_a_hablar_enseguida() -> None:
+    from jarvis.voice.engine import sentences
+
+    assert sentences(
+        "Buenas tardes, Roman. Los sistemas están en línea. ¿Seguimos con el kernel? Sí."
+    ) == [
+        "Buenas tardes, Roman. Los sistemas están en línea.",
+        "¿Seguimos con el kernel? Sí.",
+    ]
+    assert sentences("") == []
+    assert sentences("Una sola frase sin punto") == ["Una sola frase sin punto"]
+
+
+def test_sintetiza_por_delante_y_avisa_errores() -> None:
+    import pytest
+
+    from jarvis.voice.engine import _ahead
+
+    made: list[str] = []
+
+    def make(s: str) -> bytes:
+        made.append(s)
+        return s.encode()
+
+    assert list(_ahead(["a", "b", "c"], make, lambda: False)) == [b"a", b"b", b"c"]
+    assert list(_ahead(["a", "b"], make, lambda: True)) == []
+
+    def broken(s: str) -> bytes:
+        raise RuntimeError("sin modelo")
+
+    with pytest.raises(RuntimeError):
+        list(_ahead(["a"], broken, lambda: False))
+
+
+def test_send_paced_de_a_pedazos_usa_un_solo_reloj() -> None:
+    from jarvis.voice.audio import send_paced
+
+    now = [0.0]
+    sent: list[tuple[float, int]] = []
+
+    def sleep(s: float) -> None:
+        now[0] += s
+
+    half = b"\x00\x00" * 8000  # 0,5 s a 16 kHz
+    ok = send_paced(
+        iter([half, half]),
+        16000,
+        lambda rate, piece: sent.append((now[0], len(piece))),
+        lambda: False,
+        piece_ms=250,
+        lead_ms=300,
+        sleep=sleep,
+        clock=lambda: now[0],
+    )
+    assert ok
+    assert [n for _, n in sent] == [8000] * 4
+    # Lo mismo que si fuera un solo pedazo de 1 s: sin esperas extra entre oraciones.
+    assert [round(t, 2) for t, _ in sent] == [0.0, 0.0, 0.2, 0.45]
+    assert round(now[0], 2) == 1.0
 
 
 def test_send_paced_manda_al_ritmo_del_audio_y_se_puede_cortar() -> None:

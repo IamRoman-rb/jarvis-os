@@ -4,7 +4,8 @@
   silencio) se transcribe, y `voice/listener.py` decide si es para JARVIS: las que empiezan con
   "JARVIS" y, durante una conversación (hasta 1 minuto sin hablarle), todas;
 - voz → texto: faster-whisper (modelo `small`, español);
-- texto → voz: Piper, con la voz es_AR "daniela".
+- texto → voz: Kokoro-82M (voz `em_alex`) con el procesado de `voice/dsp.py` (ADR 0025); Piper
+  queda de respaldo (si faltan los archivos de Kokoro) y para las voces "cine" y "daniela".
 
 Necesita `uv sync --extra voice` y los modelos (`jarvis voz instalar` los baja, avisando el
 tamaño). El audio corre en un hilo aparte; los resultados vuelven al bucle de asyncio.
@@ -12,10 +13,14 @@ tamaño). El audio corre en un hilo aparte; los resultados vuelven al bucle de a
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import queue
+import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -40,22 +45,69 @@ log = logging.getLogger("jarvis.voz")
 ECHO_MS = 400
 WHISPER_MODEL = "small"
 PIPER_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
-#: Voces: nombre → (modelo de Piper, carpeta en el repositorio, efecto, velocidad).
-#: "cine" y "jarvis" son la misma voz masculina de Piper, procesada para evocar a un asistente
-#: de película sin imitar la voz de ningún actor (clonar la voz de una persona real sin su
-#: consentimiento no se hace): "cine", más grave y calma, con brillo metálico y sala; "jarvis",
-#: solo con el brillo.
-VOICES: dict[str, tuple[str, str, str, float]] = {
-    "cine": ("es_ES-davefx-medium", "es/es_ES/davefx/medium", "cine", 0.86),
-    "jarvis": ("es_ES-davefx-medium", "es/es_ES/davefx/medium", "jarvis", 0.92),
-    "daniela": ("es_AR-daniela-high", "es/es_AR/daniela/high", "", 1.0),
+KOKORO_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
+#: Los archivos de Kokoro (modelo int8 y estilos de las voces) con su SHA-256. La release no
+#: publica hashes: son los de la primera descarga (2026-11-08), así un archivo cambiado después
+#: no se usa sin que se note.
+KOKORO_FILES: dict[str, tuple[str, int]] = {
+    "kokoro-v1.0.int8.onnx": (
+        "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb",
+        92_361_271,
+    ),
+    "voices-v1.0.bin": (
+        "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+        28_214_398,
+    ),
 }
-DEFAULT_VOICE = "cine"
+
+
+@dataclass(frozen=True)
+class VoiceSpec:
+    #: "kokoro" o "piper".
+    engine: str
+    #: La voz de Kokoro (`em_alex`) o el modelo de Piper.
+    model: str
+    #: El efecto: "dsp" (la cadena de `voice/dsp.py`), "cine", "jarvis" o "" (ninguno).
+    effect: str
+    #: Kokoro: el ritmo al hablar. Piper: la velocidad de reproducción (más lenta = más grave).
+    speed: float
+    #: Piper: la carpeta del repositorio de voces. Kokoro: el idioma (para el fonetizador).
+    folder: str = ""
+    lang: str = "es"
+
+
+#: Ninguna imita la voz de un actor (clonar la voz de una persona real sin su consentimiento no
+#: se hace): son voces sintéticas procesadas para sonar a un asistente de película.
+VOICES: dict[str, VoiceSpec] = {
+    # Kokoro, castellano, masculina, más grave y con sala (la de fábrica).
+    "jarvis": VoiceSpec("kokoro", "em_alex", "dsp", 0.95),
+    # Lo mismo en inglés británico (bm_lewis es otra opción).
+    "jarvis-en": VoiceSpec("kokoro", "bm_george", "dsp", 0.95, lang="en-gb"),
+    # Las de Piper (las de antes de la 0025).
+    "cine": VoiceSpec("piper", "es_ES-davefx-medium", "cine", 0.86, "es/es_ES/davefx/medium"),
+    "piper": VoiceSpec("piper", "es_ES-davefx-medium", "jarvis", 0.92, "es/es_ES/davefx/medium"),
+    "daniela": VoiceSpec("piper", "es_AR-daniela-high", "", 1.0, "es/es_AR/daniela/high"),
+}
+DEFAULT_VOICE = "jarvis"
+#: Si faltan los archivos de Kokoro, esta (Piper).
+FALLBACK_VOICE = "cine"
 
 
 def voice_url(name: str) -> str:
-    model, folder, _, _ = VOICES[name]
-    return f"{PIPER_BASE}{folder}/{model}.onnx"
+    v = VOICES[name]
+    return f"{PIPER_BASE}{v.folder}/{v.model}.onnx"
+
+
+def kokoro_dir() -> Path:
+    return models_dir() / "kokoro"
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def models_dir() -> Path:
@@ -68,15 +120,36 @@ class VoiceUnavailableError(RuntimeError):
 
 def check(voice: str = DEFAULT_VOICE) -> str | None:
     """`None` si la voz puede andar; si no, qué falta (para mostrarlo)."""
+    spec = VOICES.get(voice, VOICES[DEFAULT_VOICE])
     try:
         import faster_whisper  # noqa: F401
-        import piper  # noqa: F401
         import sounddevice  # noqa: F401
+
+        if spec.engine == "kokoro":
+            import kokoro_onnx  # noqa: F401
+        else:
+            import piper  # noqa: F401
     except ImportError as e:
         return f"falta {e.name}: corré `uv sync --extra voice`"
-    if not (models_dir() / f"{VOICES.get(voice, VOICES[DEFAULT_VOICE])[0]}.onnx").exists():
+    if spec.engine == "kokoro":
+        if not all((kokoro_dir() / f).exists() for f in KOKORO_FILES):
+            return "faltan los archivos de Kokoro: corré `uv run jarvis voz instalar`"
+    elif not (models_dir() / f"{spec.model}.onnx").exists():
         return "faltan los modelos: corré `uv run jarvis voz instalar`"
     return None
+
+
+def sentences(text: str, min_chars: int = 24) -> list[str]:
+    """Parte el texto en oraciones (para empezar a hablar con la primera), juntando las muy
+    cortas con su vecina: una por una sonarían entrecortadas."""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?;:…])\s+", text) if p.strip()]
+    out: list[str] = []
+    for p in parts:
+        if out and (len(out[-1]) < min_chars or len(p) < min_chars):
+            out[-1] = f"{out[-1]} {p}"
+        else:
+            out.append(p)
+    return out
 
 
 class Voice:
@@ -85,10 +158,12 @@ class Voice:
     def __init__(self, voice: str = DEFAULT_VOICE) -> None:
         voice = voice if voice in VOICES else DEFAULT_VOICE
         problem = check(voice)
+        if problem and VOICES[voice].engine == "kokoro" and check(FALLBACK_VOICE) is None:
+            log.warning("voz %s: %s; uso %s (Piper)", voice, problem, FALLBACK_VOICE)
+            voice, problem = FALLBACK_VOICE, None
         if problem:
             raise VoiceUnavailableError(problem)
         from faster_whisper import WhisperModel
-        from piper import PiperVoice
 
         try:
             # Sin red si ya está bajado (si no, lo baja).
@@ -97,8 +172,19 @@ class Voice:
             )
         except Exception:
             self._stt = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-        model, _, self._effect, self._speed = VOICES[voice]
-        self._tts = PiperVoice.load(str(models_dir() / f"{model}.onnx"))
+        self.spec = VOICES[voice]
+        self._tts: Any
+        if self.spec.engine == "kokoro":
+            from kokoro_onnx import Kokoro
+
+            self._tts = Kokoro(
+                str(kokoro_dir() / "kokoro-v1.0.int8.onnx"), str(kokoro_dir() / "voices-v1.0.bin")
+            )
+        else:
+            from piper import PiperVoice
+
+            self._tts = PiperVoice.load(str(models_dir() / f"{self.spec.model}.onnx"))
+        log.info("voz: %s (%s, %s)", voice, self.spec.engine, self.spec.model)
         self._listen_now = threading.Event()
         self._speaking = threading.Event()
         self._hush = threading.Event()
@@ -173,18 +259,35 @@ class Voice:
         if self._speaking.is_set():
             self._hush.set()
 
-    def _render(self, text: str) -> tuple[int, list[bytes]]:
-        """El audio de `text`, con el efecto y la velocidad de la voz elegida."""
+    def _render(self, text: str) -> tuple[int, Iterator[bytes]]:
+        """El audio de `text` de a oraciones, con el efecto de la voz elegida: la primera se
+        sintetiza enseguida y las demás en otro hilo mientras suena la anterior."""
+        spec = self.spec
+        if spec.engine == "kokoro":
+            from jarvis.voice import dsp
+
+            rate = 24_000
+
+            def one(sentence: str) -> bytes:
+                samples, sr = self._tts.create(
+                    sentence, voice=spec.model, speed=spec.speed, lang=spec.lang
+                )
+                x = dsp.to_float(dsp.to_pcm(samples))
+                return dsp.to_pcm(dsp.jarvis_chain(x, sr) if spec.effect == "dsp" else x)
+
+            return rate, _ahead(sentences(text), one, self._hush.is_set)
         rate, chunks = self._synthesize(text)
-        if self._effect:
-            effect = cinema_effect if self._effect == "cine" else jarvis_effect
+        if spec.effect:
+            effect = cinema_effect if spec.effect == "cine" else jarvis_effect
             chunks = [effect(c, rate) for c in chunks]
         # Más lenta = más grave y pausada.
-        return int(rate * self._speed), chunks
+        return int(rate * spec.speed), iter(chunks)
 
-    def speak_pcm(self, text: str, on_chunk: Callable[[int, bytes], None]) -> None:
+    def speak_pcm(
+        self, text: str, on_chunk: Callable[[int, bytes], None], paced: bool = True
+    ) -> None:
         """Como `speak`, pero el audio lo reproduce JARVIS-OS (K12): se le manda de a pedazos
-        (`on_chunk(frecuencia, pcm)`), al ritmo en que suena."""
+        (`on_chunk(frecuencia, pcm)`), al ritmo en que suena (o todo junto, sin `paced`)."""
         text = for_speech(text)
         if not text:
             return
@@ -192,7 +295,11 @@ class Voice:
         self._speaking.set()
         try:
             rate, chunks = self._render(text)
-            send_paced(b"".join(chunks), rate, on_chunk, self._hush.is_set)
+            if paced:
+                send_paced(chunks, rate, on_chunk, self._hush.is_set)
+            else:
+                for chunk in chunks:
+                    on_chunk(rate, chunk)
         finally:
             self._hush.clear()
             self._speaking.clear()
@@ -234,3 +341,27 @@ class Voice:
 
     def stop(self) -> None:
         self._stop.set()
+
+
+def _ahead(
+    items: list[str], make: Callable[[str], bytes], cancelled: Callable[[], bool]
+) -> Iterator[bytes]:
+    """`make(item)` para cada uno en otro hilo, mientras quien consume usa los anteriores. (Sin
+    tope: si se deja de consumir, el hilo no se queda trabado; `cancelled` corta lo que falta.)"""
+    out: queue.Queue[bytes | BaseException | None] = queue.Queue()
+
+    def work() -> None:
+        try:
+            for item in items:
+                if cancelled():
+                    break
+                out.put(make(item))
+        except BaseException as e:  # se relanza del lado de quien consume
+            out.put(e)
+        out.put(None)
+
+    threading.Thread(target=work, name="jarvis-voz-sintesis", daemon=True).start()
+    while (got := out.get()) is not None:
+        if isinstance(got, BaseException):
+            raise got
+        yield got

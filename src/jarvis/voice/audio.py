@@ -6,7 +6,7 @@ from __future__ import annotations
 import array
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 RATE = 16_000
 #: Pedazos de 80 ms: lo que espera openWakeWord.
@@ -260,7 +260,7 @@ def for_speech(text: str) -> str:
 
 
 def send_paced(
-    pcm: bytes,
+    pcm: bytes | Iterable[bytes],
     rate: int,
     send: Callable[[int, bytes], None],
     stop: Callable[[], bool],
@@ -275,19 +275,25 @@ def send_paced(
     del audio (con `lead_ms` de ventaja, para que nunca le falte) tiene dos ventajas: callar
     (`stop`) corta enseguida, y quien llama sabe cuándo terminó de sonar (el micrófono no se
     escucha a sí mismo mientras tanto). Devuelve `False` si se cortó.
+
+    `pcm` puede venir de a pedazos (las oraciones, a medida que se sintetizan): el reloj es uno
+    solo, así no hay cortes entre una y otra.
     """
     step = max(2, rate * piece_ms // 1000 * 2)
     start = clock()
     sent_ms = 0.0
-    for i in range(0, len(pcm), step):
-        ahead = sent_ms - (clock() - start) * 1000
-        if ahead > lead_ms:
-            sleep((ahead - lead_ms) / 1000)
-        if stop():
-            return False
-        piece = pcm[i : i + step]
-        send(rate, piece)
-        sent_ms += len(piece) // 2 * 1000 / rate
+    for chunk in [pcm] if isinstance(pcm, bytes | bytearray) else pcm:
+        if sent_ms == 0:
+            start = clock()  # el reloj arranca con el primer sonido, no con la síntesis
+        for i in range(0, len(chunk), step):
+            ahead = sent_ms - (clock() - start) * 1000
+            if ahead > lead_ms:
+                sleep((ahead - lead_ms) / 1000)
+            if stop():
+                return False
+            piece = chunk[i : i + step]
+            send(rate, piece)
+            sent_ms += len(piece) // 2 * 1000 / rate
     # Esperar a que termine de sonar.
     while (remaining := sent_ms - (clock() - start) * 1000) > 0:
         if stop():
