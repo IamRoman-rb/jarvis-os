@@ -382,6 +382,11 @@ fn render_incremental_igual_a_redibujar_todo() {
         t.type_text("x");
         step(&mut t);
         t.key(Key::Escape);
+        // La Cámara sin imagen (sin cerebro): el aviso de espera y el de las teclas.
+        t.d.open(Launch::App(AppKind::Camera), t.now, CLOCK);
+        step(&mut t);
+        t.key(Key::Char(' '));
+        step(&mut t);
         t.d.open(Launch::App(AppKind::Monitor), t.now, CLOCK);
         step(&mut t);
         let r = t.window(AppKind::Monitor);

@@ -517,7 +517,7 @@ fn gestos_de_la_mano_mueven_el_puntero_hacen_clic_y_abren_el_inicio() {
     let mut b = Brain::new();
     b.second();
     // Apagados de fábrica: viaja en `hola`.
-    assert!(b.sent.contains(r#""gestos":false}"#), "{}", b.sent);
+    assert!(b.sent.contains(r#""gestos":false,"#), "{}", b.sent);
     b.reply(r#"{"t":"listo"}"#);
     b.second();
     b.sent.clear();
@@ -580,4 +580,135 @@ fn sin_cerebro_el_boton_de_google_avisa_como_conectarlo() {
         ),
         "{logs:?}"
     );
+}
+
+/// Un JPEG chico de verdad (lo arma la crate `image`), en base64 como lo manda el cerebro.
+fn camera_frame(shade: u8) -> String {
+    let img = image::RgbImage::from_pixel(32, 24, image::Rgb([shade, 90, 200]));
+    let mut jpeg = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut jpeg, image::ImageFormat::Jpeg).unwrap();
+    const ABC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in jpeg.into_inner().chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |acc, (i, &b)| acc | (b as u32) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn camera_frames(b: &Brain) -> u64 {
+    match b.t.d.app(AppKind::Camera) {
+        Some(App::Camera(c)) => c.frames(),
+        _ => panic!("la cámara no está abierta"),
+    }
+}
+
+#[test]
+fn la_camara_muestra_la_imagen_de_la_pc_saca_fotos_y_graba_video() {
+    let mut b = connected();
+    b.t.d.open(Launch::App(AppKind::Camera), b.t.now, CLOCK);
+    b.collect();
+    // Al abrirla, el anfitrión prende la cámara.
+    assert!(
+        b.sent.contains(r#"{"t":"camara_vista","activo":true}"#),
+        "{}",
+        b.sent
+    );
+    // Sin imagen todavía: la foto no se saca.
+    b.t.key(Key::Char(' '));
+    assert!(!b.t.logs().iter().any(|l| l.starts_with("CAMARA_FOTO")));
+    // Llegan cuadros: se ven.
+    b.reply(&format!(
+        r#"{{"t":"camara_cuadro","jpeg":"{}"}}"#,
+        camera_frame(10)
+    ));
+    assert_eq!(camera_frames(&b), 1);
+    // Espacio: la foto, el JPEG tal cual llegó, en /Imágenes.
+    b.t.key(Key::Char(' '));
+    let photo =
+        b.t.logs()
+            .into_iter()
+            .find_map(|l| l.strip_prefix("CAMARA_FOTO ").map(String::from))
+            .expect("sacó la foto");
+    assert!(
+        photo.starts_with("/Imágenes/foto-") && photo.ends_with(".jpg"),
+        "{photo}"
+    );
+    // V: graba tres cuadros y V lo termina → AVI en /Videos.
+    b.t.key(Key::Char('v'));
+    for shade in [40, 80, 120] {
+        b.reply(&format!(
+            r#"{{"t":"camara_cuadro","jpeg":"{}"}}"#,
+            camera_frame(shade)
+        ));
+    }
+    b.t.key(Key::Char('v'));
+    let video =
+        b.t.logs()
+            .into_iter()
+            .find_map(|l| l.strip_prefix("CAMARA_VIDEO ").map(String::from))
+            .expect("guardó el video");
+    assert!(video.ends_with(".avi 3"), "{video}");
+    // Alt+F4: el anfitrión la apaga.
+    b.sent.clear();
+    b.t.combo(Mods::ALT, Key::F(4));
+    b.collect();
+    assert!(b.t.d.app(AppKind::Camera).is_none());
+    assert!(
+        b.sent.contains(r#"{"t":"camara_vista","activo":false}"#),
+        "{}",
+        b.sent
+    );
+    // Los archivos están en el disco (lo verifica fatfs).
+    let video_path = video.trim_end_matches(" 3").to_string();
+    let d = b.t.d;
+    let avi = fatfs_read(d, &video_path).expect("el video está en el disco");
+    assert!(avi.starts_with(b"RIFF") && &avi[8..12] == b"AVI ");
+}
+
+#[test]
+fn sin_camara_en_la_pc_la_app_lo_dice() {
+    let mut b = connected();
+    b.t.d.open(Launch::App(AppKind::Camera), b.t.now, CLOCK);
+    b.collect();
+    b.reply(r#"{"t":"camara","estado":"No encontré una cámara en esta PC."}"#);
+    match b.t.d.app(AppKind::Camera) {
+        Some(App::Camera(c)) => assert_eq!(c.status, "No encontré una cámara en esta PC."),
+        _ => panic!("la cámara no está abierta"),
+    }
+}
+
+#[test]
+fn bloquear_al_irme_bloquea_cuando_no_hay_nadie() {
+    let mut b = Brain::new();
+    b.second();
+    // Apagado de fábrica: viaja en `hola`.
+    assert!(b.sent.contains(r#""presencia":false}"#), "{}", b.sent);
+    b.reply(r#"{"t":"listo"}"#);
+    b.second();
+    b.sent.clear();
+    // Sin activarlo, que no haya nadie no hace nada.
+    b.reply(r#"{"t":"presencia","hay":false}"#);
+    assert_ne!(b.t.d.overlay_name(), "bloqueo");
+    let mut cfg = b.t.d.config().clone();
+    cfg.presence_lock = true;
+    b.t.d.set_config(cfg);
+    b.second();
+    assert!(
+        b.sent.contains(r#"{"t":"presencia_activa","activo":true}"#),
+        "{}",
+        b.sent
+    );
+    b.reply(r#"{"t":"presencia","hay":false}"#);
+    assert_eq!(b.t.d.overlay_name(), "bloqueo");
+    assert!(b.t.logs().iter().any(|l| l == "PRESENCIA_BLOQUEO"));
 }

@@ -684,6 +684,23 @@ impl Controller {
         let Some(config) = usb::parse_configuration(self.scratch(n)) else {
             return;
         };
+        // Una webcam (UVC, ADR 0022): se reconoce y se anotan sus formatos. Recibir la imagen
+        // necesita transferencias isócronas, que este driver todavía no hace.
+        if let Some(cam) = jarvis_drivers::uvc::parse_streaming(self.scratch(n)) {
+            let formats: Vec<String> = cam
+                .frames
+                .iter()
+                .map(|f| format!("{:?} {}x{}", f.format, f.width, f.height))
+                .collect();
+            serial_println!(
+                "USB_WEBCAM {:04x}:{:04x} interfaz {} ({} alternates): {}",
+                desc.vendor,
+                desc.product,
+                cam.interface,
+                cam.alternates.len(),
+                formats.join(", ")
+            );
+        }
         let speed_name = match speed {
             SPEED_LOW => "baja",
             SPEED_FULL => "media",

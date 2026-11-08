@@ -255,6 +255,8 @@ pub enum Opt {
     DefaultApp(usize),
     /// Mover el sistema con gestos de la mano (la cámara del anfitrión).
     Gestures,
+    /// Bloquear la sesión al irse de frente a la cámara (ADR 0022).
+    PresenceLock,
     Info,
 }
 
@@ -1182,6 +1184,12 @@ impl Settings {
                         stats.brain_camera.as_str()
                     },
                     on(c.gestures)
+                ),
+                Row::new(
+                    Opt::PresenceLock,
+                    tr("Bloquear al irme"),
+                    tr("La cámara de la PC ve que no hay nadie: se bloquea (no se guarda imagen)"),
+                    on(c.presence_lock)
                 ),
             ],
             Section::Apps => {
@@ -2234,6 +2242,7 @@ impl Settings {
                 c.default_apps.cycle(t, if delta == 0 { 1 } else { delta });
             }
             Opt::Gestures => c.gestures = !c.gestures,
+            Opt::PresenceLock => c.presence_lock = !c.presence_lock,
             Opt::Sounds => c.sounds = !c.sounds,
             // Como en Windows: las flechas de a 1 (con Ctrl, de a 10); Enter no lo cambia.
             Opt::Volume if delta == 0 => return,

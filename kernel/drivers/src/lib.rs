@@ -21,6 +21,7 @@
 //! - [`ramdisk`]: los archivos que el bootloader carga con el kernel (el firmware del Wi-Fi).
 //! - [`rtw88`]: la placa Wi-Fi Realtek RTL8821CE (K14): encendido, efuse, firmware, tablas,
 //!   canales y descriptores.
+//! - [`uvc`]: las webcams USB (UVC): formatos, probe/commit, armado de cuadros, MJPEG y YUY2.
 //! - [`sensors`]: la temperatura del procesador (AMD por SMN) y de las zonas térmicas de ACPI.
 //!
 //! Referencias: especificación ACPI 6.5 (cap. 5), Intel SDM vol. 3A cap. 11 (APIC) y la
@@ -43,6 +44,7 @@ pub mod ramdisk;
 pub mod rtw88;
 pub mod sensors;
 pub mod usb;
+pub mod uvc;
 
 /// Lee un entero en little endian de `b` en `at`. Fuera de rango da 0: las tablas del firmware
 /// pueden venir cortas, y un campo que falta es un campo vacío.

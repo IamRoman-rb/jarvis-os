@@ -234,6 +234,7 @@ static EN: &[(&str, &str)] = &[
     ("Bloqueadas", "Blocked"),
     ("Bloquear", "Lock"),
     ("Bloquear ahora", "Lock now"),
+    ("Bloquear al irme", "Lock when I leave"),
     ("Bloquear sin actividad", "Lock when idle"),
     ("Bloquear un sitio", "Block a site"),
     (
@@ -356,6 +357,7 @@ static EN: &[(&str, &str)] = &[
         "Cuánto se mueve la página con cada paso",
         "How far the page moves with each step",
     ),
+    ("Cámara", "Camera"),
     (
         "Código (.rs, .py, .js, .json...)",
         "Code (.rs, .py, .js, .json...)",
@@ -403,6 +405,7 @@ static EN: &[(&str, &str)] = &[
     ("Doble clic en el título", "Title double-click"),
     ("Documentos", "Documents"),
     ("Duplicar", "Duplicate"),
+    ("EN VIVO", "LIVE"),
     ("ENLACES RÁPIDOS (WIN+X)", "QUICK LINKS (WIN+X)"),
     ("ENTER: SEGUIR · ESC: VOLVER", "ENTER: CONTINUE · ESC: BACK"),
     ("ESCANEAR", "SCAN"),
@@ -498,7 +501,15 @@ static EN: &[(&str, &str)] = &[
         "Ese valor no sirve (usuario y equipo: letras, números y guiones; PIN: solo números).",
         "That value won't work (user and computer: letters, digits and dashes; PIN: digits only).",
     ),
+    (
+        "Espacio: foto · V: grabar video · Esc cierra",
+        "Space: photo · V: record video · Esc closes",
+    ),
     ("Español (Latinoamérica)", "Spanish (Latin America)"),
+    (
+        "Esperando la imagen de la cámara de la PC...",
+        "Waiting for the PC camera image...",
+    ),
     (
         "Esta carpeta es del sistema: para cambiarla usá sudo en la Terminal.",
         "This is a system folder: to change it, use sudo in the Terminal.",
@@ -532,6 +543,7 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Gestos", "Gestures"),
     ("Gestos con la cámara", "Camera gestures"),
+    ("Grabando: V termina.", "Recording: V stops."),
     (
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "CPU, memory, disk and network charts at the bottom left",
@@ -626,6 +638,10 @@ static EN: &[(&str, &str)] = &[
     (
         "La contraseña necesita al menos 4 caracteres.",
         "The password needs at least 4 characters.",
+    ),
+    (
+        "La cámara de la PC ve que no hay nadie: se bloquea (no se guarda imagen)",
+        "The PC camera sees nobody there: it locks (no image is stored)",
     ),
     (
         "La del firmware: para cambiarla hace falta una placa virtio-gpu",
@@ -820,6 +836,10 @@ static EN: &[(&str, &str)] = &[
     ),
     ("No hay ventanas abiertas.", "No open windows."),
     (
+        "No llegó ningún cuadro: no se guardó el video.",
+        "No frame arrived: the video was not saved.",
+    ),
+    (
         "No se cerró la sesión: hay cambios sin guardar.",
         "Did not sign out: there are unsaved changes.",
     ),
@@ -909,6 +929,7 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Qué hace con la ventana", "What it does to the window"),
     ("RAM libre", "Free RAM"),
+    ("REC", "REC"),
     ("RECHAZAR", "REJECT"),
     ("RED", "NETWORK"),
     ("REINICIAR", "RESTART"),
@@ -1057,6 +1078,10 @@ static EN: &[(&str, &str)] = &[
     (
         "Todavía no instalaste ninguno. Probá: apt install neofetch",
         "You haven't installed any yet. Try: apt install neofetch",
+    ),
+    (
+        "Todavía no llegó imagen de la cámara.",
+        "No image from the camera yet.",
     ),
     (
         "Todavía no se bajaron: ACTUALIZAR",
@@ -1358,6 +1383,7 @@ static PT: &[(&str, &str)] = &[
     ("Bloqueadas", "Bloqueadas"),
     ("Bloquear", "Bloquear"),
     ("Bloquear ahora", "Bloquear agora"),
+    ("Bloquear al irme", "Bloquear quando eu sair"),
     ("Bloquear sin actividad", "Bloquear sem atividade"),
     ("Bloquear un sitio", "Bloquear um site"),
     (
@@ -1489,6 +1515,7 @@ static PT: &[(&str, &str)] = &[
         "Cuánto se mueve la página con cada paso",
         "Quanto a página se move a cada passo",
     ),
+    ("Cámara", "Câmera"),
     (
         "Código (.rs, .py, .js, .json...)",
         "Código (.rs, .py, .js, .json...)",
@@ -1536,6 +1563,7 @@ static PT: &[(&str, &str)] = &[
     ("Doble clic en el título", "Clique duplo no título"),
     ("Documentos", "Documentos"),
     ("Duplicar", "Duplicar"),
+    ("EN VIVO", "AO VIVO"),
     ("ENLACES RÁPIDOS (WIN+X)", "LINKS RÁPIDOS (WIN+X)"),
     ("ENTER: SEGUIR · ESC: VOLVER", "ENTER: SEGUIR · ESC: VOLTAR"),
     ("ESCANEAR", "VERIFICAR"),
@@ -1634,7 +1662,15 @@ static PT: &[(&str, &str)] = &[
         "Ese valor no sirve (usuario y equipo: letras, números y guiones; PIN: solo números).",
         "Esse valor não serve (usuário e computador: letras, números e hifens; PIN: só números).",
     ),
+    (
+        "Espacio: foto · V: grabar video · Esc cierra",
+        "Espaço: foto · V: gravar vídeo · Esc fecha",
+    ),
     ("Español (Latinoamérica)", "Espanhol (América Latina)"),
+    (
+        "Esperando la imagen de la cámara de la PC...",
+        "Esperando a imagem da câmera do PC...",
+    ),
     (
         "Esta carpeta es del sistema: para cambiarla usá sudo en la Terminal.",
         "Esta pasta é do sistema: para alterá-la, use sudo no Terminal.",
@@ -1668,6 +1704,7 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Gestos", "Gestos"),
     ("Gestos con la cámara", "Gestos com a câmera"),
+    ("Grabando: V termina.", "Gravando: V termina."),
     (
         "Gráficos de CPU, memoria, disco y red abajo a la izquierda",
         "Gráficos de CPU, memória, disco e rede no canto inferior esquerdo",
@@ -1765,6 +1802,10 @@ static PT: &[(&str, &str)] = &[
     (
         "La contraseña necesita al menos 4 caracteres.",
         "A senha precisa de pelo menos 4 caracteres.",
+    ),
+    (
+        "La cámara de la PC ve que no hay nadie: se bloquea (no se guarda imagen)",
+        "A câmera do PC vê que não há ninguém: bloqueia (nenhuma imagem é salva)",
     ),
     (
         "La del firmware: para cambiarla hace falta una placa virtio-gpu",
@@ -1965,6 +2006,10 @@ static PT: &[(&str, &str)] = &[
     ),
     ("No hay ventanas abiertas.", "Nenhuma janela aberta."),
     (
+        "No llegó ningún cuadro: no se guardó el video.",
+        "Nenhum quadro chegou: o vídeo não foi salvo.",
+    ),
+    (
         "No se cerró la sesión: hay cambios sin guardar.",
         "A sessão não foi encerrada: há alterações não salvas.",
     ),
@@ -2057,6 +2102,7 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Qué hace con la ventana", "O que faz com a janela"),
     ("RAM libre", "RAM livre"),
+    ("REC", "REC"),
     ("RECHAZAR", "RECUSAR"),
     ("RED", "REDE"),
     ("REINICIAR", "REINICIAR"),
@@ -2205,6 +2251,10 @@ static PT: &[(&str, &str)] = &[
     (
         "Todavía no instalaste ninguno. Probá: apt install neofetch",
         "Você ainda não instalou nenhum. Tente: apt install neofetch",
+    ),
+    (
+        "Todavía no llegó imagen de la cámara.",
+        "Ainda não chegou imagem da câmera.",
     ),
     (
         "Todavía no se bajaron: ACTUALIZAR",
@@ -2451,6 +2501,7 @@ static EN_F: &[(&str, &str)] = &[
         "That's all. I'm at your service.",
     ),
     ("Firewall: bloqueó {} ({})", "Firewall: blocked {} ({})"),
+    ("Foto guardada en {}", "Photo saved to {}"),
     (
         "Funciona: respuesta {} con {} bytes",
         "It works: response {} with {} bytes",
@@ -2476,12 +2527,20 @@ static EN_F: &[(&str, &str)] = &[
         "Could not connect to the Brave bridge at {} ({}). It starts with cargo xtask run.",
     ),
     (
+        "No se pudo guardar el video: {}",
+        "Could not save the video: {}",
+    ),
+    (
         "No se pudo guardar la captura: {}",
         "Couldn't save the screenshot: {}",
     ),
     (
         "No se pudo guardar la configuración: {}",
         "Couldn't save the settings: {}",
+    ),
+    (
+        "No se pudo guardar la foto: {}",
+        "Could not save the photo: {}",
     ),
     (
         "No se pudo traer {}: es muy grande o llegó incompleto",
@@ -2504,6 +2563,7 @@ static EN_F: &[(&str, &str)] = &[
         "Se cortó la conexión con Brave ({})",
         "The connection to Brave dropped ({})",
     ),
+    ("Video guardado en {}", "Video saved to {}"),
     (
         "Y no volver a conectarse a «{}» al arrancar",
         "And do not reconnect to «{}» at startup",
@@ -2648,6 +2708,7 @@ static PT_F: &[(&str, &str)] = &[
         "É isso. Estou à sua disposição.",
     ),
     ("Firewall: bloqueó {} ({})", "Firewall: bloqueou {} ({})"),
+    ("Foto guardada en {}", "Foto salva em {}"),
     (
         "Funciona: respuesta {} con {} bytes",
         "Funciona: resposta {} com {} bytes",
@@ -2673,12 +2734,20 @@ static PT_F: &[(&str, &str)] = &[
         "Não foi possível conectar à ponte do Brave em {} ({}). Ela abre com cargo xtask run.",
     ),
     (
+        "No se pudo guardar el video: {}",
+        "Não foi possível salvar o vídeo: {}",
+    ),
+    (
         "No se pudo guardar la captura: {}",
         "Não foi possível salvar a captura: {}",
     ),
     (
         "No se pudo guardar la configuración: {}",
         "Não foi possível salvar as configurações: {}",
+    ),
+    (
+        "No se pudo guardar la foto: {}",
+        "Não foi possível salvar a foto: {}",
     ),
     (
         "No se pudo traer {}: es muy grande o llegó incompleto",
@@ -2704,6 +2773,7 @@ static PT_F: &[(&str, &str)] = &[
         "Se cortó la conexión con Brave ({})",
         "A conexão com o Brave caiu ({})",
     ),
+    ("Video guardado en {}", "Vídeo salvo em {}"),
     (
         "Y no volver a conectarse a «{}» al arrancar",
         "E não reconectar a «{}» ao iniciar",

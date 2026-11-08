@@ -244,6 +244,8 @@ pub struct Config {
     pub default_apps: crate::defaults::DefaultApps,
     /// Mover el sistema con gestos de la mano frente a la cámara (en el anfitrión).
     pub gestures: bool,
+    /// Bloquear la sesión cuando nadie está frente a la cámara (ADR 0022).
+    pub presence_lock: bool,
     /// HTTPS por el puente del anfitrión en vez del TLS del kernel (ADR 0009, punto 6).
     pub https_bridge: bool,
     // Brave (ADR 0007)
@@ -322,6 +324,7 @@ impl Default for Config {
             search: SearchEngine::DuckDuckGo,
             default_apps: crate::defaults::DefaultApps::default(),
             gestures: false,
+            presence_lock: false,
             https_bridge: false,
             brave_server: "10.0.2.2:8119".into(),
             brave_token: String::new(),
@@ -448,6 +451,7 @@ impl Config {
                 }
                 "https_puente" => c.https_bridge = yes(v),
                 "gestos" => c.gestures = yes(v),
+                "bloquear_al_irme" => c.presence_lock = yes(v),
                 "brave_servidor" if parse_server(v).is_some() => c.brave_server = v.into(),
                 "brave_token" if v.len() <= 64 && !v.contains(char::is_whitespace) => {
                     c.brave_token = v.into()
@@ -563,6 +567,7 @@ impl Config {
             format!("buscador={}", self.search.name()),
             format!("https_puente={}", yn(self.https_bridge)),
             format!("gestos={}", yn(self.gestures)),
+            format!("bloquear_al_irme={}", yn(self.presence_lock)),
             format!("wifi_red={}", hex(self.wifi_ssid.as_bytes())),
             format!(
                 "wifi_clave={}",

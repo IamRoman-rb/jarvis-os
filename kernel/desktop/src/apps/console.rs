@@ -49,7 +49,7 @@ pub struct Console {
 
 const HELP: &[&str] = &[
     "Órdenes que entiendo por ahora:",
-    "  abrir <archivos|monitor|música|navegador|editor>",
+    "  abrir <archivos|monitor|música|navegador|editor|cámara>",
     "  ir <dirección>        abre una página (ej.: ir example.com)",
     "  buscar <texto>        busca en la web",
     "  ls [carpeta]          lista una carpeta del disco",
@@ -455,7 +455,9 @@ impl Console {
             | BrainEvent::Audio { .. }
             | BrainEvent::Hush
             | BrainEvent::Restart
-            | BrainEvent::Gesture(_) => {}
+            | BrainEvent::Gesture(_)
+            | BrainEvent::CameraFrame(_)
+            | BrainEvent::Presence(_) => {}
             BrainEvent::End => {
                 self.waiting = false;
                 self.streaming = None;

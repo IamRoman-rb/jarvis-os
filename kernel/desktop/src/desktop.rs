@@ -1334,6 +1334,14 @@ impl<D: BlockDevice> Desktop<D> {
                 self.damage.push(b.1); // se cerró
             }
         }
+        // El Monitor lista las ventanas en el orden de uso: si cambió algo, la lista también.
+        if before != after.as_slice() {
+            for s in &mut self.slots {
+                if s.app.kind() == AppKind::Monitor {
+                    s.content_dirty = true;
+                }
+            }
+        }
     }
 
     /// Empieza la transición de una ventana que cambió: `old` es (zona, visible) de antes.
@@ -2146,6 +2154,8 @@ impl<D: BlockDevice> Desktop<D> {
             &mut self.out,
         );
         self.brain.set_gestures(self.config.gestures, &mut self.out);
+        self.brain
+            .set_presence(self.config.presence_lock, &mut self.out);
         crate::look::apply(&self.config);
         self.wm.set_topbar(self.config.topbar);
         if (
@@ -2525,6 +2535,7 @@ impl<D: BlockDevice> Desktop<D> {
         self.brain.lead = self.config.ai_lead as usize;
         self.brain.council = self.config.ai_council;
         self.brain.gestures = self.config.gestures;
+        self.brain.presence = self.config.presence_lock;
     }
 
     /// Lo que llegó del cerebro: a la consola, y la esfera "habla" mientras llega.
@@ -2536,6 +2547,16 @@ impl<D: BlockDevice> Desktop<D> {
         self.stats.brain_agents = self.brain.agents.clone();
         self.stats.brain_camera = self.brain.camera.clone();
         self.logs.append(&mut self.brain.logs);
+        // Lo que dice el anfitrión de la cámara (no hay, falta OpenCV…) se ve en la app Cámara.
+        for s in &mut self.slots {
+            if let crate::apps::App::Camera(c) = &mut s.app
+                && c.status != self.brain.camera
+            {
+                c.status = self.brain.camera.clone();
+                c.dirty = true;
+                s.content_dirty = true;
+            }
+        }
         for ev in events {
             match &ev {
                 BrainEvent::Text(_) => {
@@ -2548,6 +2569,27 @@ impl<D: BlockDevice> Desktop<D> {
                 }
                 BrainEvent::Error(_) | BrainEvent::Confirm { .. } => {}
                 BrainEvent::Gesture(g) => self.gesture(*g, now_ms),
+                BrainEvent::CameraFrame(jpeg) => {
+                    for s in &mut self.slots {
+                        if let crate::apps::App::Camera(c) = &mut s.app {
+                            c.frame(jpeg.clone());
+                            s.content_dirty = true;
+                            if c.frames() == 1 {
+                                self.logs.push("CAMARA_PRIMER_CUADRO".into());
+                            }
+                        }
+                    }
+                }
+                BrainEvent::Presence(here) => {
+                    // Nadie frente a la cámara: se bloquea (si está activado y hay PIN).
+                    if !*here
+                        && self.config.presence_lock
+                        && !matches!(self.overlay, Overlay::Lock | Overlay::Sleep)
+                    {
+                        self.logs.push("PRESENCIA_BLOQUEO".into());
+                        self.lock();
+                    }
+                }
                 BrainEvent::Restart => {
                     // Unos segundos, así se lee (y se oye) la respuesta de JARVIS.
                     self.restart_at = Some(now_ms + 4000);
@@ -2812,6 +2854,7 @@ impl<D: BlockDevice> Desktop<D> {
             Launch::App(AppKind::Files) => App::Files(FilesWindow::new("/", &mut ctx)),
             Launch::Folder(p) => App::Files(FilesWindow::new(&p, &mut ctx)),
             Launch::App(AppKind::Monitor) => App::Monitor(Monitor::new()),
+            Launch::App(AppKind::Camera) => App::Camera(crate::apps::camera::Camera::new(&mut ctx)),
             Launch::App(AppKind::Console) => App::Console(Console::new()),
             Launch::App(AppKind::Project) => App::Project(crate::apps::project::Project::new()),
             Launch::App(AppKind::Music) => {

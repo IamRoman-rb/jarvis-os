@@ -69,6 +69,10 @@ pub enum BrainEvent {
         text: String,
     },
     /// Un gesto de la mano frente a la cámara del anfitrión (Configuración → Gestos).
+    /// Un cuadro de la cámara del anfitrión (JPEG), para la app Cámara.
+    CameraFrame(alloc::vec::Vec<u8>),
+    /// Hay (o no) alguien frente a la cámara ("bloquear al irme").
+    Presence(bool),
     Gesture(Gesture),
     /// El cerebro compiló los cambios que JARVIS le hizo al sistema: hay que apagar para que
     /// `cargo xtask run` arranque la versión nueva.
@@ -154,6 +158,8 @@ pub enum BrainOp {
     AgentUnlink(String),
     /// Volver a preguntar el estado de los agentes.
     AgentsStatus,
+    /// Abrir o cerrar la vista de la cámara (la app Cámara, ADR 0022).
+    CameraView(bool),
 }
 
 pub struct BrainService {
@@ -184,6 +190,11 @@ pub struct BrainService {
     pub greeting: Option<(&'static str, String)>,
     /// Gestos con la cámara activados (Configuración): viaja en `hola` y en `gestos`.
     pub gestures: bool,
+    /// "Bloquear al irme" activado (viaja en `hola` y en `presencia_activa`).
+    pub presence: bool,
+    /// La app Cámara está abierta (si el cerebro se reconecta, se le vuelve a pedir la vista).
+    pub camera_view: bool,
+    resend_view: bool,
     /// Qué dice el anfitrión de la cámara ("" = nada todavía).
     pub camera: String,
     /// La respuesta en curso (para la esfera y el mensaje del escritorio).
@@ -220,6 +231,9 @@ impl Default for BrainService {
             council: false,
             greeting: None,
             gestures: false,
+            presence: false,
+            camera_view: false,
+            resend_view: false,
             camera: String::new(),
             answer: String::new(),
             status: Status::Off,
@@ -272,6 +286,21 @@ impl BrainService {
 
     pub fn busy(&self) -> bool {
         self.current.is_some()
+    }
+
+    /// "Bloquear al irme" (ADR 0022): el anfitrión mira si hay alguien frente a la cámara.
+    pub fn set_presence(&mut self, on: bool, out: &mut Outbox) {
+        if on == self.presence {
+            return;
+        }
+        self.presence = on;
+        self.logs.push(format!("CEREBRO_PRESENCIA {on}"));
+        if self.ready {
+            self.send(
+                out,
+                format!("{{\"t\":\"presencia_activa\",\"activo\":{on}}}"),
+            );
+        }
     }
 
     /// Se prendieron o apagaron los gestos: el anfitrión abre o cierra la cámara.
@@ -335,6 +364,15 @@ impl BrainService {
         }
         match op {
             BrainOp::Listen => self.send(out, "{\"t\":\"escuchar\"}".into()),
+            BrainOp::CameraView(on) => {
+                self.camera_view = on;
+                if on {
+                    // Que no quede el aviso de una vez anterior (o el de los gestos).
+                    self.camera.clear();
+                }
+                self.logs.push(format!("CEREBRO_CAMARA_VISTA {on}"));
+                self.send(out, format!("{{\"t\":\"camara_vista\",\"activo\":{on}}}"));
+            }
             BrainOp::Speak(text) => self.send(
                 out,
                 format!("{{\"t\":\"decir\",\"texto\":{}}}", quote(&text)),
@@ -412,13 +450,14 @@ impl BrainService {
                 self.send(
                     out,
                     format!(
-                        "{{\"t\":\"hola\",\"token\":{},\"equipo\":{},\"parlantes\":{},\"principal\":\"{}\",\"consejo\":{},\"gestos\":{}}}",
+                        "{{\"t\":\"hola\",\"token\":{},\"equipo\":{},\"parlantes\":{},\"principal\":\"{}\",\"consejo\":{},\"gestos\":{},\"presencia\":{}}}",
                         quote(&self.token),
                         quote(&self.equipo),
                         self.speakers,
                         AGENTS[self.lead].0,
                         self.council,
-                        self.gestures
+                        self.gestures,
+                        self.presence
                     ),
                 );
             }
@@ -435,6 +474,9 @@ impl BrainService {
                 if self.buf.len() > MAX_LINE {
                     self.buf.clear();
                     out.close_stream(id);
+                }
+                if core::mem::take(&mut self.resend_view) {
+                    self.send(out, "{\"t\":\"camara_vista\",\"activo\":true}".into());
                 }
                 if self.ready
                     && let Some((moment, name)) = self.greeting.take()
@@ -510,6 +552,8 @@ impl BrainService {
                 self.status = Status::Online;
                 self.backoff = 1000;
                 self.logs.push("CEREBRO_CONECTADO".into());
+                // La app Cámara estaba abierta cuando se cortó: se vuelve a pedir la imagen.
+                self.resend_view = self.camera_view;
             }
             "texto" if for_current => {
                 let delta = msg.get("delta").and_then(Json::str).unwrap_or("");
@@ -593,6 +637,19 @@ impl BrainService {
                     .to_string();
                 self.logs.push(format!("CEREBRO_CAMARA {}", self.camera));
                 events.push(BrainEvent::Account);
+            }
+            "camara_cuadro" => {
+                if let Some(jpeg) = msg.get("jpeg").and_then(Json::str).and_then(base64) {
+                    events.push(BrainEvent::CameraFrame(jpeg));
+                }
+            }
+            "presencia" => {
+                let here = matches!(msg.get("hay"), Some(Json::Bool(true)));
+                self.logs.push(format!(
+                    "CEREBRO_PRESENCIA_HAY {}",
+                    if here { "si" } else { "no" }
+                ));
+                events.push(BrainEvent::Presence(here));
             }
             "gesto" => {
                 let n = |k: &str| num(msg.get(k)).unwrap_or(0);

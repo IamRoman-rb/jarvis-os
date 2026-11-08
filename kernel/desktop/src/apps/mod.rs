@@ -6,6 +6,7 @@
 //! hora, pedidos al kernel) y lo que quiere pedir lo deja en el [`Outbox`].
 
 pub mod brave;
+pub mod camera;
 pub mod console;
 pub mod editor;
 pub mod files;
@@ -130,6 +131,7 @@ pub enum App {
     Terminal(terminal::Terminal),
     Settings(settings::Settings),
     Brave(brave::Brave),
+    Camera(camera::Camera),
 }
 
 macro_rules! each {
@@ -145,6 +147,7 @@ macro_rules! each {
             App::Terminal($a) => $e,
             App::Settings($a) => $e,
             App::Brave($a) => $e,
+            App::Camera($a) => $e,
         }
     };
 }
@@ -162,6 +165,7 @@ impl App {
             App::Terminal(_) => AppKind::Terminal,
             App::Settings(_) => AppKind::Settings,
             App::Brave(_) => AppKind::Brave,
+            App::Camera(_) => AppKind::Camera,
         }
     }
 
@@ -182,6 +186,7 @@ impl App {
             App::Terminal(_) => (860, 520),
             App::Settings(_) => (1000, 660),
             App::Brave(_) => (1180, 720),
+            App::Camera(_) => (720, 600),
         }
     }
 
@@ -206,6 +211,7 @@ impl App {
             App::Terminal(a) => a.draw(c, content),
             App::Settings(a) => a.draw(c, content, sys),
             App::Brave(a) => a.draw(c, content, sys.now_ms),
+            App::Camera(a) => a.draw(c, content),
         }
     }
 
@@ -228,6 +234,7 @@ impl App {
             App::Terminal(a) => a.key(key, mods, ctx),
             App::Settings(a) => a.key(key, mods, ctx),
             App::Brave(a) => a.key(key, mods, ctx),
+            App::Camera(a) => a.key(key, ctx),
         }
     }
 
@@ -238,7 +245,7 @@ impl App {
             App::Console(_) | App::Project(_) => {}
             App::Editor(a) => a.click(click, content),
             App::Music(a) => a.click(click, content, ctx),
-            App::Viewer(_) => {}
+            App::Viewer(_) | App::Camera(_) => {}
             App::Terminal(_) => {}
             App::Settings(a) => a.click(click, content, ctx),
             App::Brave(a) => a.click(click, content, ctx),
@@ -340,6 +347,10 @@ impl App {
                 a.on_close(ctx);
                 true
             }
+            App::Camera(a) => {
+                a.close(ctx);
+                true
+            }
             _ => true,
         }
     }
@@ -361,6 +372,7 @@ pub fn icon_of(kind: AppKind) -> Icon {
         AppKind::Terminal => Icon::Terminal,
         AppKind::Settings => Icon::Gear,
         AppKind::Brave => Icon::Shield,
+        AppKind::Camera => Icon::Camera,
     }
 }
 
@@ -382,6 +394,7 @@ pub fn app_by_name(name: &str) -> Option<AppKind> {
         "terminal" | "jsh" => AppKind::Terminal,
         "configuracion" | "configuración" | "ajustes" | "settings" => AppKind::Settings,
         "visor" | "imagenes" | "imágenes" => AppKind::Viewer,
+        "camara" | "cámara" | "webcam" | "camera" => AppKind::Camera,
         _ => return None,
     })
 }
@@ -399,5 +412,6 @@ pub fn name_of(kind: AppKind) -> &'static str {
         AppKind::Terminal => "Terminal",
         AppKind::Settings => tr("Configuración"),
         AppKind::Brave => "Brave",
+        AppKind::Camera => tr("Cámara"),
     }
 }

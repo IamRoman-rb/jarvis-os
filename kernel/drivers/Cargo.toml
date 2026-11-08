@@ -11,6 +11,8 @@ jarvis-fs = { path = "../fs" }
 
 [dev-dependencies]
 gpt = "3.1.0"
+# Cuadros MJPEG de prueba para la webcam (tests/uvc.rs): los codifica y decodifica.
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [lints]
 workspace = true

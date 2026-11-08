@@ -702,7 +702,7 @@ pub struct StartMenu {
     pub selected: usize,
 }
 
-const MENU_APPS: [AppKind; 8] = [
+const MENU_APPS: [AppKind; 9] = [
     AppKind::Files,
     AppKind::Brave,
     AppKind::Terminal,
@@ -711,6 +711,7 @@ const MENU_APPS: [AppKind; 8] = [
     AppKind::Console,
     AppKind::Editor,
     AppKind::Music,
+    AppKind::Camera,
 ];
 const MENU_ROW: i32 = 40;
 

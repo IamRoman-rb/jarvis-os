@@ -1004,6 +1004,7 @@ name = "jarvis-drivers"
 version = "0.1.0"
 dependencies = [
  "gpt",
+ "image",
  "jarvis-fs",
 ]
 

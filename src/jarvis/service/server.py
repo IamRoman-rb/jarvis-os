@@ -22,6 +22,7 @@ from jarvis import account
 from jarvis.agent.brain import Brain, BrainError
 from jarvis.agent.council import LEADS, Mode
 from jarvis.agent.providers import PROVIDERS, AgentError, AgentHub
+from jarvis.camera import CameraHub
 from jarvis.gestures import GestureHub
 from jarvis.memory import Memory
 from jarvis.nlu import telemetry
@@ -89,6 +90,8 @@ class Host:
     memory: Memory | None = None
     #: Los gestos con la cámara del anfitrión. None = sin gestos (tests, simulado).
     gestures: GestureHub | None = None
+    #: La vista de la app Cámara y "bloquear al irme" (ADR 0022). None = sin cámara.
+    camera: CameraHub | None = None
     #: El registro por pedido (C0) guarda el texto (`diagnostico` en config.toml).
     keep_text: bool = False
     #: Registrar cada pedido en pedidos.jsonl (C0). Los tests lo apagan.
@@ -486,6 +489,16 @@ class Session:
                 cam.set(msg.get("activo") is True, self)
             elif msg.get("activo") is True:
                 await self.send({"t": "camara", "estado": "Este cerebro no maneja la cámara."})
+        elif t in ("camara_vista", "presencia_activa"):
+            webcam = self.host.camera if self.host else None
+            on = msg.get("activo") is True
+            if webcam is None:
+                if on:
+                    await self.send({"t": "camara", "estado": "Este cerebro no maneja la cámara."})
+            elif t == "camara_vista":
+                webcam.set_view(on, self)
+            else:
+                webcam.set_presence(on, self)
         elif t == "saludo":
             req_id = msg.get("id")
             if not isinstance(req_id, int):
@@ -553,6 +566,8 @@ async def serve_connection(
         session.set_mode(hello)
         if host is not None and host.gestures is not None:
             host.gestures.set(hello.get("gestos") is True, session)
+        if host is not None and host.camera is not None:
+            host.camera.set_presence(hello.get("presencia") is True, session)
         if host is not None and host.voice is not None:
             host.voice.session = session
             parlantes = hello.get("parlantes")
@@ -575,6 +590,8 @@ async def serve_connection(
     finally:
         if host is not None and host.gestures is not None:
             host.gestures.disconnected(session)
+        if host is not None and host.camera is not None:
+            host.camera.disconnected(session)
         await session.cancel()
         await session.stop_project()
         await brain.close()

@@ -1440,6 +1440,20 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
         s.monitor("sendkey esc")?;
         s.wait_for("CEREBRO_CONFIRMACION 2 no", STEP)?;
         s.wait_for("CEREBRO_RESPUESTA No lo hice", STEP)?;
+        // ADR 0022: la Cámara. El cerebro simulado manda una foto fija como si fuera la webcam;
+        // Espacio la guarda en /Imágenes y al cerrar la ventana el anfitrión la apaga.
+        s.monitor("sendkey meta_l-r")?;
+        thread::sleep(Duration::from_millis(500));
+        s.type_text("abrir camara")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("CEREBRO_CAMARA_VISTA true", STEP)?;
+        s.wait_for("CAMARA_PRIMER_CUADRO", STEP)?;
+        s.monitor("sendkey spc")?;
+        s.wait_for("CAMARA_FOTO /Imágenes/foto-", STEP)?;
+        thread::sleep(Duration::from_millis(500));
+        s.screenshot(&target_dir().join("jarvis-os-camara.png"))?;
+        s.monitor("sendkey alt-f4")?;
+        s.wait_for("CEREBRO_CAMARA_VISTA false", STEP)?;
         // Un proyecto: se permite abrirlo (nivel 2, con el teclado), se abre la ventana Proyecto
         // y la edición que pide el agente se rechaza.
         s.monitor("sendkey meta_l-r")?;

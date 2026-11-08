@@ -136,11 +136,18 @@ def serve(
             asyncio.get_running_loop().create_task(load_nlu())
         if not simulado and not sin_voz:
             host.voice = await start_voice()
+        from jarvis.camera import CameraHub, StillSource
+
         if not simulado:
             from jarvis.gestures import GestureHub
 
             # La cámara se abre solo cuando JARVIS-OS activa los gestos.
             host.gestures = GestureHub(asyncio.get_running_loop())
+            # La vista de la app Cámara y "bloquear al irme" (ADR 0022): también a pedido.
+            host.camera = CameraHub(asyncio.get_running_loop())
+        else:
+            # Simulado: una foto fija hace de cámara (la app Cámara se prueba sin webcam).
+            host.camera = CameraHub(asyncio.get_running_loop(), StillSource)
         await run_server(puerto or config.puerto, token, make_brain, host)
 
     with contextlib.suppress(KeyboardInterrupt):

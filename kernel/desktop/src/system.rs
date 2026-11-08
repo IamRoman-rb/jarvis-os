@@ -337,6 +337,8 @@ pub enum AppKind {
     Brave,
     /// El agente de código que JARVIS abrió en un proyecto del anfitrión (ADR 0008).
     Project,
+    /// La webcam (ADR 0022).
+    Camera,
 }
 
 /// Qué abrir.
