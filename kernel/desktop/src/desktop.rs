@@ -159,6 +159,14 @@ enum Overlay {
     },
     /// Win+N: notificaciones y calendario.
     Notices,
+    /// El firewall en modo "preguntar": una app quiere ir a un sitio nuevo (ADR 0024).
+    FirewallAsk {
+        app: String,
+        host: String,
+        port: u16,
+        since: u64,
+        sel: usize,
+    },
     /// El cerebro pide permiso para una acción de nivel 2 o 3 (0 = Permitir, 1 = Rechazar).
     Confirm {
         call: u32,
@@ -425,6 +433,37 @@ pub struct Desktop<D: BlockDevice> {
     antivirus: crate::antivirus::Antivirus,
     /// Dueños y permisos de los archivos (ADR 0020).
     perms: crate::perms::Perms,
+    /// Las listas de bloqueo del firewall, cargadas (ADR 0024).
+    blocklists: crate::blocklist::Blocklists,
+    /// Lo que Roman contestó en esta sesión: (app, sitio, permitido).
+    fw_session: Vec<(String, String, bool)>,
+    /// Conexiones esperando la respuesta del diálogo del firewall.
+    fw_waiting: Vec<FwWaiting>,
+    /// El registro de conexiones (como Portmaster): quién se conectó a dónde.
+    fw_conns: Vec<crate::firewall::Conn>,
+}
+
+/// Una conexión que espera que Roman diga si sale o no.
+enum FwWaiting {
+    Net(NetRequest),
+    Stream(StreamOp),
+}
+
+impl FwWaiting {
+    fn target(&self) -> (String, String, u16) {
+        match self {
+            FwWaiting::Net(r) => {
+                let u = crate::web::url::Url::parse(&r.url);
+                (
+                    r.app.clone(),
+                    u.as_ref().map(|u| u.host.clone()).unwrap_or_default(),
+                    u.map_or(0, |u| u.port),
+                )
+            }
+            FwWaiting::Stream(StreamOp::Connect(r)) => (r.app.clone(), r.host.clone(), r.port),
+            FwWaiting::Stream(_) => (String::new(), String::new(), 0),
+        }
+    }
 }
 
 /// Arma un `Ctx` con campos separados de `self` (así se puede usar junto con `self.slots`).
@@ -580,6 +619,10 @@ impl<D: BlockDevice> Desktop<D> {
             sound: Default::default(),
             antivirus: crate::antivirus::Antivirus::new(),
             perms: crate::perms::Perms::new(),
+            blocklists: crate::blocklist::Blocklists::new(),
+            fw_session: Vec::new(),
+            fw_waiting: Vec::new(),
+            fw_conns: Vec::new(),
             last_clock: None,
             sync: Default::default(),
             brain: Default::default(),
@@ -728,6 +771,7 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Quick { .. } => "rapida",
             Overlay::Notices => "notificaciones",
             Overlay::Confirm { .. } => "confirmar",
+            Overlay::FirewallAsk { .. } => "firewall",
         }
     }
 
@@ -760,18 +804,126 @@ impl<D: BlockDevice> Desktop<D> {
         core::mem::take(&mut self.requests)
     }
 
-    /// ¿Deja salir este pedido el firewall?
-    fn firewall_check(&self, req: &NetRequest) -> Result<(), String> {
+    /// ¿Deja salir este pedido el firewall? (Reglas, lo contestado en la sesión, listas de
+    /// bloqueo y la política por defecto, que puede ser "preguntar".)
+    fn firewall_check(&mut self, req: &NetRequest) -> crate::firewall::Verdict {
         let Some(u) = crate::web::url::Url::parse(&req.url) else {
-            return Ok(());
+            return crate::firewall::Verdict::Allow;
         };
         if !matches!(
             u.scheme,
             crate::web::url::Scheme::Http | crate::web::url::Scheme::Https
         ) {
-            return Ok(());
+            return crate::firewall::Verdict::Allow;
         }
-        self.config.firewall.check_out(&u.host, u.port, &req.app)
+        self.firewall_decide(&u.host, u.port, &req.app)
+    }
+
+    fn firewall_decide(&mut self, host: &str, port: u16, app: &str) -> crate::firewall::Verdict {
+        if !self.blocklists.is_loaded()
+            && let Some(fs) = self.fs.as_mut()
+        {
+            self.blocklists.reload(fs, &self.config.firewall.lists);
+        }
+        let v = self.config.firewall.decide_out(
+            host,
+            port,
+            app,
+            Some(&self.blocklists),
+            &self.fw_session,
+        );
+        if !matches!(v, crate::firewall::Verdict::Ask) {
+            let ok = matches!(v, crate::firewall::Verdict::Allow);
+            crate::firewall::record_conn(&mut self.fw_conns, app, host, port, ok);
+        }
+        v
+    }
+
+    /// Una conexión tiene que esperar a que Roman conteste (modo "preguntar").
+    fn firewall_wait(&mut self, w: FwWaiting, now_ms: u64) {
+        let (app, host, port) = w.target();
+        self.fw_waiting.push(w);
+        if !matches!(self.overlay, Overlay::FirewallAsk { .. }) {
+            self.logs.push(format!("FIREWALL_PREGUNTA {app} {host}"));
+            self.set_overlay(Overlay::FirewallAsk {
+                app,
+                host,
+                port,
+                since: now_ms,
+                sel: 0,
+            });
+        } else {
+            self.overlay_dirty = true;
+        }
+    }
+
+    /// La respuesta del diálogo: 0 = permitir (esta sesión), 1 = permitir siempre (regla),
+    /// 2 = denegar siempre (regla), 3 = denegar en esta sesión (Esc o sin respuesta).
+    fn firewall_answer(&mut self, choice: usize) {
+        let Overlay::FirewallAsk { app, host, .. } = &self.overlay else {
+            return;
+        };
+        let (app, host) = (app.clone(), host.clone());
+        let allow = matches!(choice, 0 | 1);
+        let word = ["permitir", "siempre", "denegar-siempre", "denegar"][choice.min(3)];
+        self.logs
+            .push(format!("FIREWALL_RESPUESTA {word} {app} {host}"));
+        if matches!(choice, 1 | 2) {
+            let rule = crate::firewall::Rule {
+                action: if allow {
+                    crate::firewall::Action::Allow
+                } else {
+                    crate::firewall::Action::Deny
+                },
+                dir: crate::firewall::Dir::Out,
+                host: Some(host.clone()),
+                port: None,
+                app: Some(app.clone()),
+            };
+            self.config.firewall.rules.insert(0, rule);
+            if let Some(fs) = self.fs.as_mut() {
+                let _ = save_config(fs, &self.config, crate::apps::timestamp(self.last_clock));
+            }
+        } else {
+            self.fw_session.push((app.clone(), host.clone(), allow));
+        }
+        // Las que esperaban lo mismo salen (o no) juntas.
+        let waiting = core::mem::take(&mut self.fw_waiting);
+        for w in waiting {
+            let (a, h, port) = w.target();
+            if !(a.eq_ignore_ascii_case(&app) && h.eq_ignore_ascii_case(&host)) {
+                self.fw_waiting.push(w);
+                continue;
+            }
+            crate::firewall::record_conn(&mut self.fw_conns, &a, &h, port, allow);
+            match (w, allow) {
+                (FwWaiting::Net(r), true) => self.requests.net.push(r),
+                (FwWaiting::Stream(op), true) => self.requests.streams.push(op),
+                (FwWaiting::Net(r), false) => {
+                    let msg = format!("bloqueado por el firewall: lo denegaste ({h})");
+                    self.fw_blocked.push((r.id, msg));
+                }
+                (FwWaiting::Stream(StreamOp::Connect(r)), false) => {
+                    let msg = format!("bloqueado por el firewall: lo denegaste ({h})");
+                    self.fw_blocked_streams.push((r.id, msg));
+                }
+                (FwWaiting::Stream(_), false) => {}
+            }
+        }
+        // La próxima pregunta, si hay.
+        match self.fw_waiting.first().map(FwWaiting::target) {
+            Some((app, host, port)) => {
+                self.logs.push(format!("FIREWALL_PREGUNTA {app} {host}"));
+                self.set_overlay(Overlay::FirewallAsk {
+                    app,
+                    host,
+                    port,
+                    since: self.last_now,
+                    sel: 0,
+                });
+            }
+            None => self.set_overlay(Overlay::None),
+        }
     }
 
     fn firewall_block(
@@ -1025,6 +1177,13 @@ impl<D: BlockDevice> Desktop<D> {
         let mic = self.stats.mic.take();
         self.stats = stats;
         self.stats.mic = mic;
+        self.stats.firewall_conns = self.fw_conns.clone();
+        // Una pregunta del firewall sin respuesta en 60 s: se deniega por esta sesión.
+        if let Overlay::FirewallAsk { since, .. } = self.overlay
+            && self.last_now.saturating_sub(since) > 60_000
+        {
+            self.firewall_answer(3);
+        }
         self.stats.displays = self.outputs.clone();
         self.stats.display_capacity = self.display_capacity;
         if let Some(fs) = self.fs.as_mut() {
@@ -1292,6 +1451,7 @@ impl<D: BlockDevice> Desktop<D> {
                 | Overlay::Setup(_)
                 | Overlay::Sleep
                 | Overlay::Confirm { .. }
+                | Overlay::FirewallAsk { .. }
         )
     }
 
@@ -2155,6 +2315,25 @@ impl<D: BlockDevice> Desktop<D> {
                 self.overlay_dirty = true;
                 true
             }
+            Overlay::FirewallAsk { sel, .. } => {
+                match key {
+                    Key::Escape => self.firewall_answer(3),
+                    Key::Left => {
+                        *sel = (*sel + 2) % 3;
+                        self.overlay_dirty = true;
+                    }
+                    Key::Right | Key::Tab => {
+                        *sel = (*sel + 1) % 3;
+                        self.overlay_dirty = true;
+                    }
+                    Key::Enter => {
+                        let s = *sel;
+                        self.firewall_answer(s);
+                    }
+                    _ => {}
+                }
+                true
+            }
             Overlay::Confirm {
                 call, level, sel, ..
             } => {
@@ -2763,7 +2942,7 @@ impl<D: BlockDevice> Desktop<D> {
             for req in out.spawn {
                 self.logs
                     .push(format!("PROGRAMA_INICIO {} {}", req.pid, req.path));
-                self.procs.started(req.pid, req.uid);
+                self.procs.started(req.pid, req.uid, &req.path);
                 self.requests.spawn.push(req);
             }
             for (pid, data) in out.proc_input {
@@ -2795,8 +2974,13 @@ impl<D: BlockDevice> Desktop<D> {
             }
             for req in out.net {
                 match self.firewall_check(&req) {
-                    Ok(()) => self.requests.net.push(req),
-                    Err(why) => self.firewall_block(req, why, now_ms, clock),
+                    crate::firewall::Verdict::Allow => self.requests.net.push(req),
+                    crate::firewall::Verdict::Deny(why) => {
+                        self.firewall_block(req, why, now_ms, clock)
+                    }
+                    crate::firewall::Verdict::Ask => {
+                        self.firewall_wait(FwWaiting::Net(req), now_ms)
+                    }
                 }
             }
             for op in out.brain {
@@ -2826,15 +3010,26 @@ impl<D: BlockDevice> Desktop<D> {
                     );
                 }
             }
+            if out.firewall_reload {
+                self.blocklists.invalidate();
+            }
             for op in out.streams {
-                if let StreamOp::Connect(r) = &op
-                    && let Err(why) = self.config.firewall.check_out(&r.host, r.port, &r.app)
-                {
-                    let target = format!("{}:{}", r.host, r.port);
-                    let msg =
-                        self.firewall_record(&r.app, &r.host, &target, &why, true, now_ms, clock);
-                    self.fw_blocked_streams.push((r.id, msg));
-                    continue;
+                if let StreamOp::Connect(r) = &op {
+                    let (host, port, app) = (r.host.clone(), r.port, r.app.clone());
+                    match self.firewall_decide(&host, port, &app) {
+                        crate::firewall::Verdict::Allow => {}
+                        crate::firewall::Verdict::Deny(why) => {
+                            let target = format!("{host}:{port}");
+                            let msg = self
+                                .firewall_record(&app, &host, &target, &why, true, now_ms, clock);
+                            self.fw_blocked_streams.push((r.id, msg));
+                            continue;
+                        }
+                        crate::firewall::Verdict::Ask => {
+                            self.firewall_wait(FwWaiting::Stream(op), now_ms);
+                            continue;
+                        }
+                    }
                 }
                 self.requests.streams.push(op);
             }
@@ -3235,6 +3430,13 @@ impl<D: BlockDevice> Desktop<D> {
                     }
                 } else if !panels::quick_rect(w, h).contains(x, y) {
                     self.set_overlay(Overlay::None);
+                }
+                return;
+            }
+            Overlay::FirewallAsk { .. } => {
+                let buttons = shell::firewall_buttons(self.width, self.height);
+                if let Some(i) = buttons.iter().position(|b| b.contains(x, y)) {
+                    self.firewall_answer(i);
                 }
                 return;
             }
@@ -3774,7 +3976,9 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Menu(m) => m.rect(w, h).inset(-4),
             Overlay::Quick { .. } => panels::quick_rect(w, h).inset(-4),
             Overlay::Notices => panels::notices_rect(w, h).inset(-4),
-            Overlay::Confirm { .. } => Rect::new(0, 0, w as i32, h as i32),
+            Overlay::Confirm { .. } | Overlay::FirewallAsk { .. } => {
+                Rect::new(0, 0, w as i32, h as i32)
+            }
             Overlay::Layouts { .. } => shell::layouts_rect(w, h).inset(-4),
             Overlay::Project { .. } => shell::project_rect(w, h).inset(-4),
             _ => Rect::new(0, 0, self.full_w as i32, self.full_h as i32),
@@ -4062,6 +4266,20 @@ impl<D: BlockDevice> Desktop<D> {
             Overlay::Confirm {
                 level, desc, sel, ..
             } => shell::draw_confirm(frame, w, h, *level, desc, *sel),
+            Overlay::FirewallAsk {
+                app,
+                host,
+                port,
+                sel,
+                ..
+            } => shell::draw_firewall_ask(
+                frame,
+                w,
+                h,
+                (app, host, *port),
+                self.fw_waiting.len(),
+                *sel,
+            ),
             Overlay::Layouts { sel } => shell::draw_layouts(frame, w, h, *sel),
             Overlay::Project { sel } => {
                 shell::draw_project(frame, w, h, *sel, self.config.display_mode)

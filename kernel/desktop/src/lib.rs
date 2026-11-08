@@ -11,6 +11,7 @@ extern crate alloc;
 pub mod antivirus;
 pub mod apps;
 pub mod audio;
+pub mod blocklist;
 pub mod bmp;
 pub mod brain;
 pub mod chrome;

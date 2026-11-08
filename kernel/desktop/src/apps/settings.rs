@@ -231,6 +231,10 @@ pub enum Opt {
     FwAddSite,
     FwRule(usize),
     FwShowLog,
+    /// Una lista de bloqueo (ADR 0024): activarla o no.
+    FwList(usize),
+    FwUpdateLists,
+    FwShowConns,
     /// El antivirus: la protección en tiempo real, actualizar, escanear y la cuarentena.
     AvEnabled,
     AvUpdate,
@@ -1347,10 +1351,10 @@ impl Settings {
                         tr("Conexiones salientes"),
                         tr("Lo que no dice ninguna regla"),
                         Choice(
-                            if fw.default_out == Action::Allow {
-                                tr("Permitir")
-                            } else {
-                                tr("Denegar")
+                            match fw.default_out {
+                                Action::Allow => tr("Permitir"),
+                                Action::Deny => tr("Denegar"),
+                                Action::Ask => tr("Preguntar"),
                             }
                             .into()
                         )
@@ -1383,6 +1387,26 @@ impl Settings {
                         on(!blocked),
                     ));
                 }
+                for (i, (name, desc, _)) in crate::blocklist::LISTS.iter().enumerate() {
+                    rows.push(Row::new(
+                        Opt::FwList(i),
+                        trf("Lista de bloqueo: {}", &[tr(desc)]),
+                        tr("Bloquea miles de sitios sin escribir reglas (una regla allow gana)"),
+                        on(fw.lists.iter().any(|l| l == name)),
+                    ));
+                }
+                rows.push(Row::new(
+                    Opt::FwUpdateLists,
+                    tr("Actualizar las listas"),
+                    tr("Las baja de nuevo (sudo ufw listas actualizar)"),
+                    Button(tr("ACTUALIZAR")),
+                ));
+                rows.push(Row::new(
+                    Opt::FwShowConns,
+                    tr("Conexiones"),
+                    tr("Qué app se conectó a dónde (ufw show conexiones)"),
+                    Button(tr("VER")),
+                ));
                 rows.push(Row::new(
                     Opt::FwAddSite,
                     tr("Bloquear un sitio"),
@@ -2277,11 +2301,22 @@ impl Settings {
             }
             Opt::FwEnabled => c.firewall.enabled = !c.firewall.enabled,
             Opt::FwDefaultOut => {
-                c.firewall.default_out = if c.firewall.default_out == Action::Allow {
-                    Action::Deny
-                } else {
-                    Action::Allow
+                c.firewall.default_out = match c.firewall.default_out {
+                    Action::Allow => Action::Deny,
+                    Action::Deny => Action::Ask,
+                    Action::Ask => Action::Allow,
                 }
+            }
+            Opt::FwList(i) => {
+                let Some((name, _, _)) = crate::blocklist::LISTS.get(i) else {
+                    return;
+                };
+                if let Some(pos) = c.firewall.lists.iter().position(|l| l == name) {
+                    c.firewall.lists.remove(pos);
+                } else {
+                    c.firewall.lists.push((*name).into());
+                }
+                ctx.out.firewall_reload = true;
             }
             Opt::FwLog => c.firewall.log = !c.firewall.log,
             Opt::FwApp(i) => {
@@ -2329,6 +2364,18 @@ impl Settings {
                 ctx.out
                     .launch
                     .push(Launch::Terminal(Some("ufw show blocked".into())));
+                return;
+            }
+            Opt::FwShowConns => {
+                ctx.out
+                    .launch
+                    .push(Launch::Terminal(Some("ufw show conexiones".into())));
+                return;
+            }
+            Opt::FwUpdateLists => {
+                ctx.out
+                    .launch
+                    .push(Launch::Terminal(Some("sudo ufw listas actualizar".into())));
                 return;
             }
             Opt::Info => return,

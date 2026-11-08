@@ -15,6 +15,13 @@
 //! (`ejemplo.com` vale también para sus subdominios; `*.ejemplo.com` solo para los
 //! subdominios; o una IP), un puerto y una app (`brave`, `terminal`, `apt`, `snap`…).
 //!
+//! **Desde K16 (ADR 0024)**, además:
+//! - **listas de bloqueo** (URLhaus, StevenBlack: ver [`crate::blocklist`]), que se miran
+//!   después de las reglas: una regla `allow` explícita gana (como la lista blanca de pi-hole);
+//! - la política **"preguntar"** (como OpenSnitch): la primera vez que una app quiere ir a un
+//!   sitio nuevo, el escritorio pregunta; la respuesta vale para la sesión o queda como regla;
+//! - reglas **por programa de Linux**: `app programas:curl` (y `app programas` vale para todos).
+//!
 //! Se guarda en `/Sistema/config.ini`, con el resto de la configuración:
 //!
 //! ```text
@@ -43,17 +50,83 @@ pub const APPS: [(&str, &str); 10] = [
 
 pub const LOG_PATH: &str = "/Sistema/firewall.log";
 
+/// Una entrada del registro de conexiones (como el monitor de red de Portmaster): las de la
+/// misma app, sitio, puerto y resultado se juntan y se cuentan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Conn {
+    pub app: String,
+    pub host: String,
+    pub port: u16,
+    pub allowed: bool,
+    pub count: u32,
+}
+
+/// Cuántas entradas distintas se recuerdan (las más viejas se olvidan).
+pub const MAX_CONNS: usize = 200;
+
+/// Anota una conexión (la más reciente queda al final).
+pub fn record_conn(list: &mut Vec<Conn>, app: &str, host: &str, port: u16, allowed: bool) {
+    if host.is_empty() {
+        return;
+    }
+    if let Some(i) = list
+        .iter()
+        .position(|c| c.app == app && c.host == host && c.port == port && c.allowed == allowed)
+    {
+        let mut c = list.remove(i);
+        c.count = c.count.saturating_add(1);
+        list.push(c);
+    } else {
+        list.push(Conn {
+            app: app.to_string(),
+            host: host.to_string(),
+            port,
+            allowed,
+            count: 1,
+        });
+        if list.len() > MAX_CONNS {
+            list.remove(0);
+        }
+    }
+}
+
+/// `ufw show conexiones`: la tabla, lo más reciente arriba.
+pub fn conns_table(list: &[Conn]) -> String {
+    if list.is_empty() {
+        return "Todavía no hubo conexiones.\n".into();
+    }
+    let mut s = format!(
+        "{:<22}{:<34}{:>6}  {:<10}{:>6}\n",
+        "App", "Sitio", "Puerto", "Resultado", "Veces"
+    );
+    for c in list.iter().rev() {
+        let host: String = c.host.chars().take(33).collect();
+        s.push_str(&format!(
+            "{:<22}{:<34}{:>6}  {:<10}{:>6}\n",
+            c.app,
+            host,
+            c.port,
+            if c.allowed { "permitida" } else { "BLOQUEADA" },
+            c.count
+        ));
+    }
+    s
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Allow,
     Deny,
+    /// Solo para la política por defecto: preguntarle a Roman (como OpenSnitch).
+    Ask,
 }
 
 impl Action {
-    fn word(self) -> &'static str {
+    pub fn word(self) -> &'static str {
         match self {
             Action::Allow => "permitir",
             Action::Deny => "denegar",
+            Action::Ask => "preguntar",
         }
     }
 
@@ -61,8 +134,26 @@ impl Action {
         match self {
             Action::Allow => "ALLOW",
             Action::Deny => "DENY",
+            Action::Ask => "ASK",
         }
     }
+}
+
+/// Lo que se decide para una conexión que sale.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    Allow,
+    Deny(String),
+    /// Hay que preguntarle a Roman.
+    Ask,
+}
+
+/// ¿El nombre de app de una regla abarca a `app`? `programas` abarca a `programas:curl`.
+pub fn app_matches(rule_app: &str, app: &str) -> bool {
+    rule_app.eq_ignore_ascii_case(app)
+        || app
+            .split_once(':')
+            .is_some_and(|(group, _)| group.eq_ignore_ascii_case(rule_app))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +180,8 @@ pub struct Firewall {
     /// Anotar lo que se bloquea en [`LOG_PATH`].
     pub log: bool,
     pub rules: Vec<Rule>,
+    /// Las listas de bloqueo activas (por nombre, ver [`crate::blocklist::LISTS`]).
+    pub lists: Vec<String>,
 }
 
 impl Default for Firewall {
@@ -99,6 +192,7 @@ impl Default for Firewall {
             default_out: Action::Allow,
             log: true,
             rules: Vec::new(),
+            lists: Vec::new(),
         }
     }
 }
@@ -137,10 +231,7 @@ impl Rule {
         self.dir == dir
             && self.host.as_deref().is_none_or(|p| host_matches(p, host))
             && self.port.is_none_or(|p| p == port)
-            && self
-                .app
-                .as_deref()
-                .is_none_or(|a| a.eq_ignore_ascii_case(app))
+            && self.app.as_deref().is_none_or(|a| app_matches(a, app))
     }
 
     /// Como se guarda: `denegar salida a facebook.com puerto 443 app brave`.
@@ -218,7 +309,13 @@ impl Rule {
                 }
                 "app" | "aplicacion" | "aplicación" => {
                     let a = it.next().ok_or("falta el nombre de la app")?;
-                    if !APPS.iter().any(|(n, _)| *n == a) {
+                    // `programas:curl`: un programa de Linux por su nombre.
+                    let program = a.strip_prefix("programas:").is_some_and(|p| {
+                        !p.is_empty()
+                            && p.chars()
+                                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                    });
+                    if !program && !APPS.iter().any(|(n, _)| *n == a) {
                         return Err(format!("app desconocida: {a} (ver: ufw app list)"));
                     }
                     rule.app = Some(a.to_string());
@@ -275,22 +372,53 @@ impl Rule {
 }
 
 impl Firewall {
-    /// ¿Puede `app` conectarse a `host:port`? `Err` dice por qué no.
+    /// ¿Puede `app` conectarse a `host:port`? `Err` dice por qué no. (Sin listas ni
+    /// preguntas: "preguntar" cuenta como permitir. Lo usan los tests y quien no puede esperar.)
     pub fn check_out(&self, host: &str, port: u16, app: &str) -> Result<(), String> {
+        match self.decide_out(host, port, app, None, &[]) {
+            Verdict::Allow | Verdict::Ask => Ok(()),
+            Verdict::Deny(why) => Err(why),
+        }
+    }
+
+    /// La decisión completa: reglas (en orden) → lo que Roman ya contestó en esta sesión
+    /// (`session`: app, sitio, permitido) → listas de bloqueo → política por defecto.
+    pub fn decide_out(
+        &self,
+        host: &str,
+        port: u16,
+        app: &str,
+        lists: Option<&crate::blocklist::Blocklists>,
+        session: &[(String, String, bool)],
+    ) -> Verdict {
         if !self.enabled {
-            return Ok(());
+            return Verdict::Allow;
         }
         for (i, r) in self.rules.iter().enumerate() {
             if r.matches(Dir::Out, host, port, app) {
                 return match r.action {
-                    Action::Allow => Ok(()),
-                    Action::Deny => Err(format!("regla {}: {}", i + 1, r.to_line())),
+                    Action::Allow | Action::Ask => Verdict::Allow,
+                    Action::Deny => Verdict::Deny(format!("regla {}: {}", i + 1, r.to_line())),
                 };
             }
         }
+        if let Some((_, _, ok)) = session
+            .iter()
+            .find(|(a, h, _)| a.eq_ignore_ascii_case(app) && h.eq_ignore_ascii_case(host))
+        {
+            return if *ok {
+                Verdict::Allow
+            } else {
+                Verdict::Deny("lo denegaste en esta sesión".into())
+            };
+        }
+        if let Some(name) = lists.and_then(|l| l.find(host)) {
+            return Verdict::Deny(format!("lista de bloqueo {name}"));
+        }
         match self.default_out {
-            Action::Allow => Ok(()),
-            Action::Deny => Err("política por defecto: denegar lo saliente".into()),
+            Action::Allow => Verdict::Allow,
+            Action::Deny => Verdict::Deny("política por defecto: denegar lo saliente".into()),
+            Action::Ask => Verdict::Ask,
         }
     }
 
@@ -300,6 +428,8 @@ impl Firewall {
         let action = |v: &str| {
             if v.starts_with("den") || v == "deny" {
                 Action::Deny
+            } else if v.starts_with("preg") || v == "ask" {
+                Action::Ask
             } else {
                 Action::Allow
             }
@@ -309,6 +439,11 @@ impl Firewall {
             "firewall_entrante" => self.default_in = action(v),
             "firewall_saliente" => self.default_out = action(v),
             "firewall_registro" => self.log = yes,
+            "firewall_lista" => {
+                if crate::blocklist::url_of(v).is_some() && !self.lists.iter().any(|l| l == v) {
+                    self.lists.push(v.to_string());
+                }
+            }
             "firewall_regla" => {
                 if let Ok(r) = Rule::parse(v)
                     && self.rules.len() < 200
@@ -329,6 +464,9 @@ impl Firewall {
             format!("firewall_saliente={}", self.default_out.word()),
             format!("firewall_registro={}", yn(self.log)),
         ];
+        for l in &self.lists {
+            out.push(format!("firewall_lista={l}"));
+        }
         for r in &self.rules {
             out.push(format!("firewall_regla={}", r.to_line()));
         }
@@ -444,9 +582,17 @@ impl Firewall {
                 let action = match *act {
                     "allow" => Action::Allow,
                     "deny" | "reject" => Action::Deny,
-                    _ => return Err("uso: ufw default allow|deny [incoming|outgoing]".into()),
+                    "ask" | "preguntar" => Action::Ask,
+                    _ => {
+                        return Err("uso: ufw default allow|deny|ask [incoming|outgoing]".into());
+                    }
                 };
                 let outgoing = rest.first().is_some_and(|d| d.starts_with("out"));
+                if action == Action::Ask && !outgoing {
+                    return Err(
+                        "preguntar es solo para lo saliente (ufw default ask outgoing)".into(),
+                    );
+                }
                 if outgoing {
                     self.default_out = action;
                 } else {
@@ -542,6 +688,89 @@ Ejemplos:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reglas_sesion_listas_y_preguntar() {
+        let mut fw = Firewall::default();
+        let mut lists = crate::blocklist::Blocklists::new();
+        assert_eq!(
+            fw.decide_out("x.com", 443, "brave", Some(&lists), &[]),
+            Verdict::Allow
+        );
+        fw.ufw(&["default", "ask", "outgoing"]).unwrap();
+        assert_eq!(fw.default_out, Action::Ask);
+        assert!(
+            fw.serialize()
+                .contains(&"firewall_saliente=preguntar".to_string())
+        );
+        assert_eq!(
+            fw.decide_out("x.com", 443, "brave", None, &[]),
+            Verdict::Ask
+        );
+        // Lo contestado en la sesión.
+        let session = alloc::vec![("brave".to_string(), "x.com".to_string(), false)];
+        assert!(matches!(
+            fw.decide_out("x.com", 443, "brave", None, &session),
+            Verdict::Deny(_)
+        ));
+        // Una regla gana sobre todo lo demás.
+        fw.ufw(&["allow", "out", "to", "x.com"]).unwrap();
+        assert_eq!(
+            fw.decide_out("x.com", 443, "brave", None, &session),
+            Verdict::Allow
+        );
+        // Las listas: después de las reglas, antes de la política.
+        lists.reload_from(alloc::vec![(
+            "urlhaus".to_string(),
+            crate::blocklist::compile(&["malo.net".to_string(), "x.com".to_string()])
+        )]);
+        assert_eq!(
+            fw.decide_out("a.malo.net", 80, "terminal", Some(&lists), &[]),
+            Verdict::Deny("lista de bloqueo urlhaus".into())
+        );
+        assert_eq!(
+            fw.decide_out("x.com", 80, "terminal", Some(&lists), &[]),
+            Verdict::Allow
+        );
+        // "preguntar" solo para lo saliente.
+        assert!(fw.ufw(&["default", "ask", "incoming"]).is_err());
+        // Volver a leer la configuración.
+        let mut back = Firewall::default();
+        for line in fw.serialize() {
+            let (k, v) = line.split_once('=').unwrap();
+            back.parse_key(k, v);
+        }
+        assert_eq!(back.default_out, Action::Ask);
+    }
+
+    #[test]
+    fn reglas_por_programa() {
+        assert!(app_matches("programas", "programas:curl"));
+        assert!(app_matches("programas:curl", "programas:curl"));
+        assert!(!app_matches("programas:curl", "programas:wget"));
+        assert!(!app_matches("brave", "programas:brave"));
+        let mut fw = Firewall::default();
+        fw.ufw(&["deny", "out", "app", "programas:curl"]).unwrap();
+        assert!(fw.check_out("x.com", 443, "programas:curl").is_err());
+        assert!(fw.check_out("x.com", 443, "programas:wget").is_ok());
+        assert!(fw.ufw(&["deny", "out", "app", "programas:../x"]).is_err());
+    }
+
+    #[test]
+    fn registro_de_conexiones() {
+        let mut v = Vec::new();
+        record_conn(&mut v, "brave", "a.com", 443, true);
+        record_conn(&mut v, "apt", "b.org", 80, true);
+        record_conn(&mut v, "brave", "a.com", 443, true);
+        assert_eq!(v.len(), 2);
+        assert_eq!((v[1].host.as_str(), v[1].count), ("a.com", 2));
+        let t = conns_table(&v);
+        assert!(t.lines().nth(1).unwrap().contains("a.com"), "{t}");
+        for i in 0..MAX_CONNS + 10 {
+            record_conn(&mut v, "x", &alloc::format!("h{i}.com"), 1, false);
+        }
+        assert_eq!(v.len(), MAX_CONNS);
+    }
 
     #[test]
     fn reglas_en_orden_y_sitios() {

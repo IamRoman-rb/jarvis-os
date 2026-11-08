@@ -147,7 +147,9 @@ fn serve(t: &mut Driver) {
 
 /// Respuestas de sitios de verdad (la tienda de snaps, GitHub), para probar sin red.
 fn fake_internet(url: &str) -> Option<Vec<u8>> {
-    let body: &str = if url.starts_with("https://api.snapcraft.io/v2/snaps/find") {
+    let body: &str = if url.starts_with("https://urlhaus.abuse.ch/downloads/hostfile") {
+        "# URLhaus Host file\n127.0.0.1\tmalo.example\n127.0.0.1\tdescargas-falsas.net\n"
+    } else if url.starts_with("https://api.snapcraft.io/v2/snaps/find") {
         r#"{"results":[{"name":"vlc","revision":{"version":"3.0.20"},"snap":{"publisher":{"username":"videolan","validation":"verified"},"summary":"The ultimate media player","title":"VLC"}}]}"#
     } else if url.starts_with("https://api.snapcraft.io/v2/snaps/info/vlc") {
         r#"{"name":"vlc","snap":{"summary":"The ultimate media player","publisher":{"display-name":"VideoLAN"}},"channel-map":[{"channel":{"architecture":"amd64","risk":"stable","track":"latest"},"revision":3777,"version":"3.0.20","confinement":"strict","base":"core22","download":{"size":351555584,"url":"https://api.snapcraft.io/api/v1/snaps/download/vlc_3777.snap","sha3-384":"00"}}]}"#
@@ -1141,4 +1143,73 @@ fn snap_instala_un_squashfs_de_verdad() {
     assert!(out.contains("Papelera"), "{out}");
     assert!(!fatfs_exists_in(&mut t, "/snap/bin/hola"));
     assert!(!fatfs_exists_in(&mut t, "/snap/bin/hola.saludo"));
+}
+
+/// ADR 0024: el firewall pregunta (como OpenSnitch), usa listas de bloqueo y anota las
+/// conexiones (como Portmaster).
+#[test]
+fn firewall_pregunta_listas_y_conexiones() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    assert!(run(&mut t, "sudo ufw default ask outgoing").contains("preguntar"));
+    // Una conexión nueva: el pedido queda esperando y aparece el diálogo.
+    t.type_text("wget http://example.com/");
+    t.key(Key::Enter);
+    let reqs = t.d.take_requests();
+    assert!(reqs.net.iter().all(|r| !r.url.contains("example.com")));
+    assert_eq!(t.d.overlay_name(), "firewall");
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l == "FIREWALL_PREGUNTA terminal example.com")
+    );
+    // Enter = permitir (esta sesión): el pedido sale (y wget termina).
+    t.key(Key::Enter);
+    assert_eq!(t.d.overlay_name(), "");
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l == "FIREWALL_RESPUESTA permitir terminal example.com")
+    );
+    serve(&mut t);
+    // Llegó a la "red" del test (sin el firewall en el medio).
+    assert!(screen(&t).contains("sin red en el test"), "{}", screen(&t));
+    // La segunda vez no pregunta.
+    let out = run(&mut t, "wget http://example.com/otra");
+    assert_eq!(t.d.overlay_name(), "");
+    assert!(out.contains("sin red en el test"), "{out}");
+
+    // Otro sitio: "denegar siempre" crea una regla.
+    t.type_text("wget http://rastreador.example/");
+    t.key(Key::Enter);
+    assert_eq!(t.d.overlay_name(), "firewall");
+    t.key(Key::Right);
+    t.key(Key::Right);
+    t.key(Key::Enter);
+    serve(&mut t);
+    let out = run(&mut t, "ufw status");
+    assert!(out.contains("rastreador.example"), "{out}");
+    assert!(out.contains("DENY OUT"), "{out}");
+
+    // Listas de bloqueo: se bajan, quedan activas y bloquean.
+    run(&mut t, "sudo ufw default allow outgoing");
+    let out = run(&mut t, "sudo ufw listas actualizar urlhaus");
+    assert!(out.contains("Lista urlhaus: 2 dominios"), "{out}");
+    let out = run(&mut t, "ufw listas");
+    assert!(out.contains("urlhaus") && out.contains("sí"), "{out}");
+    let out = run(&mut t, "wget http://www.malo.example/");
+    assert!(out.contains("lista de bloqueo urlhaus"), "{out}");
+    // Sin sudo no se tocan.
+    assert!(run(&mut t, "ufw listas desactivar urlhaus").contains("root"));
+    // El registro de conexiones.
+    t.d.set_stats(jarvis_desktop::SystemStats::default());
+    let out = run(&mut t, "ufw show conexiones");
+    assert!(
+        out.contains("www.malo.example") && out.contains("BLOQUEADA"),
+        "{out}"
+    );
+    assert!(
+        out.contains("example.com") && out.contains("permitida"),
+        "{out}"
+    );
 }

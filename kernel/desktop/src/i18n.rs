@@ -163,6 +163,7 @@ static EN: &[(&str, &str)] = &[
     ("Acoplar a la izquierda", "Snap left"),
     ("Acoplar a los bordes", "Snap to edges"),
     ("Activado", "On"),
+    ("Actualizar las listas", "Update the lists"),
     ("Agente principal", "Main agent"),
     ("Agosto", "August"),
     (
@@ -226,6 +227,10 @@ static EN: &[(&str, &str)] = &[
     ("Barra de arriba al maximizar", "Top bar when maximized"),
     ("Barra superior", "Top bar"),
     ("Barra y cursor", "Bar and cursor"),
+    (
+        "Bloquea miles de sitios sin escribir reglas (una regla allow gana)",
+        "Blocks thousands of sites without writing rules (an allow rule wins)",
+    ),
     ("Bloqueadas", "Blocked"),
     ("Bloquear", "Lock"),
     ("Bloquear ahora", "Lock now"),
@@ -322,6 +327,7 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Conectada con", "Connected with"),
     ("Conectando al relé...", "Connecting to the relay..."),
+    ("Conexiones", "Connections"),
     ("Conexiones entrantes", "Incoming connections"),
     ("Conexiones salientes", "Outgoing connections"),
     ("Configuración", "Settings"),
@@ -355,6 +361,7 @@ static EN: &[(&str, &str)] = &[
     ),
     ("Código de emparejado", "Pairing code"),
     ("Código nuevo", "New code"),
+    ("DENEGAR SIEMPRE", "ALWAYS DENY"),
     ("DESCONECTAR", "DISCONNECT"),
     ("DESINSTALAR", "UNINSTALL"),
     ("DESVINCULAR", "UNLINK"),
@@ -472,6 +479,10 @@ static EN: &[(&str, &str)] = &[
         "Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3).",
         "That network uses a security JARVIS-OS does not support (WEP, WPA or WPA3).",
     ),
+    (
+        "Esc: denegar en esta sesión. Sin respuesta en 60 s, se deniega.",
+        "Esc: deny for this session. With no answer in 60 s, it is denied.",
+    ),
     ("Escanear todo el disco", "Scan the whole disk"),
     (
         "Escribí para buscar apps o la web",
@@ -499,6 +510,7 @@ static EN: &[(&str, &str)] = &[
         "Extend, duplicate or use just one (also Win+P)",
     ),
     ("FINALIZAR", "END TASK"),
+    ("FIREWALL: CONEXIÓN NUEVA", "FIREWALL: NEW CONNECTION"),
     ("Facultad", "University"),
     ("Febrero", "February"),
     ("Firewall", "Firewall"),
@@ -640,6 +652,10 @@ static EN: &[(&str, &str)] = &[
         "The window jumps into place on release (lighter)",
     ),
     (
+        "Las baja de nuevo (sudo ufw listas actualizar)",
+        "Downloads them again (sudo ufw listas actualizar)",
+    ),
+    (
         "Las contraseñas no coinciden. Repetila.",
         "The passwords don't match. Type it again.",
     ),
@@ -688,6 +704,7 @@ static EN: &[(&str, &str)] = &[
     ("MODIFICADO", "MODIFIED"),
     ("MOVER", "MOVE"),
     ("MOVER A LA PAPELERA", "MOVE TO TRASH"),
+    ("Malware (URLhaus, abuse.ch)", "Malware (URLhaus, abuse.ch)"),
     ("Marzo", "March"),
     ("Maximizar", "Maximize"),
     ("Mayo", "May"),
@@ -861,6 +878,7 @@ static EN: &[(&str, &str)] = &[
         "Getting an address (DHCP)...",
     ),
     ("Preguntando al anfitrión...", "Asking the host..."),
+    ("Preguntar", "Ask"),
     (
         "Primero completá el PIN actual",
         "Fill in the current PIN first",
@@ -876,10 +894,18 @@ static EN: &[(&str, &str)] = &[
     ("Protección en tiempo real", "Real-time protection"),
     ("Proyecto", "Project"),
     ("Proyectos", "Projects"),
+    (
+        "Publicidad y malware (StevenBlack/hosts)",
+        "Ads and malware (StevenBlack/hosts)",
+    ),
     ("Puente de Brave", "Brave bridge"),
     ("Puerta de enlace y DNS", "Gateway and DNS"),
     ("Página de inicio de Brave", "Brave home page"),
     ("Páginas web guardadas (.html)", "Saved web pages (.html)"),
+    (
+        "Qué app se conectó a dónde (ufw show conexiones)",
+        "Which app connected where (ufw show conexiones)",
+    ),
     ("Qué hace con la ventana", "What it does to the window"),
     ("RAM libre", "Free RAM"),
     ("RECHAZAR", "REJECT"),
@@ -922,6 +948,7 @@ static EN: &[(&str, &str)] = &[
         "SESIÓN CERRADA · TOCÁ UNA TECLA O HACÉ CLIC PARA ENTRAR",
         "SIGNED OUT · PRESS A KEY OR CLICK TO SIGN IN",
     ),
+    ("SIEMPRE", "ALWAYS"),
     ("SIGUIENTE", "NEXT"),
     ("SIN DISCO", "NO DISK"),
     ("SIN RED", "NO NETWORK"),
@@ -1255,6 +1282,7 @@ static PT: &[(&str, &str)] = &[
     ("Acoplar a la izquierda", "Encaixar à esquerda"),
     ("Acoplar a los bordes", "Encaixar nas bordas"),
     ("Activado", "Ativado"),
+    ("Actualizar las listas", "Atualizar as listas"),
     ("Agente principal", "Agente principal"),
     ("Agosto", "Agosto"),
     (
@@ -1321,6 +1349,10 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Barra superior", "Barra superior"),
     ("Barra y cursor", "Barra e cursor"),
+    (
+        "Bloquea miles de sitios sin escribir reglas (una regla allow gana)",
+        "Bloqueia milhares de sites sem escrever regras (uma regra allow vence)",
+    ),
     ("Bloqueadas", "Bloqueadas"),
     ("Bloquear", "Bloquear"),
     ("Bloquear ahora", "Bloquear agora"),
@@ -1423,6 +1455,7 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Conectada con", "Conectada com"),
     ("Conectando al relé...", "Conectando ao relé..."),
+    ("Conexiones", "Conexões"),
     ("Conexiones entrantes", "Conexões de entrada"),
     ("Conexiones salientes", "Conexões de saída"),
     ("Configuración", "Configurações"),
@@ -1459,6 +1492,7 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Código de emparejado", "Código de pareamento"),
     ("Código nuevo", "Código novo"),
+    ("DENEGAR SIEMPRE", "NEGAR SEMPRE"),
     ("DESCONECTAR", "DESCONECTAR"),
     ("DESINSTALAR", "DESINSTALAR"),
     ("DESVINCULAR", "DESVINCULAR"),
@@ -1579,6 +1613,10 @@ static PT: &[(&str, &str)] = &[
         "Esa red usa una seguridad que JARVIS-OS no soporta (WEP, WPA o WPA3).",
         "Essa rede usa uma segurança que o JARVIS-OS não suporta (WEP, WPA ou WPA3).",
     ),
+    (
+        "Esc: denegar en esta sesión. Sin respuesta en 60 s, se deniega.",
+        "Esc: negar nesta sessão. Sem resposta em 60 s, é negado.",
+    ),
     ("Escanear todo el disco", "Verificar o disco inteiro"),
     (
         "Escribí para buscar apps o la web",
@@ -1606,6 +1644,7 @@ static PT: &[(&str, &str)] = &[
         "Estender, duplicar ou usar só um (também Win+P)",
     ),
     ("FINALIZAR", "FINALIZAR"),
+    ("FIREWALL: CONEXIÓN NUEVA", "FIREWALL: CONEXÃO NOVA"),
     ("Facultad", "Faculdade"),
     ("Febrero", "Fevereiro"),
     ("Firewall", "Firewall"),
@@ -1750,6 +1789,10 @@ static PT: &[(&str, &str)] = &[
         "A janela pula para o lugar ao soltar (mais leve)",
     ),
     (
+        "Las baja de nuevo (sudo ufw listas actualizar)",
+        "Baixa de novo (sudo ufw listas actualizar)",
+    ),
+    (
         "Las contraseñas no coinciden. Repetila.",
         "As senhas não coincidem. Repita.",
     ),
@@ -1804,6 +1847,7 @@ static PT: &[(&str, &str)] = &[
     ("MODIFICADO", "MODIFICADO"),
     ("MOVER", "MOVER"),
     ("MOVER A LA PAPELERA", "MOVER PARA A LIXEIRA"),
+    ("Malware (URLhaus, abuse.ch)", "Malware (URLhaus, abuse.ch)"),
     ("Marzo", "Março"),
     ("Maximizar", "Maximizar"),
     ("Mayo", "Maio"),
@@ -1974,6 +2018,7 @@ static PT: &[(&str, &str)] = &[
     ),
     ("Pidiendo dirección (DHCP)...", "Pedindo endereço (DHCP)..."),
     ("Preguntando al anfitrión...", "Perguntando ao anfitrião..."),
+    ("Preguntar", "Perguntar"),
     (
         "Primero completá el PIN actual",
         "Preencha primeiro o PIN atual",
@@ -1992,12 +2037,20 @@ static PT: &[(&str, &str)] = &[
     ("Protección en tiempo real", "Proteção em tempo real"),
     ("Proyecto", "Projeto"),
     ("Proyectos", "Projetos"),
+    (
+        "Publicidad y malware (StevenBlack/hosts)",
+        "Publicidade e malware (StevenBlack/hosts)",
+    ),
     ("Puente de Brave", "Ponte do Brave"),
     ("Puerta de enlace y DNS", "Gateway e DNS"),
     ("Página de inicio de Brave", "Página inicial do Brave"),
     (
         "Páginas web guardadas (.html)",
         "Páginas web salvas (.html)",
+    ),
+    (
+        "Qué app se conectó a dónde (ufw show conexiones)",
+        "Qual app se conectou a onde (ufw show conexiones)",
     ),
     ("Qué hace con la ventana", "O que faz com a janela"),
     ("RAM libre", "RAM livre"),
@@ -2041,6 +2094,7 @@ static PT: &[(&str, &str)] = &[
         "SESIÓN CERRADA · TOCÁ UNA TECLA O HACÉ CLIC PARA ENTRAR",
         "SESSÃO ENCERRADA · TOQUE UMA TECLA OU CLIQUE PARA ENTRAR",
     ),
+    ("SIEMPRE", "SEMPRE"),
     ("SIGUIENTE", "PRÓXIMO"),
     ("SIN DISCO", "SEM DISCO"),
     ("SIN RED", "SEM REDE"),
@@ -2405,6 +2459,7 @@ static EN_F: &[(&str, &str)] = &[
         "La tecla Windows abre el menú de inicio; Windows + X, el menú rápido.",
         "The Windows key opens the start menu; Windows + X, the quick menu.",
     ),
+    ("Lista de bloqueo: {}", "Blocklist: {}"),
     (
         "LÍN {} · COL {} · CTRL+S GUARDAR",
         "LN {} · COL {} · CTRL+S SAVE",
@@ -2455,6 +2510,10 @@ static EN_F: &[(&str, &str)] = &[
     ("versión {}", "version {}"),
     ("{} MiB", "{} MiB"),
     ("{} MiB libres", "{} MiB free"),
+    (
+        "{} conexiones esperan. Esc: denegar en esta sesión",
+        "{} connections waiting. Esc: deny for this session",
+    ),
     ("{} de {}", "{} {}"),
     ("{} de {} (heap)", "{} of {} (heap)"),
     (
@@ -2486,6 +2545,10 @@ static EN_F: &[(&str, &str)] = &[
     ),
     ("{} libres", "{} free"),
     ("{} min", "{} min"),
+    (
+        "{} quiere conectarse a {} (puerto {})",
+        "{} wants to connect to {} (port {})",
+    ),
     ("{} redes a la vista", "{} networks in range"),
     ("{} renglones", "{} lines"),
     (
@@ -2588,6 +2651,7 @@ static PT_F: &[(&str, &str)] = &[
         "La tecla Windows abre el menú de inicio; Windows + X, el menú rápido.",
         "A tecla Windows abre o menu iniciar; Windows + X, o menu rápido.",
     ),
+    ("Lista de bloqueo: {}", "Lista de bloqueio: {}"),
     (
         "LÍN {} · COL {} · CTRL+S GUARDAR",
         "LIN {} · COL {} · CTRL+S SALVAR",
@@ -2641,6 +2705,10 @@ static PT_F: &[(&str, &str)] = &[
     ("versión {}", "versão {}"),
     ("{} MiB", "{} MiB"),
     ("{} MiB libres", "{} MiB livres"),
+    (
+        "{} conexiones esperan. Esc: denegar en esta sesión",
+        "{} conexões esperando. Esc: negar nesta sessão",
+    ),
     ("{} de {}", "{} de {}"),
     ("{} de {} (heap)", "{} de {} (heap)"),
     (
@@ -2672,6 +2740,10 @@ static PT_F: &[(&str, &str)] = &[
     ),
     ("{} libres", "{} livres"),
     ("{} min", "{} min"),
+    (
+        "{} quiere conectarse a {} (puerto {})",
+        "{} quer se conectar a {} (porta {})",
+    ),
     ("{} redes a la vista", "{} redes ao alcance"),
     ("{} renglones", "{} linhas"),
     (

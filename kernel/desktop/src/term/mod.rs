@@ -104,6 +104,8 @@ pub(crate) enum Job {
     Apt(alloc::boxed::Box<apt::AptJob>),
     Snap(alloc::boxed::Box<snap::SnapJob>),
     Winget(alloc::boxed::Box<winget::WingetJob>),
+    /// `ufw listas actualizar`: bajando las listas de bloqueo.
+    Blocklist(alloc::boxed::Box<BlocklistJob>),
     /// `antivirus actualizar`: bajando las firmas.
     Antivirus {
         id: u32,
@@ -126,8 +128,71 @@ impl Job {
             Job::Apt(a) => a.waiting_id(),
             Job::Snap(s) => s.waiting_id(),
             Job::Winget(w) => w.waiting_id(),
+            Job::Blocklist(b) => Some(b.id),
             Job::Sleep { .. } | Job::Process { .. } => None,
         }
+    }
+}
+
+/// Bajando las listas de bloqueo del firewall, de a una.
+pub(crate) struct BlocklistJob {
+    pub id: u32,
+    pub queue: Vec<String>,
+    pub next: usize,
+}
+
+impl BlocklistJob {
+    /// Llegó una lista: se guarda y se pide la siguiente. `Some` cuando terminó.
+    fn on_response<D: BlockDevice>(
+        &mut self,
+        result: &Result<HttpResponse, String>,
+        ctx: &mut Ctx<'_, D>,
+        out: &mut Out,
+    ) -> Option<(i32, String)> {
+        let name = self.queue.get(self.next).cloned().unwrap_or_default();
+        let now = ctx.timestamp();
+        match result {
+            Ok(r) if r.status == 200 => {
+                let text = String::from_utf8_lossy(&r.body);
+                let stored = match ctx.fs.as_deref_mut() {
+                    Some(fs) => crate::blocklist::store(fs, &name, &text, now),
+                    None => Err("no hay disco".into()),
+                };
+                match stored {
+                    Ok(n) => {
+                        out.info(&format!("Lista {name}: {n} dominios."));
+                        ctx.log
+                            .push(format!("FIREWALL_LISTA_ACTUALIZADA {name} {n}"));
+                    }
+                    Err(e) => out.err(&format!("No se pudo guardar la lista {name}: {e}")),
+                }
+            }
+            Ok(r) => out.err(&format!(
+                "La lista {name} no se pudo bajar: HTTP {}",
+                r.status
+            )),
+            Err(e) => out.err(&format!("La lista {name} no se pudo bajar: {e}")),
+        }
+        self.next += 1;
+        if let Some(next) = self.queue.get(self.next)
+            && let Some(url) = crate::blocklist::url_of(next)
+        {
+            out.info(&format!("Bajando la lista {next}..."));
+            self.id = ctx
+                .out
+                .fetch_as(url, crate::system::FetchKind::Download, "sistema");
+            return None;
+        }
+        // Las que se bajaron quedan activas.
+        let mut cfg = ctx.out.config.clone().unwrap_or_else(|| ctx.config.clone());
+        for n in &self.queue {
+            if !cfg.firewall.lists.iter().any(|l| l == n) {
+                cfg.firewall.lists.push(n.clone());
+            }
+        }
+        ctx.out.config = Some(cfg);
+        ctx.out.firewall_reload = true;
+        Some((0, String::new()))
     }
 }
 
@@ -1109,6 +1174,7 @@ impl Shell {
             Job::Apt(job) => job.on_response(id, result, ctx, &mut out),
             Job::Snap(job) => job.on_response(result, ctx, &mut out),
             Job::Winget(job) => job.on_response(result, ctx, &mut out),
+            Job::Blocklist(job) => job.on_response(result, ctx, &mut out),
             Job::Antivirus { .. } => Some(crate::antivirus::on_update(result, ctx, &mut out)),
             Job::Sleep { .. } | Job::Process { .. } => Some((0, String::new())),
         };

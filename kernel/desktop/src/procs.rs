@@ -111,6 +111,8 @@ struct Sock {
 struct Proc {
     pid: u32,
     uid: u32,
+    /// Para el firewall: `programas:<nombre>` (ADR 0024).
+    app: String,
     /// Líneas tipeadas que el programa todavía no leyó. Un vector vacío es fin de la entrada.
     input: VecDeque<Vec<u8>>,
     /// El programa está esperando una línea (con cuántos bytes como mucho).
@@ -127,10 +129,17 @@ pub struct Procs {
 
 impl Procs {
     /// Un proceso nuevo (lo pidió la Terminal).
-    pub fn started(&mut self, pid: u32, uid: u32) {
+    pub fn started(&mut self, pid: u32, uid: u32, path: &str) {
+        let name = path.rsplit('/').next().unwrap_or("programa");
+        let app = if name.is_empty() {
+            String::from(FIREWALL_APP)
+        } else {
+            format!("{FIREWALL_APP}:{name}")
+        };
         self.list.push(Proc {
             pid,
             uid,
+            app,
             input: VecDeque::new(),
             reading: None,
             socks: Vec::new(),
@@ -225,7 +234,7 @@ impl Procs {
         let reply = match op {
             NetOp::Connect { ip, port } => {
                 let host = format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
-                let stream = out.connect_as(&host, port, FIREWALL_APP);
+                let stream = out.connect_as(&host, port, &p.app);
                 p.socks.push(Sock {
                     stream,
                     state: SockState::Connecting,

@@ -1242,6 +1242,79 @@ pub fn draw_confirm(c: &mut Canvas<'_>, w: usize, h: usize, level: u8, desc: &st
     }
 }
 
+/// El diálogo del firewall en modo "preguntar" (ADR 0024, como OpenSnitch).
+fn firewall_rect(w: usize, h: usize) -> Rect {
+    let (dw, dh) = (620.min(w as i32 - 40), 230);
+    Rect::new((w as i32 - dw) / 2, (h as i32 - dh) / 2, dw, dh)
+}
+
+/// Permitir (esta sesión), Permitir siempre y Denegar siempre.
+pub fn firewall_buttons(w: usize, h: usize) -> [Rect; 3] {
+    let d = firewall_rect(w, h);
+    let y = d.y + d.h - 56;
+    let bw = (d.w - 4 * 16) / 3;
+    [
+        Rect::new(d.x + 16, y, bw, 36),
+        Rect::new(d.x + 16 * 2 + bw, y, bw, 36),
+        Rect::new(d.x + 16 * 3 + 2 * bw, y, bw, 36),
+    ]
+}
+
+pub fn draw_firewall_ask(
+    c: &mut Canvas<'_>,
+    w: usize,
+    h: usize,
+    (app, host, port): (&str, &str, u16),
+    waiting: usize,
+    sel: usize,
+) {
+    c.fill_rect(
+        0,
+        0,
+        w as i32,
+        h as i32,
+        theme::void().lerp(Color::BLACK, 90),
+    );
+    let d = firewall_rect(w, h);
+    let col = theme::amber();
+    rounded_rect(c, d.x, d.y, d.w, d.h, 12, theme::menu(), 255);
+    rounded_outline(c, d.x, d.y, d.w, d.h, 12, col.scale(180));
+    text::draw(
+        c,
+        d.x + 24,
+        d.y + 24,
+        tr("FIREWALL: CONEXIÓN NUEVA"),
+        &label(col),
+    );
+    text::draw(
+        c,
+        d.x + 24,
+        d.y + 62,
+        &trf(
+            "{} quiere conectarse a {} (puerto {})",
+            &[app, host, &port.to_string()],
+        ),
+        &s16(theme::text()),
+    );
+    let hint = if waiting > 1 {
+        trf(
+            "{} conexiones esperan. Esc: denegar en esta sesión",
+            &[&waiting.to_string()],
+        )
+    } else {
+        tr("Esc: denegar en esta sesión. Sin respuesta en 60 s, se deniega.").into()
+    };
+    text::draw(c, d.x + 24, d.y + 96, &hint, &light(theme::text_dim()));
+    let labels = [tr("PERMITIR"), tr("SIEMPRE"), tr("DENEGAR SIEMPRE")];
+    let colors = [theme::cyan(), col, theme::crimson()];
+    for (i, r) in firewall_buttons(w, h).into_iter().enumerate() {
+        button(c, r, labels[i], colors[i], if i == sel { 90 } else { 20 });
+        if i == sel {
+            rounded_outline(c, r.x - 3, r.y - 3, r.w + 6, r.h + 6, 6, colors[i]);
+        }
+    }
+}
+
 // --- avisos -----------------------------------------------------------------------------------
 
 pub const TOAST_H: i32 = 44;

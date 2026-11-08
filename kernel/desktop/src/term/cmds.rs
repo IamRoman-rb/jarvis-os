@@ -1049,6 +1049,13 @@ impl Shell {
             }
             "ufw" => {
                 let args: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
+                if matches!(args.as_slice(), ["show", "conexiones" | "connections"]) {
+                    o.push_str(&crate::firewall::conns_table(&ctx.stats.firewall_conns));
+                    return Res::Code(0);
+                }
+                if args.first() == Some(&"listas") || args.first() == Some(&"lists") {
+                    return self.ufw_lists(&args[1..], ctx, o, e);
+                }
                 if matches!(args.as_slice(), ["show", "blocked" | "log"]) {
                     let Some(fs) = Self::fs(ctx, e) else {
                         return Res::Code(1);
@@ -1636,6 +1643,93 @@ impl Shell {
     }
 
     // --- comandos largos ----------------------------------------------------------------------
+
+    /// `ufw listas [actualizar [nombre] | activar nombre | desactivar nombre]` (ADR 0024).
+    fn ufw_lists<D: BlockDevice>(
+        &mut self,
+        args: &[&str],
+        ctx: &mut Ctx<'_, D>,
+        o: &mut String,
+        e: &mut String,
+    ) -> Res {
+        use crate::blocklist::{LISTS, stored_count, url_of};
+        let mut cfg = ctx.out.config.clone().unwrap_or_else(|| ctx.config.clone());
+        match args {
+            [] => {
+                let Some(fs) = ctx.fs.as_deref_mut() else {
+                    return Res::Code(1);
+                };
+                o.push_str(&format!(
+                    "{:<13}{:<9}{:>10}  {}\n",
+                    "Lista", "Activa", "Dominios", "Qué bloquea"
+                ));
+                for (name, desc, _) in LISTS {
+                    let active = cfg.firewall.lists.iter().any(|l| l == name);
+                    let count =
+                        stored_count(fs, name).map_or("sin bajar".to_string(), |n| n.to_string());
+                    o.push_str(&format!(
+                        "{name:<13}{:<9}{count:>10}  {desc}\n",
+                        if active { "sí" } else { "no" }
+                    ));
+                }
+                o.push_str("Actualizar: sudo ufw listas actualizar · activar/desactivar NOMBRE\n");
+                Res::Code(0)
+            }
+            _ if self.euid != crate::perms::ROOT => {
+                e.push_str("ERROR: hay que ser root para ejecutar esto (probá con sudo)\n");
+                Res::Code(1)
+            }
+            ["activar" | "enable", name] | ["desactivar" | "disable", name] => {
+                if url_of(name).is_none() {
+                    e.push_str(&format!(
+                        "ufw: no existe la lista «{name}» (ver: ufw listas)\n"
+                    ));
+                    return Res::Code(1);
+                }
+                let on = matches!(args[0], "activar" | "enable");
+                cfg.firewall.lists.retain(|l| l != name);
+                if on {
+                    cfg.firewall.lists.push((*name).to_string());
+                }
+                ctx.out.config = Some(cfg);
+                ctx.out.firewall_reload = true;
+                ctx.log.push(format!(
+                    "FIREWALL_LISTA {name} {}",
+                    if on { "si" } else { "no" }
+                ));
+                o.push_str(&format!(
+                    "Lista {name} {}\n",
+                    if on { "activada" } else { "desactivada" }
+                ));
+                Res::Code(0)
+            }
+            ["actualizar" | "update", rest @ ..] => {
+                let queue: Vec<String> = match rest.first() {
+                    Some(n) if url_of(n).is_some() => alloc::vec![(*n).to_string()],
+                    Some(n) => {
+                        e.push_str(&format!("ufw: no existe la lista «{n}»\n"));
+                        return Res::Code(1);
+                    }
+                    None if !cfg.firewall.lists.is_empty() => cfg.firewall.lists.clone(),
+                    None => LISTS.iter().map(|(n, _, _)| (*n).to_string()).collect(),
+                };
+                let Some(url) = url_of(&queue[0]) else {
+                    return Res::Code(1);
+                };
+                e.push_str(&format!("Bajando la lista {}...\n", queue[0]));
+                let id = ctx.out.fetch_as(url, FetchKind::Download, "sistema");
+                Res::Wait(Job::Blocklist(alloc::boxed::Box::new(
+                    super::BlocklistJob { id, queue, next: 0 },
+                )))
+            }
+            _ => {
+                e.push_str(
+                    "uso: ufw listas [actualizar [nombre] | activar NOMBRE | desactivar NOMBRE]\n",
+                );
+                Res::Code(1)
+            }
+        }
+    }
 
     /// `sudo`: ejecuta como root (ADR 0020). La contraseña se pidió antes de correr la línea
     /// ([`super::Shell::run`]); adentro de un script, si no hay una reciente, falla.

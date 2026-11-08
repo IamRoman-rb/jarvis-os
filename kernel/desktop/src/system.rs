@@ -212,6 +212,8 @@ pub struct SystemStats {
     pub devices: Vec<(String, String)>,
     /// Los discos (menos el del sistema) y el estado del instalador.
     pub disks: Vec<DiskInfo>,
+    /// El registro de conexiones del firewall (lo llena el escritorio, ADR 0024).
+    pub firewall_conns: Vec<crate::firewall::Conn>,
     pub install: InstallState,
 }
 
@@ -459,6 +461,8 @@ pub struct Outbox {
     pub close_self: bool,
     /// Programas de Linux a lanzar (K11): los crea el kernel.
     pub spawn: Vec<crate::procs::SpawnRequest>,
+    /// Las listas de bloqueo del firewall cambiaron (se bajaron o se activó una): recargarlas.
+    pub firewall_reload: bool,
     /// Entrada para un programa: (pid, bytes). Vacío: fin de la entrada (Ctrl+D).
     pub proc_input: Vec<(u32, Vec<u8>)>,
     /// Programas a terminar (Ctrl+C).
