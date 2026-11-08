@@ -6,7 +6,8 @@
 //! Este módulo es ese "servidor":
 //!
 //! - archivos: cada pedido de `jarvis-linux` ([`FileOp`]) se hace sobre el FAT32; borrar manda a
-//!   la Papelera (regla 13);
+//!   la Papelera (regla 13). Antes se miran los permisos (ADR 0020): un programa del usuario no
+//!   puede escribir en las carpetas del sistema (`EACCES`), uno lanzado con `sudo` (uid 0) sí;
 //! - consola: la salida va a la Terminal que lanzó el programa y las líneas que se tipean ahí son
 //!   su entrada;
 //! - red: `connect`/`send`/`recv` son conexiones largas del `Outbox`, así que pasan por el
@@ -21,6 +22,7 @@ use jarvis_fs::{BlockDevice, FileSystem};
 use jarvis_linux::abi::errno;
 use jarvis_linux::sys::{DirEntry, FileOp, FileReply, Meta, NetOp, NetReply};
 
+use crate::perms::{Access, Perms};
 use crate::system::{Outbox, StreamEvent};
 
 /// La app con la que los programas aparecen en el firewall.
@@ -42,6 +44,8 @@ pub struct SpawnRequest {
     pub cwd: String,
     /// Filas y columnas de la Terminal.
     pub size: (u16, u16),
+    /// Con qué usuario corre: 1000, o 0 (root) si se lanzó con `sudo` (ADR 0020).
+    pub uid: u32,
 }
 
 /// Lo que llega de un proceso.
@@ -106,6 +110,7 @@ struct Sock {
 
 struct Proc {
     pid: u32,
+    uid: u32,
     /// Líneas tipeadas que el programa todavía no leyó. Un vector vacío es fin de la entrada.
     input: VecDeque<Vec<u8>>,
     /// El programa está esperando una línea (con cuántos bytes como mucho).
@@ -122,9 +127,10 @@ pub struct Procs {
 
 impl Procs {
     /// Un proceso nuevo (lo pidió la Terminal).
-    pub fn started(&mut self, pid: u32) {
+    pub fn started(&mut self, pid: u32, uid: u32) {
         self.list.push(Proc {
             pid,
+            uid,
             input: VecDeque::new(),
             reading: None,
             socks: Vec::new(),
@@ -183,10 +189,19 @@ impl Procs {
         pid: u32,
         op: FileOp,
         fs: Option<&mut FileSystem<D>>,
+        perms: &mut Perms,
         now: jarvis_fs::Timestamp,
     ) {
+        let uid = self
+            .list
+            .iter()
+            .find(|p| p.pid == pid)
+            .map_or(crate::perms::USER, |p| p.uid);
         let r = match fs {
-            Some(fs) => file_op(fs, op, now),
+            Some(fs) => {
+                perms.ensure_loaded(fs);
+                file_op_as(fs, perms, uid, op, now)
+            }
             None => FileReply::Error(errno::EIO),
         };
         self.replies.push((pid, ProcReply::File(r)));
@@ -319,7 +334,141 @@ pub(crate) fn unix_seconds(t: jarvis_fs::Timestamp) -> u64 {
     secs.max(0) as u64
 }
 
-/// Un pedido de archivos sobre el FAT32. Los errores, como `errno`.
+/// ¿Puede `uid` hacer este pedido? (`Err(errno)` si no.) Crear, borrar o renombrar pide
+/// escribir en la carpeta; leer o escribir un archivo, en el archivo.
+fn check_op<D: BlockDevice>(
+    fs: &mut FileSystem<D>,
+    perms: &Perms,
+    uid: u32,
+    op: &FileOp,
+) -> Result<(), i64> {
+    use crate::files::parent;
+    let is_dir = |fs: &mut FileSystem<D>, p: &str| p == "/" || fs.stat(p).is_ok_and(|s| s.is_dir);
+    let need = |fs: &mut FileSystem<D>, p: &str, a: Access| {
+        let d = is_dir(fs, p);
+        if perms.allowed(uid, p, d, a) {
+            Ok(())
+        } else {
+            Err(errno::EACCES)
+        }
+    };
+    match op {
+        FileOp::Stat(_) => Ok(()),
+        FileOp::Read(p) | FileOp::List(p) => need(fs, p, Access::Read),
+        FileOp::Write(p, _) => {
+            if fs.exists(p) {
+                need(fs, p, Access::Write)
+            } else {
+                need(fs, &parent(p), Access::Write)
+            }
+        }
+        FileOp::Mkdir(p) | FileOp::Remove(p) | FileOp::Rmdir(p) => {
+            need(fs, &parent(p), Access::Write)
+        }
+        FileOp::Rename(from, to) => {
+            need(fs, &parent(from), Access::Write)?;
+            need(fs, &parent(to), Access::Write)
+        }
+        // chmod: el dueño o root. chown: root; el dueño solo puede cambiar el grupo a uno suyo
+        // (como en Linux).
+        FileOp::Chmod(p, _) => {
+            let d = is_dir(fs, p);
+            if uid == crate::perms::ROOT || perms.get(p, d).uid == uid {
+                Ok(())
+            } else {
+                Err(errno::EPERM)
+            }
+        }
+        FileOp::Chown(p, new_uid, new_gid) => {
+            let d = is_dir(fs, p);
+            let e = perms.get(p, d);
+            let same_owner = *new_uid == u32::MAX || *new_uid == e.uid;
+            let own_group = *new_gid == u32::MAX || crate::perms::groups(uid).contains(new_gid);
+            if uid == crate::perms::ROOT || (e.uid == uid && same_owner && own_group) {
+                Ok(())
+            } else {
+                Err(errno::EPERM)
+            }
+        }
+    }
+}
+
+/// Un pedido de archivos de un proceso de `uid`: primero los permisos, después el FAT32, y la
+/// tabla de permisos al día (chmod, chown, renombrar, borrar).
+pub fn file_op_as<D: BlockDevice>(
+    fs: &mut FileSystem<D>,
+    perms: &mut Perms,
+    uid: u32,
+    op: FileOp,
+    now: jarvis_fs::Timestamp,
+) -> FileReply {
+    if let Err(e) = check_op(fs, perms, uid, &op) {
+        return FileReply::Error(e);
+    }
+    match op {
+        FileOp::Stat(path) => match file_op(fs, FileOp::Stat(path.clone()), now) {
+            FileReply::Meta(mut m) => {
+                let e = perms.get(&path, m.is_dir);
+                m.mode = u32::from(e.mode);
+                m.uid = e.uid;
+                m.gid = e.gid;
+                FileReply::Meta(m)
+            }
+            other => other,
+        },
+        FileOp::Chmod(path, mode) => match fs.stat(&path) {
+            Ok(s) => {
+                perms.set_mode(&path, s.is_dir, mode as u16);
+                saved(fs, perms, now)
+            }
+            Err(_) => FileReply::Error(errno::ENOENT),
+        },
+        FileOp::Chown(path, uid, gid) => match fs.stat(&path) {
+            Ok(s) => {
+                let mut e = perms.get(&path, s.is_dir);
+                if uid != u32::MAX {
+                    e.uid = uid;
+                }
+                if gid != u32::MAX {
+                    e.gid = gid;
+                }
+                perms.set(&path, s.is_dir, e);
+                saved(fs, perms, now)
+            }
+            Err(_) => FileReply::Error(errno::ENOENT),
+        },
+        FileOp::Rename(from, to) => {
+            let r = file_op(fs, FileOp::Rename(from.clone(), to.clone()), now);
+            if r == FileReply::Done && !perms.is_empty() {
+                perms.renamed(&from, &to);
+                let _ = saved(fs, perms, now);
+            }
+            r
+        }
+        FileOp::Remove(path) => {
+            let r = file_op(fs, FileOp::Remove(path.clone()), now);
+            if r == FileReply::Done && !perms.is_empty() {
+                perms.removed(&path);
+                let _ = saved(fs, perms, now);
+            }
+            r
+        }
+        other => file_op(fs, other, now),
+    }
+}
+
+fn saved<D: BlockDevice>(
+    fs: &mut FileSystem<D>,
+    perms: &Perms,
+    now: jarvis_fs::Timestamp,
+) -> FileReply {
+    match perms.save(fs, now) {
+        Ok(()) => FileReply::Done,
+        Err(_) => FileReply::Error(errno::EIO),
+    }
+}
+
+/// Un pedido de archivos sobre el FAT32 (sin mirar permisos). Los errores, como `errno`.
 pub fn file_op<D: BlockDevice>(
     fs: &mut FileSystem<D>,
     op: FileOp,
@@ -345,16 +494,25 @@ pub fn file_op<D: BlockDevice>(
     };
     match op {
         FileOp::Stat(path) => match fs.stat(&path) {
-            Ok(s) => FileReply::Meta(Meta {
-                is_dir: s.is_dir,
-                size: u64::from(s.size),
-                mtime: unix_seconds(s.modified),
-            }),
+            Ok(s) => {
+                let e = Perms::default_for(&path, s.is_dir);
+                FileReply::Meta(Meta {
+                    is_dir: s.is_dir,
+                    size: u64::from(s.size),
+                    mtime: unix_seconds(s.modified),
+                    mode: u32::from(e.mode),
+                    uid: e.uid,
+                    gid: e.gid,
+                })
+            }
             // La raíz no tiene entrada propia.
             Err(_) if path == "/" => FileReply::Meta(Meta {
                 is_dir: true,
                 size: 0,
                 mtime: 0,
+                mode: 0o755,
+                uid: crate::perms::USER,
+                gid: crate::perms::USER,
             }),
             Err(e) => code(e),
         },
@@ -408,5 +566,7 @@ pub fn file_op<D: BlockDevice>(
             };
             done(r)
         }
+        // Sin tabla de permisos (lo hace `file_op_as`): no hay nada que cambiar en el FAT32.
+        FileOp::Chmod(..) | FileOp::Chown(..) => FileReply::Done,
     }
 }

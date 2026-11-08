@@ -57,7 +57,7 @@ fn la_configuracion_se_lee_al_arrancar() {
     let mut t = Driver::new();
     t.d.open(
         Launch::Terminal(Some(
-            "mkdir -p /Sistema && echo zona_utc=5 > /Sistema/config.ini".into(),
+            "sudo mkdir -p /Sistema && echo zona_utc=5 | sudo tee /Sistema/config.ini".into(),
         )),
         t.now,
         CLOCK,
@@ -82,7 +82,7 @@ fn el_pin_viejo_en_texto_se_hashea_al_arrancar() {
     let mut t = Driver::new();
     t.d.open(
         Launch::Terminal(Some(
-            "mkdir -p /Sistema && echo pin=2468 > /Sistema/config.ini".into(),
+            "sudo mkdir -p /Sistema && echo pin=2468 | sudo tee /Sistema/config.ini".into(),
         )),
         t.now,
         CLOCK,

@@ -600,7 +600,7 @@ fn test_hardware(image: &Path) -> Result<()> {
             s.saw_or_wait("HDA_LISTO", STEP)?;
             s.monitor("sendkey ctrl-alt-t")?;
             s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
-            s.type_text("apt install musica && cd /M* && open Escala.wav")?;
+            s.type_text("sudo apt install musica && cd /M* && open Escala.wav")?;
             s.monitor("sendkey ret")?;
             s.wait_for("MUSICA_ARCHIVO", STEP)?;
             s.wait_for("MUSICA_FIN", STEP)?;
@@ -1147,7 +1147,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("RED_RESPUESTA 200", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
     // apt: instala un paquete del repositorio (lo sirve el puente) y se ejecuta.
-    s.type_text("apt install hola")?;
+    s.type_text("sudo apt install hola")?;
     s.monitor("sendkey ret")?;
     s.wait_for("APT_INSTALADO hola", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
@@ -1156,7 +1156,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("TERMINAL hola", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
     // snap: un programa de la tienda de JARVIS-OS (también la sirve el puente).
-    s.type_text("snap install saludo")?;
+    s.type_text("sudo snap install saludo")?;
     s.monitor("sendkey ret")?;
     s.wait_for("SNAP_INSTALADO saludo", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
@@ -1186,7 +1186,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     }
     // K11: programas de Linux de verdad (ELF estáticos de musl), en el anillo 3. Se instalan con
     // apt (el puente los sirve desde target/usuario/).
-    s.type_text("apt install programas-linux")?;
+    s.type_text("sudo apt install programas-linux")?;
     s.monitor("sendkey ret")?;
     s.wait_for("APT_INSTALADO programas-linux", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
@@ -1237,7 +1237,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("TERMINAL_FIN 1", STEP)?;
     // Un intérprete de JavaScript (Boa) como programa de Linux: código suelto, un archivo y la
     // consola interactiva (lo tipeado es su entrada estándar).
-    s.type_text("apt install js")?;
+    s.type_text("sudo apt install js")?;
     s.monitor("sendkey ret")?;
     s.wait_for("APT_INSTALADO js", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
@@ -1268,7 +1268,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     }
     // K12: canciones y un video por los parlantes de la placa virtio-sound.
     s.saw_or_wait("SONIDO_LISTO", STEP)?;
-    s.type_text("apt install musica videos")?;
+    s.type_text("sudo apt install musica videos")?;
     s.monitor("sendkey ret")?;
     s.wait_for("APT_INSTALADO videos", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
@@ -1593,7 +1593,7 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     // Terminal: apt instala programas y fondos del repositorio; neofetch y cowsay.
     s.monitor("sendkey ctrl-alt-t")?;
     s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
-    s.type_text("apt install esenciales fondos")?;
+    s.type_text("sudo apt install esenciales fondos")?;
     s.monitor("sendkey ret")?;
     s.wait_for("APT_INSTALADO fondos", Duration::from_secs(60))?;
     s.wait_for("TERMINAL_FIN", STEP)?;
@@ -1610,7 +1610,7 @@ fn screenshot(image: &Path, disk: &Path) -> Result<()> {
     // snap y el firewall desde la terminal.
     s.type_text("clear")?;
     s.monitor("sendkey ret")?;
-    s.type_text("snap install saludo --beta && saludo && snap list")?;
+    s.type_text("sudo snap install saludo --beta && saludo && snap list")?;
     s.monitor("sendkey ret")?;
     s.wait_for("SNAP_INSTALADO saludo", STEP)?;
     s.wait_for("TERMINAL_FIN", STEP)?;
@@ -1716,7 +1716,7 @@ fn glibc(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey ctrl-alt-t")?;
     s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
     thread::sleep(Duration::from_millis(500));
-    s.type_text("apt install hello")?;
+    s.type_text("sudo apt install hello")?;
     s.monitor("sendkey ret")?;
     let t0 = Instant::now();
     let installed = s.wait_for("APT_INSTALADO hello ", Duration::from_secs(600));

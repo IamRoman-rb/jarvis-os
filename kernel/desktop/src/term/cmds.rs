@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use jarvis_fs::{BlockDevice, DirEntry, FileSystem};
 
 use super::regex::Regex;
-use super::{BIN, Job, Out, PATH, Res, Shell, ansi, apt, binfmt, child, snap, winget};
+use super::{Job, Out, PATH, Res, Shell, ansi, apt, binfmt, child, snap, winget};
 use crate::apps::Ctx;
 use crate::files::{FilesApp, basename, format_size, parent};
 use crate::system::{AppKind, FetchKind, HttpResponse, Launch, Power};
@@ -27,6 +27,15 @@ pub const NAMES: &[(&str, &str)] = &[
     ("cal", "calendario del mes"),
     ("cat", "muestra archivos (-n numera las líneas)"),
     ("cd", "cambia de carpeta (cd .., cd -, cd ~)"),
+    ("chgrp", "cambia el grupo: sudo chgrp sudo archivo"),
+    (
+        "chmod",
+        "cambia los permisos: chmod +x script.sh, chmod 644 archivo (-R)",
+    ),
+    (
+        "chown",
+        "cambia el dueño: sudo chown roman:roman archivo (-R)",
+    ),
     ("clear", "limpia la pantalla (Ctrl+L)"),
     ("cp", "copia archivos (-r: carpetas)"),
     ("curl", "baja una dirección a la pantalla (-o archivo)"),
@@ -45,6 +54,7 @@ pub const NAMES: &[(&str, &str)] = &[
     ("file", "qué tipo de archivo es (reconoce .exe y ELF)"),
     ("find", "busca: find /Documentos -name '*.txt'"),
     ("free", "memoria (-h)"),
+    ("groups", "los grupos del usuario"),
     (
         "grep",
         "busca texto (-i -v -n -c -r, expresiones regulares)",
@@ -62,6 +72,7 @@ pub const NAMES: &[(&str, &str)] = &[
     ("jarvis", "JARVIS lo dice en voz alta: jarvis hola"),
     ("kill", "cierra una ventana por su PID (ver ps)"),
     ("ls", "lista una carpeta (-l -a -h -1)"),
+    ("passwd", "cambia la contraseña del usuario"),
     ("man", "ayuda de un comando"),
     ("mkdir", "crea carpetas (-p)"),
     ("mv", "mueve o renombra"),
@@ -88,6 +99,11 @@ pub const NAMES: &[(&str, &str)] = &[
     ("sort", "ordena líneas (-r -n -u)"),
     ("stat", "datos de un archivo"),
     ("strings", "texto adentro de un binario"),
+    ("su", "abre una terminal de root (exit vuelve)"),
+    (
+        "sudo",
+        "ejecuta como root: sudo apt install x (-k -v -l -i)",
+    ),
     ("tail", "últimas líneas (-n N)"),
     ("tee", "copia la entrada a un archivo y a la salida"),
     ("test", "condiciones: test -f archivo (también [ ])"),
@@ -97,6 +113,7 @@ pub const NAMES: &[(&str, &str)] = &[
     ("tree", "árbol de carpetas"),
     ("true", "sale bien"),
     ("type", "qué es un comando"),
+    ("umask", "la máscara de los archivos nuevos (umask 022)"),
     ("ufw", "firewall: ufw status, ufw deny out to sitio.com"),
     ("uname", "datos del sistema (-a)"),
     ("uniq", "saca líneas repetidas seguidas (-c)"),
@@ -219,13 +236,26 @@ impl Shell {
         if files.is_empty() {
             return out;
         }
-        let Some(fs) = Self::fs(ctx, e) else {
+        Self::perms(ctx);
+        let Some(fs) = ctx.fs.as_deref_mut() else {
+            e.push_str(
+                "no hay disco
+",
+            );
             return out;
         };
+        let uid = self.euid;
         for f in files {
             let p = self.abs(f);
             match fs.stat(&p) {
                 Ok(st) if st.is_dir => e.push_str(&format!("{name}: {f}: es una carpeta\n")),
+                Ok(_)
+                    if !ctx
+                        .perms
+                        .allowed(uid, &p, false, crate::perms::Access::Read) =>
+                {
+                    e.push_str(&format!("{name}: {f}: Permiso denegado\n"))
+                }
                 Ok(_) => match fs.read_file(&p) {
                     Ok(b) => out.push((f.clone(), String::from_utf8_lossy(&b).into_owned())),
                     Err(err) => e.push_str(&format!("{name}: {f}: {err}\n")),
@@ -596,6 +626,17 @@ impl Shell {
                 let text = stdin.unwrap_or("").to_string();
                 let (flags, files) = opts(argv);
                 let now = ctx.timestamp();
+                let files: Vec<String> = files
+                    .into_iter()
+                    .filter(|f| {
+                        let p = self.abs(f);
+                        let no = self.denied_write(ctx, &p);
+                        if no {
+                            e.push_str(&format!("tee: {f}: Permiso denegado\n"));
+                        }
+                        !no
+                    })
+                    .collect();
                 if let Some(fs) = Self::fs(ctx, e) {
                     for f in files {
                         let p = self.abs(&f);
@@ -685,6 +726,16 @@ impl Shell {
             "touch" => {
                 let (_, files) = opts(argv);
                 let now = ctx.timestamp();
+                let files: Vec<String> = files
+                    .into_iter()
+                    .filter(|f| {
+                        let no = self.denied_write(ctx, &self.abs(f));
+                        if no {
+                            e.push_str(&format!("touch: {f}: Permiso denegado\n"));
+                        }
+                        !no
+                    })
+                    .collect();
                 let Some(fs) = Self::fs(ctx, e) else {
                     return Res::Code(1);
                 };
@@ -701,12 +752,36 @@ impl Shell {
             "mkdir" => {
                 let (flags, dirs) = opts(argv);
                 let now = ctx.timestamp();
-                let Some(fs) = Self::fs(ctx, e) else {
-                    return Res::Code(1);
-                };
                 if dirs.is_empty() {
                     e.push_str("mkdir: falta el nombre\n");
                 }
+                let dirs: Vec<String> = dirs
+                    .into_iter()
+                    .filter(|d| {
+                        let p = self.abs(d);
+                        let exists = ctx.fs.as_deref_mut().is_some_and(|fs| fs.exists(&p));
+                        // `mkdir -p` de algo que ya existe no escribe nada.
+                        let no = !(exists && flags.contains(&'p')) && {
+                            // La primera carpeta que existe hacia arriba es la que se escribe.
+                            let mut up = crate::files::parent(&p);
+                            while up != "/"
+                                && !ctx.fs.as_deref_mut().is_some_and(|fs| fs.exists(&up))
+                            {
+                                up = crate::files::parent(&up);
+                            }
+                            self.denied(ctx, &up, crate::perms::Access::Write)
+                        };
+                        if no {
+                            e.push_str(&format!(
+                                "mkdir: no se puede crear la carpeta «{d}»: Permiso denegado\n"
+                            ));
+                        }
+                        !no
+                    })
+                    .collect();
+                let Some(fs) = Self::fs(ctx, e) else {
+                    return Res::Code(1);
+                };
                 for d in &dirs {
                     let p = self.abs(d);
                     let r = if flags.contains(&'p') {
@@ -723,6 +798,21 @@ impl Shell {
             "rmdir" | "rm" => {
                 let (flags, targets) = opts(argv);
                 let now = ctx.timestamp();
+                let targets: Vec<String> = targets
+                    .into_iter()
+                    .filter(|t| {
+                        let p = self.abs(t);
+                        let exists = ctx.fs.as_deref_mut().is_some_and(|fs| fs.exists(&p));
+                        let no = exists && self.denied_parent(ctx, &p);
+                        if no {
+                            e.push_str(&format!(
+                                "{name}: no se puede borrar «{t}»: Permiso denegado\n"
+                            ));
+                        }
+                        !no
+                    })
+                    .collect();
+                let mut gone = Vec::new();
                 let Some(fs) = Self::fs(ctx, e) else {
                     return Res::Code(1);
                 };
@@ -757,12 +847,14 @@ impl Shell {
                             Ok(_) => {
                                 moved += 1;
                                 logs.push(format!("TERMINAL_PAPELERA {p}"));
+                                gone.push(p.clone());
                             }
                             Err(err) => e.push_str(&format!("{name}: {t}: {err}\n")),
                         },
                     }
                 }
                 ctx.log.extend(logs);
+                self.forget_perms(ctx, &gone);
                 if moved > 0 && flags.contains(&'v') {
                     o.push_str(&format!("{moved} elemento(s) movidos a la Papelera\n"));
                 }
@@ -864,8 +956,74 @@ impl Shell {
                 0
             }
             "whoami" => {
-                o.push_str(self.user());
+                o.push_str(self.effective_user());
                 o.push('\n');
+                0
+            }
+            "groups" => {
+                let uid = self.euid;
+                let p = Self::perms(ctx);
+                let names: Vec<String> = crate::perms::groups(uid)
+                    .iter()
+                    .map(|g| p.group_name(*g))
+                    .collect();
+                o.push_str(&names.join(" "));
+                o.push('\n');
+                0
+            }
+            "umask" => match argv.get(1) {
+                None => {
+                    o.push_str(&format!("{:04o}\n", self.umask));
+                    0
+                }
+                Some(m) => match u16::from_str_radix(m, 8) {
+                    Ok(v) if v <= 0o777 => {
+                        self.umask = v;
+                        0
+                    }
+                    _ => {
+                        e.push_str(&format!("umask: {m}: número octal fuera de rango\n"));
+                        1
+                    }
+                },
+            },
+            "chmod" => self.chmod(argv, ctx, e),
+            "chown" | "chgrp" => self.chown(name, argv, ctx, e),
+            "su" => {
+                if self.is_root_shell() || self.euid == crate::perms::ROOT {
+                    self.base_uid = crate::perms::ROOT;
+                    0
+                } else if ctx.config.pin.is_none() {
+                    self.base_uid = crate::perms::ROOT;
+                    self.euid = crate::perms::ROOT;
+                    ctx.log.push("SU_ROOT".into());
+                    0
+                } else {
+                    self.ask(super::Auth::Su { tries: 0 }, "Contraseña: ", out);
+                    0
+                }
+            }
+            "passwd" => {
+                if ctx.config.pin.is_some() && self.euid != crate::perms::ROOT {
+                    o.push_str(&format!("Cambiando la contraseña de {}.\n", self.user()));
+                    self.ask(
+                        super::Auth::Passwd {
+                            step: 0,
+                            new: String::new(),
+                        },
+                        "Contraseña actual: ",
+                        out,
+                    );
+                } else {
+                    self.ask(
+                        super::Auth::Passwd {
+                            step: 1,
+                            new: String::new(),
+                        },
+                        "Nueva contraseña: ",
+                        out,
+                    );
+                }
                 0
             }
             "hostname" => {
@@ -874,10 +1032,19 @@ impl Shell {
                 0
             }
             "id" => {
-                let u = self.user().to_string();
-                o.push_str(&format!(
-                    "uid=1000({u}) gid=1000({u}) grupos=1000({u}),27(sudo)\n"
-                ));
+                let uid = match argv.get(1) {
+                    Some(n) => match Self::perms(ctx).uid_of(n) {
+                        Some(u) => u,
+                        None => {
+                            e.push_str(&format!("id: «{n}»: no existe ese usuario\n"));
+                            return Res::Code(1);
+                        }
+                    },
+                    None => self.euid,
+                };
+                let line = Self::perms(ctx).id_line(uid);
+                o.push_str(&line);
+                o.push('\n');
                 0
             }
             "ufw" => {
@@ -891,6 +1058,14 @@ impl Shell {
                         _ => o.push_str("Todavía no se bloqueó nada.\n"),
                     }
                     return Res::Code(0);
+                }
+                let reads = matches!(
+                    args.first(),
+                    None | Some(&("status" | "show" | "app" | "help" | "--help" | "version"))
+                );
+                if !reads && self.euid != crate::perms::ROOT {
+                    e.push_str("ERROR: hay que ser root para ejecutar esto (probá con sudo)\n");
+                    return Res::Code(1);
                 }
                 // Si un comando anterior de la misma línea ya cambió algo, se parte de eso.
                 let mut cfg = ctx.out.config.clone().unwrap_or_else(|| ctx.config.clone());
@@ -909,15 +1084,7 @@ impl Shell {
                     }
                 }
             }
-            "sudo" => {
-                if argv.len() == 1 {
-                    e.push_str("sudo: decime qué ejecutar\n");
-                    1
-                } else {
-                    // En JARVIS-OS sos el dueño de todo: sudo solo ejecuta.
-                    return self.exec(&argv[1..], stdin, o, e, ctx, out);
-                }
-            }
+            "sudo" => return self.sudo(argv, stdin, o, e, ctx, out),
             "date" => match ctx.clock {
                 Some(t) => {
                     let wd = DAYS[t.weekday()];
@@ -1110,7 +1277,10 @@ impl Shell {
                 code
             }
             "exit" | "logout" => {
-                self.exit = true;
+                // En una terminal de root (`su`), `exit` vuelve al usuario.
+                if !self.leave_root() {
+                    self.exit = true;
+                }
                 0
             }
             "reboot" => {
@@ -1178,20 +1348,35 @@ impl Shell {
             }
             "stat" => {
                 let (_, files) = opts(argv);
-                let Some(fs) = Self::fs(ctx, e) else {
+                Self::perms(ctx);
+                let Some(fs) = ctx.fs.as_deref_mut() else {
+                    e.push_str(
+                        "no hay disco
+",
+                    );
                     return Res::Code(1);
                 };
                 for f in &files {
-                    match fs.stat(&self.abs(f)) {
-                        Ok(st) => o.push_str(&format!(
-                            "  Archivo: {f}\n   Tamaño: {} bytes\tTipo: {}\nNombre 8.3: {}\tCluster: {}\n Creado: {}\nModificado: {}\n",
+                    let abs = self.abs(f);
+                    match fs.stat(&abs) {
+                        Ok(st) => {
+                            let pe = ctx.perms.get(&abs, st.is_dir);
+                            o.push_str(&format!(
+                            "  Archivo: {f}\n   Tamaño: {} bytes\tTipo: {}\n   Acceso: ({:04o}/{})  Uid: ({}/{})  Gid: ({}/{})\nNombre 8.3: {}\tCluster: {}\n Creado: {}\nModificado: {}\n",
                             st.size,
                             if st.is_dir { "carpeta" } else { "archivo" },
+                            pe.mode,
+                            crate::perms::format_mode(st.is_dir, pe.mode),
+                            pe.uid,
+                            ctx.perms.user_name(pe.uid),
+                            pe.gid,
+                            ctx.perms.group_name(pe.gid),
                             st.short_name,
                             st.first_cluster,
                             crate::files::format_date(st.created),
                             crate::files::format_date(st.modified)
-                        )),
+                        ))
+                        }
                         Err(err) => e.push_str(&format!("stat: {f}: {err}\n")),
                     }
                 }
@@ -1302,6 +1487,27 @@ impl Shell {
                 };
             }
             "apt" => {
+                let changes = matches!(
+                    argv.get(1).map(String::as_str),
+                    Some(
+                        "install"
+                            | "remove"
+                            | "purge"
+                            | "upgrade"
+                            | "full-upgrade"
+                            | "dist-upgrade"
+                            | "update"
+                            | "autoremove"
+                            | "reinstall"
+                    )
+                );
+                if changes && self.euid != crate::perms::ROOT {
+                    e.push_str(
+                        "E: No se pudo abrir el archivo de bloqueo /var/lib/dpkg/lock-frontend - open (13: Permiso denegado)\n\
+                         E: No se pudo obtener el bloqueo de la interfaz de dpkg (/var/lib/dpkg/lock-frontend), ¿es usted superusuario?\n",
+                    );
+                    return Res::Code(100);
+                }
                 return match apt::run(argv, ctx, o, e, out) {
                     Ok(code) => Res::Code(code),
                     Err(job) => Res::Wait(Job::Apt(job)),
@@ -1317,12 +1523,30 @@ impl Shell {
                 return self.exec(&cmd, stdin, o, e, ctx, out);
             }
             "snap" => {
+                if matches!(
+                    argv.get(1).map(String::as_str),
+                    Some("install" | "remove" | "refresh" | "revert")
+                ) && self.euid != crate::perms::ROOT
+                {
+                    e.push_str("error: acceso denegado (probá con sudo)\n");
+                    return Res::Code(1);
+                }
                 return match snap::run(argv, ctx, o, e) {
                     Ok(code) => Res::Code(code),
                     Err(job) => Res::Wait(Job::Snap(job)),
                 };
             }
             "winget" | "winget.exe" => {
+                if matches!(
+                    argv.get(1).map(String::as_str),
+                    Some("install" | "uninstall" | "remove" | "upgrade")
+                ) && self.euid != crate::perms::ROOT
+                {
+                    e.push_str(
+                        "winget: instalar programas necesita permisos de administrador (probá con sudo)\n",
+                    );
+                    return Res::Code(1);
+                }
                 return match winget::run(argv, ctx, o, e) {
                     Ok(code) => Res::Code(code),
                     Err(job) => Res::Wait(Job::Winget(job)),
@@ -1356,6 +1580,12 @@ impl Shell {
                     return Res::Code(2);
                 };
                 let p = self.abs(f);
+                if ctx.fs.as_deref_mut().is_some_and(|fs| fs.exists(&p))
+                    && self.denied(ctx, &p, crate::perms::Access::Read)
+                {
+                    e.push_str(&format!("{name}: {f}: Permiso denegado\n"));
+                    return Res::Code(126);
+                }
                 let Some(fs) = Self::fs(ctx, e) else {
                     return Res::Code(1);
                 };
@@ -1406,6 +1636,288 @@ impl Shell {
     }
 
     // --- comandos largos ----------------------------------------------------------------------
+
+    /// `sudo`: ejecuta como root (ADR 0020). La contraseña se pidió antes de correr la línea
+    /// ([`super::Shell::run`]); adentro de un script, si no hay una reciente, falla.
+    fn sudo<D: BlockDevice>(
+        &mut self,
+        argv: &[String],
+        stdin: Option<&str>,
+        o: &mut String,
+        e: &mut String,
+        ctx: &mut Ctx<'_, D>,
+        out: &mut Out,
+    ) -> Res {
+        let mut args = &argv[1..];
+        let user = self.user().to_string();
+        match args.first().map(String::as_str) {
+            None | Some("-h" | "--help") => {
+                e.push_str("uso: sudo [-k | -v | -l | -i | -s] [-u usuario] comando\n");
+                return Res::Code(1);
+            }
+            Some("-k" | "-K") => {
+                self.sudo_reset();
+                if args.len() == 1 {
+                    return Res::Code(0);
+                }
+                args = &args[1..];
+            }
+            _ => {}
+        }
+        if !self.sudo_ok(ctx) {
+            e.push_str("sudo: hace falta la contraseña (escribí la orden en la terminal o corré «sudo -v»)\n");
+            return Res::Code(1);
+        }
+        match args.first().map(String::as_str) {
+            Some("-v") => return Res::Code(0),
+            Some("-l") => {
+                let host = self.host().to_string();
+                o.push_str(&format!(
+                    "El usuario {user} puede ejecutar los siguientes comandos en {host}:\n    (ALL : ALL) ALL\n"
+                ));
+                return Res::Code(0);
+            }
+            Some("-i" | "-s" | "su")
+                if args.len() == 1 || args.get(1).is_some_and(|a| a == "-") =>
+            {
+                self.base_uid = crate::perms::ROOT;
+                self.euid = crate::perms::ROOT;
+                ctx.log.push("SU_ROOT".into());
+                return Res::Code(0);
+            }
+            Some("-u") => {
+                let who = args.get(1).cloned().unwrap_or_default();
+                let uid = Self::perms(ctx).uid_of(&who);
+                match uid {
+                    Some(crate::perms::ROOT) => args = &args[2..],
+                    Some(crate::perms::USER) => {
+                        // Como uno mismo: no cambia nada.
+                        if args.len() <= 2 {
+                            return Res::Code(0);
+                        }
+                        return self.exec(&args[2..], stdin, o, e, ctx, out);
+                    }
+                    _ => {
+                        e.push_str(&format!("sudo: usuario desconocido: {who}\n"));
+                        return Res::Code(1);
+                    }
+                }
+            }
+            _ => {}
+        }
+        if args.is_empty() {
+            e.push_str("sudo: decime qué ejecutar\n");
+            return Res::Code(1);
+        }
+        ctx.log.push(format!("SUDO {}", args.join(" ")));
+        let saved = self.euid;
+        self.euid = crate::perms::ROOT;
+        let r = self.exec(args, stdin, o, e, ctx, out);
+        self.euid = saved;
+        r
+    }
+
+    /// `chmod [-R] MODO ARCHIVO...`: el dueño o root.
+    fn chmod<D: BlockDevice>(
+        &mut self,
+        argv: &[String],
+        ctx: &mut Ctx<'_, D>,
+        e: &mut String,
+    ) -> i32 {
+        let mut recursive = false;
+        let mut rest: Vec<&String> = Vec::new();
+        for a in &argv[1..] {
+            match a.as_str() {
+                "-R" | "--recursive" => recursive = true,
+                "-v" | "-c" | "-f" => {}
+                // `-x` o `-w` son modos, no opciones.
+                _ => rest.push(a),
+            }
+        }
+        let Some((spec, files)) = rest.split_first() else {
+            e.push_str("chmod: falta el modo. Ejemplo: chmod +x script.sh\n");
+            return 1;
+        };
+        if files.is_empty() {
+            e.push_str(&format!("chmod: falta el archivo después de «{spec}»\n"));
+            return 1;
+        }
+        let now = ctx.timestamp();
+        let uid = self.euid;
+        let umask = self.umask;
+        let mut targets = Vec::new();
+        {
+            let Some(fs) = Self::fs(ctx, e) else { return 1 };
+            for f in files {
+                let p = self.abs(f);
+                match fs.stat(&p) {
+                    Ok(st) => {
+                        targets.push((p.clone(), st.is_dir, (*f).clone()));
+                        if recursive && st.is_dir {
+                            collect_tree(fs, &p, &mut targets);
+                        }
+                    }
+                    Err(_) if p == "/" => targets.push((p, true, (*f).clone())),
+                    Err(err) => e.push_str(&format!("chmod: «{f}»: {err}\n")),
+                }
+            }
+        }
+        let perms = Self::perms(ctx);
+        let mut changed = false;
+        for (p, is_dir, shown) in &targets {
+            let cur = perms.get(p, *is_dir);
+            if uid != crate::perms::ROOT && cur.uid != uid {
+                e.push_str(&format!(
+                    "chmod: cambiando los permisos de «{shown}»: Operación no permitida\n"
+                ));
+                continue;
+            }
+            match crate::perms::apply_mode(spec, cur.mode, *is_dir, umask) {
+                Ok(m) => {
+                    perms.set_mode(p, *is_dir, m);
+                    changed = true;
+                }
+                Err(msg) => {
+                    e.push_str(&format!("chmod: {msg}\n"));
+                    return 1;
+                }
+            }
+        }
+        if changed {
+            self.save_perms(ctx, now, e);
+        }
+        i32::from(!e.is_empty())
+    }
+
+    /// `chown [-R] DUEÑO[:GRUPO] ARCHIVO...` y `chgrp [-R] GRUPO ARCHIVO...`.
+    fn chown<D: BlockDevice>(
+        &mut self,
+        name: &str,
+        argv: &[String],
+        ctx: &mut Ctx<'_, D>,
+        e: &mut String,
+    ) -> i32 {
+        let (flags, rest) = opts(argv);
+        let recursive = flags.contains(&'R');
+        let Some((spec, files)) = rest.split_first() else {
+            e.push_str(&format!(
+                "{name}: falta el dueño. Ejemplo: sudo chown roman:roman archivo\n"
+            ));
+            return 1;
+        };
+        if files.is_empty() {
+            e.push_str(&format!("{name}: falta el archivo después de «{spec}»\n"));
+            return 1;
+        }
+        let (user_s, group_s) = if name == "chgrp" {
+            ("", spec.as_str())
+        } else {
+            match spec.split_once([':', '.']) {
+                Some((u, g)) => (u, g),
+                None => (spec.as_str(), ""),
+            }
+        };
+        let (new_uid, new_gid) = {
+            let p = Self::perms(ctx);
+            let uid = if user_s.is_empty() {
+                None
+            } else {
+                match p.uid_of(user_s) {
+                    Some(u) => Some(u),
+                    None => {
+                        e.push_str(&format!("{name}: usuario inválido: «{user_s}»\n"));
+                        return 1;
+                    }
+                }
+            };
+            let gid = if group_s.is_empty() {
+                // `chown roman:` = el grupo del usuario.
+                spec.ends_with(':')
+                    .then_some(uid.unwrap_or(crate::perms::USER))
+            } else {
+                match p.gid_of(group_s) {
+                    Some(g) => Some(g),
+                    None => {
+                        e.push_str(&format!("{name}: grupo inválido: «{group_s}»\n"));
+                        return 1;
+                    }
+                }
+            };
+            (uid, gid)
+        };
+        let now = ctx.timestamp();
+        let me = self.euid;
+        let mut targets = Vec::new();
+        {
+            let Some(fs) = Self::fs(ctx, e) else { return 1 };
+            for f in files {
+                let p = self.abs(f);
+                match fs.stat(&p) {
+                    Ok(st) => {
+                        targets.push((p.clone(), st.is_dir, f.clone()));
+                        if recursive && st.is_dir {
+                            collect_tree(fs, &p, &mut targets);
+                        }
+                    }
+                    Err(err) => e.push_str(&format!("{name}: «{f}»: {err}\n")),
+                }
+            }
+        }
+        let perms = Self::perms(ctx);
+        let mut changed = false;
+        for (p, is_dir, shown) in &targets {
+            let mut cur = perms.get(p, *is_dir);
+            // Solo root cambia el dueño; el dueño puede pasar el archivo a uno de sus grupos.
+            let allowed = me == crate::perms::ROOT
+                || (cur.uid == me
+                    && new_uid.is_none_or(|u| u == me)
+                    && new_gid.is_none_or(|g| crate::perms::groups(me).contains(&g)));
+            if !allowed {
+                e.push_str(&format!(
+                    "{name}: cambiando el dueño de «{shown}»: Operación no permitida\n"
+                ));
+                continue;
+            }
+            if let Some(u) = new_uid {
+                cur.uid = u;
+            }
+            if let Some(g) = new_gid {
+                cur.gid = g;
+            }
+            perms.set(p, *is_dir, cur);
+            changed = true;
+        }
+        if changed {
+            self.save_perms(ctx, now, e);
+        }
+        i32::from(!e.is_empty())
+    }
+
+    fn save_perms<D: BlockDevice>(
+        &self,
+        ctx: &mut Ctx<'_, D>,
+        now: jarvis_fs::Timestamp,
+        e: &mut String,
+    ) {
+        if let Some(fs) = ctx.fs.as_deref_mut()
+            && let Err(err) = ctx.perms.save(fs, now)
+        {
+            e.push_str(&format!("no se pudieron guardar los permisos: {err}\n"));
+        }
+    }
+
+    /// Lo que fue a la Papelera ya no tiene permisos propios.
+    fn forget_perms<D: BlockDevice>(&self, ctx: &mut Ctx<'_, D>, gone: &[String]) {
+        if gone.is_empty() || ctx.perms.is_empty() {
+            return;
+        }
+        for g in gone {
+            ctx.perms.removed(g);
+        }
+        let now = ctx.timestamp();
+        let mut ignore = String::new();
+        self.save_perms(ctx, now, &mut ignore);
+    }
 
     fn cd<D: BlockDevice>(
         &mut self,
@@ -1465,10 +1977,18 @@ impl Shell {
             o.push('\n');
             return 0;
         }
-        let Some(fs) = Self::fs(ctx, e) else { return 1 };
+        Self::perms(ctx);
+        let Some(fs) = ctx.fs.as_deref_mut() else {
+            e.push_str(
+                "no hay disco
+",
+            );
+            return 1;
+        };
         for (i, p) in paths.iter().enumerate() {
             let abs = self.abs(p);
             let st = if abs == "/" { None } else { fs.stat(&abs).ok() };
+            let single_file = matches!(&st, Some(s) if !s.is_dir);
             let entries: Vec<DirEntry> = match st {
                 Some(s) if !s.is_dir => alloc::vec![DirEntry {
                     name: p.clone(),
@@ -1493,7 +2013,16 @@ impl Shell {
                 .filter(|e| all || (!e.name.starts_with('.') && !e.hidden))
                 .collect();
             entries.sort_by_key(|e| e.name.to_lowercase());
-            let is_exec = |e: &DirEntry| abs == BIN || e.name.ends_with(".sh");
+            let perms = &*ctx.perms;
+            let abs_ref = &abs;
+            let full = move |en: &DirEntry| {
+                if single_file {
+                    abs_ref.clone()
+                } else {
+                    child(abs_ref, &en.name)
+                }
+            };
+            let is_exec = |e: &DirEntry| !e.is_dir && perms.get(&full(e), false).mode & 0o111 != 0;
             let color = |e: &DirEntry| -> (&str, &str) {
                 if !tty {
                     ("", "")
@@ -1510,22 +2039,19 @@ impl Shell {
             if long {
                 let total: u64 = entries.iter().map(|e| e.size as u64).sum();
                 o.push_str(&format!("total {}\n", human(total, human_sizes)));
-                let user = self.user().to_string();
                 for en in &entries {
                     let (c0, c1) = color(en);
-                    let perms = if en.is_dir {
-                        "drwxr-xr-x"
-                    } else if is_exec(en) {
-                        "-rwxr-xr-x"
-                    } else if en.read_only {
-                        "-r--r--r--"
-                    } else {
-                        "-rw-r--r--"
-                    };
+                    let pe = perms.get(&full(en), en.is_dir);
+                    let mut mode = pe.mode;
+                    if en.read_only {
+                        mode &= !0o222;
+                    }
+                    let bits = crate::perms::format_mode(en.is_dir, mode);
+                    let (user, group) = (perms.user_name(pe.uid), perms.group_name(pe.gid));
                     let m = en.modified;
                     let size = if en.is_dir { 4096 } else { en.size as u64 };
                     o.push_str(&format!(
-                        "{perms} 1 {user} {user} {:>8} {} {:>2} {:02}:{:02} {c0}{}{c1}\n",
+                        "{bits} 1 {user:<5} {group:<5} {:>8} {} {:>2} {:02}:{:02} {c0}{}{c1}\n",
                         human(size, human_sizes),
                         MONTHS[(m.month.clamp(1, 12) - 1) as usize],
                         m.day,
@@ -1727,7 +2253,14 @@ impl Shell {
             return 1;
         }
         let now = ctx.timestamp();
-        let Some(fs) = Self::fs(ctx, e) else { return 1 };
+        Self::perms(ctx);
+        let Some(fs) = ctx.fs.as_deref_mut() else {
+            e.push_str(
+                "no hay disco
+",
+            );
+            return 1;
+        };
         let (sources, dest) = paths.split_at(paths.len() - 1);
         let dest_abs = self.abs(&dest[0]);
         let dest_is_dir = dest_abs == "/" || fs.stat(&dest_abs).is_ok_and(|s| s.is_dir);
@@ -1735,6 +2268,8 @@ impl Shell {
             e.push_str(&format!("{name}: {}: no es una carpeta\n", dest[0]));
             return 1;
         }
+        let uid = self.euid;
+        let mut moved = Vec::new();
         for s in sources {
             let src = self.abs(s);
             let st = match fs.stat(&src) {
@@ -1749,6 +2284,31 @@ impl Shell {
             } else {
                 dest_abs.clone()
             };
+            {
+                use crate::perms::Access;
+                let p = &*ctx.perms;
+                let dir_ok = |path: &str| {
+                    let d = parent(path);
+                    p.allowed(uid, &d, true, Access::Write)
+                };
+                let target_ok = if fs.exists(&target) && !st.is_dir {
+                    p.allowed(uid, &target, false, Access::Write) && dir_ok(&target)
+                } else {
+                    dir_ok(&target)
+                };
+                let src_ok = if name == "mv" {
+                    dir_ok(&src)
+                } else {
+                    p.allowed(uid, &src, st.is_dir, Access::Read)
+                };
+                if !target_ok || !src_ok {
+                    e.push_str(&format!("{name}: {s}: Permiso denegado\n"));
+                    continue;
+                }
+            }
+            if name == "mv" {
+                moved.push((src.clone(), target.clone()));
+            }
             if target.eq_ignore_ascii_case(&src) {
                 e.push_str(&format!("{name}: {s} y {} son el mismo archivo\n", dest[0]));
                 continue;
@@ -1782,7 +2342,18 @@ impl Shell {
             };
             if let Err(err) = result {
                 e.push_str(&format!("{name}: {s}: {err}\n"));
+                if name == "mv" {
+                    moved.pop();
+                }
             }
+        }
+        // Los permisos propios siguen a lo que se movió.
+        if !moved.is_empty() && !ctx.perms.is_empty() {
+            for (from, to) in &moved {
+                ctx.perms.renamed(from, to);
+            }
+            let mut ignore = String::new();
+            self.save_perms(ctx, now, &mut ignore);
         }
         i32::from(!e.is_empty())
     }
@@ -1992,6 +2563,12 @@ impl Shell {
             });
         }
         let save = save.map(|s| self.abs(&s));
+        if let Some(path) = &save
+            && self.denied_write(ctx, path)
+        {
+            e.push_str(&format!("{name}: {path}: Permiso denegado\n"));
+            return Res::Code(1);
+        }
         if name == "wget" {
             e.push_str(&format!(
                 "--{}--  {}\nResolviendo {}... conectando... Petición HTTP enviada, esperando respuesta...\n",
@@ -2042,11 +2619,23 @@ impl Shell {
                 return Res::Code(126);
             }
         };
-        if binfmt::runnable(&data) {
+        if binfmt::runnable(&data) && !self.denied(ctx, &path, crate::perms::Access::Exec) {
             return self.spawn_program(argv, &path, stdin, ctx, e);
         }
         if binfmt::windows_runnable(&data) {
             return self.run_windows(argv, &path, stdin, ctx, e);
+        }
+        // Linux pide el permiso de ejecución (`chmod +x`) para un programa o un script.
+        let program = binfmt::runnable(&data)
+            || matches!(
+                binfmt::detect(&data),
+                binfmt::Kind::Script | binfmt::Kind::Text
+            );
+        if program && self.denied(ctx, &path, crate::perms::Access::Exec) {
+            e.push_str(&format!(
+                "jsh: {name}: Permiso denegado (falta el permiso de ejecución: chmod +x {name})\n"
+            ));
+            return Res::Code(126);
         }
         if let Some(why) = binfmt::why_not(&data) {
             e.push_str(&why);
@@ -2162,7 +2751,7 @@ impl Shell {
                     if found.is_none() {
                         e.push_str(&format!(
                             "{}: usa bibliotecas dinámicas y falta su intérprete ({want}).\n\
-                             Instalá glibc con: apt install libc6\n",
+                             Instalá glibc con: sudo apt install libc6\n",
                             argv[0]
                         ));
                         return Res::Code(127);
@@ -2188,6 +2777,7 @@ impl Shell {
             envp,
             cwd: self.cwd.clone(),
             size: (24, self.cols.min(u16::MAX as usize) as u16),
+            uid: self.euid,
         });
         ctx.log.push(format!("TERMINAL_PROGRAMA {pid} {path}"));
         // Con una entrada de una tubería (`echo hola | programa`), esa es toda su entrada.
@@ -2223,6 +2813,30 @@ impl Shell {
             }
         }
         None
+    }
+}
+
+/// Todo lo que hay adentro de `dir` (para `chmod -R`, `chown -R`): (ruta, es carpeta, nombre).
+fn collect_tree<D: BlockDevice>(
+    fs: &mut FileSystem<D>,
+    dir: &str,
+    out: &mut Vec<(String, bool, String)>,
+) {
+    let mut stack = alloc::vec![dir.to_string()];
+    while let Some(d) = stack.pop() {
+        for en in fs.list(&d).unwrap_or_default() {
+            if en.name == "." || en.name == ".." {
+                continue;
+            }
+            let p = child(&d, &en.name);
+            if en.is_dir {
+                stack.push(p.clone());
+            }
+            out.push((p.clone(), en.is_dir, p));
+            if out.len() > 100_000 {
+                return;
+            }
+        }
     }
 }
 

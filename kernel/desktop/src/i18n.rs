@@ -487,6 +487,10 @@ static EN: &[(&str, &str)] = &[
         "That value won't work (user and computer: letters, digits and dashes; PIN: digits only).",
     ),
     ("Español (Latinoamérica)", "Spanish (Latin America)"),
+    (
+        "Esta carpeta es del sistema: para cambiarla usá sudo en la Terminal.",
+        "This is a system folder: to change it, use sudo in the Terminal.",
+    ),
     ("Estado", "Status"),
     ("Estado de la cuenta", "Account status"),
     ("Extender", "Extend"),
@@ -1590,6 +1594,10 @@ static PT: &[(&str, &str)] = &[
         "Esse valor não serve (usuário e computador: letras, números e hifens; PIN: só números).",
     ),
     ("Español (Latinoamérica)", "Espanhol (América Latina)"),
+    (
+        "Esta carpeta es del sistema: para cambiarla usá sudo en la Terminal.",
+        "Esta pasta é do sistema: para alterá-la, use sudo no Terminal.",
+    ),
     ("Estado", "Status"),
     ("Estado de la cuenta", "Estado da conta"),
     ("Extender", "Estender"),

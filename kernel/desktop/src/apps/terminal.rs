@@ -383,6 +383,17 @@ impl Terminal {
                     }
                     return true;
                 }
+                Key::Char('c' | 'C') if self.shell.wants_password() => {
+                    self.shell.cancel_password();
+                    self.input.clear();
+                    self.cursor = 0;
+                    self.write(
+                        "^C
+",
+                    );
+                    ctx.log.push(format!("TERMINAL_FIN {}", self.shell.status));
+                    return true;
+                }
                 Key::Char('c' | 'C') => {
                     if self.shell.cancel() {
                         self.write("^C\n");
@@ -437,6 +448,27 @@ impl Terminal {
                     }
                 }
                 _ => return false,
+            }
+            return true;
+        }
+        if self.shell.wants_password() {
+            // `sudo`, `su`, `passwd`: lo que se tipea no se muestra (ni con asteriscos).
+            match key {
+                Key::Enter => {
+                    let typed: String = self.input.drain(..).collect();
+                    self.cursor = 0;
+                    let out = self.shell.password(&typed, ctx);
+                    self.after(out, ctx);
+                }
+                Key::Char(c) => {
+                    self.input.push(c);
+                    self.cursor = self.input.len();
+                }
+                Key::Backspace => {
+                    self.input.pop();
+                    self.cursor = self.input.len();
+                }
+                _ => {}
             }
             return true;
         }
@@ -546,7 +578,11 @@ impl Terminal {
         let mut all: Vec<Line> = self.lines.clone();
         let mut last = self.partial.clone();
         let mut cursor = None;
-        if self.shell.process_pid().is_some() {
+        if self.shell.wants_password() {
+            // Una contraseña: el cursor queda después del pedido y no se ve lo que se tipea.
+            let start: usize = self.partial.iter().map(|(_, t)| t.chars().count()).sum();
+            cursor = Some(start);
+        } else if self.shell.process_pid().is_some() {
             // Lo que se va tipeando para el programa (sin prompt).
             let start: usize = self.partial.iter().map(|(_, t)| t.chars().count()).sum();
             last.push((Sgr::default(), self.input_string()));

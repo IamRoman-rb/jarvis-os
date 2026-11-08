@@ -293,13 +293,30 @@ roman@jarvis:~$ apt update && apt install neofetch && neofetch
 - **Programas propios**: un archivo en `/Programas/bin` con comandos (uno por línea) es un
   programa: `nano /Programas/bin/saludo`, escribí `echo Hola, $1` y después `saludo Roman`.
 
+### Usuarios, `sudo` y permisos (ADR 0020)
+
+```
+roman@jarvis:~$ sudo apt install neofetch      # pide la contraseña (la del asistente) y la recuerda 15 min
+roman@jarvis:~$ chmod +x script.sh && ./script.sh
+roman@jarvis:~$ sudo chown root:sudo archivo · ls -l · stat archivo · id · groups
+roman@jarvis:~$ su            # terminal de root (prompt con #) hasta exit
+roman@jarvis:~$ passwd        # cambia la contraseña
+```
+
+Hay dos usuarios: `root` y el del asistente (uid 1000, grupos propio y `sudo`). FAT32 no guarda
+permisos: van aparte, en `/Sistema/permisos.db`, solo lo que difiere del valor por defecto (las
+carpetas del sistema —`/Sistema`, `/Programas`, `/snap`, `/usr`…— son de root; el resto, del
+usuario). `apt`, `snap`, `winget` y los cambios de `ufw` piden `sudo`, con los mensajes de
+Debian. Los programas de Linux corren con el uid de quien los lanzó y ven modos y dueños reales
+(`stat`, `access`, `chmod`, `chown`, `umask`). Un `.exe` no necesita el bit `x`.
+
 ### Paquetes: `apt`
 
 | Orden | Qué hace |
 |---|---|
 | `apt update` | baja la lista de paquetes del repositorio |
 | `apt list` (`--installed`, `--upgradable`) · `apt search x` · `apt show x` | ver qué hay |
-| `apt install x y` | instala (con dependencias) |
+| `sudo apt install x y` | instala (con dependencias) |
 | `apt remove x` | desinstala: los archivos van a la Papelera |
 | `apt upgrade` | actualiza lo instalado |
 

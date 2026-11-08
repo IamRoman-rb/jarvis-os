@@ -67,6 +67,8 @@ pub struct Ctx<'a, D: BlockDevice> {
     pub audio: &'a mut crate::sound::Sound,
     /// El antivirus: las apps le pasan lo que guardan y lo que van a ejecutar.
     pub antivirus: &'a mut crate::antivirus::Antivirus,
+    /// Dueños y permisos de los archivos (ADR 0020).
+    pub perms: &'a mut crate::perms::Perms,
 }
 
 impl<D: BlockDevice> Ctx<'_, D> {

@@ -179,6 +179,10 @@ fn fatfs_exists_in(t: &mut Driver, path: &str) -> bool {
     t.d.fs_mut().is_some_and(|fs| fs.stat(path).is_ok())
 }
 
+fn fatfs_read_in(t: &mut Driver, path: &str) -> Option<Vec<u8>> {
+    t.d.fs_mut().and_then(|fs| fs.read_file(path).ok())
+}
+
 /// Un ELF de Linux x86-64 mínimo (estático, o dinámico si se le da un intérprete).
 fn tiny_elf(interp: Option<&str>) -> Vec<u8> {
     let mut b = vec![0u8; 0x200];
@@ -371,6 +375,8 @@ fn el_antivirus_bloquea_lo_infectado_y_lo_pone_en_cuarentena() {
             jarvis_fs::Timestamp::EPOCH,
         )
         .unwrap();
+    // Linux pide el permiso de ejecución antes de correrlo (ADR 0020).
+    run(&mut t, "chmod +x /Documentos/marcado");
     let out = run(&mut t, "/Documentos/marcado");
     assert!(out.contains("el antivirus lo bloqueó"), "{out}");
     assert!(t.d.take_requests().spawn.is_empty());
@@ -407,7 +413,7 @@ fn apt_instala_programas_de_debian() {
     open_terminal(&mut t);
     // No está en el repositorio de JARVIS-OS: se busca en Debian (la primera vez baja el
     // índice), con sus dependencias; debconf se saltea.
-    let out = run(&mut t, "apt install hola-deb");
+    let out = run(&mut t, "sudo apt install hola-deb");
     assert!(out.contains("paquetes de Debian disponibles"), "{out}");
     assert!(
         out.contains(
@@ -432,7 +438,7 @@ fn apt_instala_programas_de_debian() {
     assert!(run(&mut t, "apt show hola-deb").contains("deb.debian.org"));
     assert!(run(&mut t, "apt search hola").contains("hola-deb/debian"));
     // Ya instalado: la segunda vez no baja nada.
-    assert!(run(&mut t, "apt install hola-deb").contains("ya está instalado"));
+    assert!(run(&mut t, "sudo apt install hola-deb").contains("ya está instalado"));
     // Está en el PATH (/usr/bin): se ejecuta como cualquier programa de Linux.
     t.type_text("hola");
     t.key(Key::Enter);
@@ -445,7 +451,7 @@ fn apt_instala_programas_de_debian() {
         why: None,
     });
     // Se desinstala como los demás: a la Papelera.
-    assert!(run(&mut t, "apt remove hola-deb").contains("Papelera"));
+    assert!(run(&mut t, "sudo apt remove hola-deb").contains("Papelera"));
     assert!(!existe(&mut t, "/usr/bin/hola-deb"));
 }
 
@@ -453,7 +459,7 @@ fn apt_instala_programas_de_debian() {
 fn apt_instala_programas_del_repositorio_y_los_desinstala() {
     let mut t = Driver::new();
     open_terminal(&mut t);
-    let out = run(&mut t, "apt install esenciales");
+    let out = run(&mut t, "sudo apt install esenciales");
     assert!(
         out.contains("Se instalarán los siguientes paquetes NUEVOS"),
         "{out}"
@@ -474,10 +480,14 @@ fn apt_instala_programas_del_repositorio_y_los_desinstala() {
         "{cow}"
     );
     assert!(run(&mut t, "apt list --installed").contains("fortune"));
-    assert!(run(&mut t, "apt install neofetch").contains("ya está en su versión más reciente"));
-    assert!(run(&mut t, "apt install no-existe").contains("No se ha podido localizar el paquete"));
+    assert!(
+        run(&mut t, "sudo apt install neofetch").contains("ya está en su versión más reciente")
+    );
+    assert!(
+        run(&mut t, "sudo apt install no-existe").contains("No se ha podido localizar el paquete")
+    );
     // Desinstalar: el programa va a la Papelera y ya no se encuentra.
-    assert!(run(&mut t, "apt remove calc").contains("Papelera"));
+    assert!(run(&mut t, "sudo apt remove calc").contains("Papelera"));
     let out = run(&mut t, "calc 1 + 1");
     assert!(out.contains("no se encontró la orden"), "{out}");
     assert!(
@@ -505,7 +515,7 @@ fn los_programas_de_windows_corren_con_vino() {
     assert!(t.d.take_requests().spawn.is_empty());
     assert!(fatfs_exists_in(&mut t, "/Documentos/programa.exe"));
 
-    assert!(run(&mut t, "apt install vino programas-windows").contains("Listo"));
+    assert!(run(&mut t, "sudo apt install vino programas-windows").contains("Listo"));
     assert!(fatfs_exists_in(&mut t, "/Programas/bin/vino"));
     assert!(fatfs_exists_in(&mut t, "/Programas/windows/hola-win.exe"));
     // `./programa.exe uno` → `vino /Documentos/programa.exe uno`.
@@ -568,7 +578,7 @@ fn ufw_bloquea_conexiones_y_lo_anota() {
     open_terminal(&mut t);
     let out = run(
         &mut t,
-        "sudo ufw deny out to example.com && ufw deny out port 8080 app apt && ufw status numbered",
+        "sudo ufw deny out to example.com && sudo ufw deny out port 8080 app apt && ufw status numbered",
     );
     assert!(out.contains("Estado: activo"), "{out}");
     assert!(out.contains("[ 1] example.com"), "{out}");
@@ -587,13 +597,13 @@ fn ufw_bloquea_conexiones_y_lo_anota() {
         "{out}"
     );
     // Las reglas quedan en la configuración del disco.
-    let out = run(&mut t, "grep firewall_regla /Sistema/config.ini");
+    let out = run(&mut t, "sudo grep firewall_regla /Sistema/config.ini");
     assert!(out.contains("denegar salida a example.com"), "{out}");
     // apt usa otro sitio: sigue andando.
-    let out = run(&mut t, "apt install hola");
+    let out = run(&mut t, "sudo apt install hola");
     assert!(out.contains("hola"), "{out}");
     // Borrar la regla vuelve a dejar pasar.
-    run(&mut t, "ufw delete 1");
+    run(&mut t, "sudo ufw delete 1");
     let out = run(&mut t, "ufw status");
     assert!(!out.contains("example.com"), "{out}");
     assert!(run(&mut t, "ufw bailar").contains("ERROR"));
@@ -622,19 +632,19 @@ fn snap_instala_actualiza_de_canal_y_vuelve_atras() {
         "{out}"
     );
     // Al canal beta: queda la revisión vieja en el disco.
-    let out = run(&mut t, "snap refresh saludo --beta");
+    let out = run(&mut t, "sudo snap refresh saludo --beta");
     assert!(out.contains("actualizado (revisión 5)"), "{out}");
     assert!(run(&mut t, "saludo").contains("(beta)"));
-    let out = run(&mut t, "snap revert saludo");
+    let out = run(&mut t, "sudo snap revert saludo");
     assert!(out.contains("revisión 3"), "{out}");
     assert!(!run(&mut t, "saludo").contains("(beta)"));
     // Uno de Linux (de Snapcraft) no se puede instalar: se explica por qué.
-    let out = run(&mut t, "snap install vlc");
+    let out = run(&mut t, "sudo snap install vlc");
     assert!(
         out.contains("snap de Linux") && out.contains("snap download vlc"),
         "{out}"
     );
-    let out = run(&mut t, "snap remove saludo && ls /snap/bin");
+    let out = run(&mut t, "sudo snap remove saludo && ls /snap/bin");
     assert!(out.contains("desinstalado"), "{out}");
     assert!(
         t.logs()
@@ -652,7 +662,7 @@ fn winget_baja_instaladores_de_windows_del_repositorio_oficial() {
     let out = run(&mut t, "winget search zip");
     assert!(out.contains("7zip.7zip"), "{out}");
     // En minúsculas también (se corrige con la lista conocida).
-    let out = run(&mut t, "winget install 7ZIP.7zip");
+    let out = run(&mut t, "sudo winget install 7ZIP.7zip");
     assert!(out.contains("Encontrado") && out.contains("7-Zip"), "{out}");
     assert!(
         out.contains("Versión: 24.08"),
@@ -717,7 +727,7 @@ fn programas_de_linux_en_la_terminal() {
 
     let mut t = Driver::new();
     open_terminal(&mut t);
-    let out = run(&mut t, "apt install programas-linux js");
+    let out = run(&mut t, "sudo apt install programas-linux js");
     assert!(out.contains("Listo"), "{out}");
     assert!(fatfs_exists_in(&mut t, "/Programas/bin/js"));
     assert!(run(&mut t, "file /Programas/bin/eco").contains("enlazado estáticamente"));
@@ -812,6 +822,7 @@ fn programas_de_linux_en_la_terminal() {
             jarvis_fs::Timestamp::EPOCH,
         )
         .unwrap();
+    run(&mut t, "chmod +x /Documentos/dinamico");
     // Sin su intérprete en el disco: se dice qué instalar y no se lanza.
     let out = run(&mut t, "/Documentos/dinamico");
     assert!(out.contains("apt install libc6"), "{out}");
@@ -852,4 +863,110 @@ fn instalar_abre_la_configuracion_de_hardware() {
         panic!("no se abrió Configuración");
     };
     assert_eq!(s.section.name(), "Hardware");
+}
+
+/// ADR 0020: usuarios, `sudo` con contraseña, `su`, `chmod`, `chown` y permisos que se respetan.
+#[test]
+fn sudo_pide_la_contrasena_y_los_permisos_se_respetan() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    // Sin contraseña configurada, sudo anda directo (como NOPASSWD). Se define una con passwd.
+    let out = run(&mut t, "passwd");
+    assert!(out.contains("Nueva contraseña"), "{out}");
+    let out = run(&mut t, "clave1234");
+    assert!(out.contains("otra vez") || out.contains("Vuelva"), "{out}");
+    // Lo que se tipea no aparece en la pantalla.
+    assert!(!screen(&t).contains("clave1234"));
+    let out = run(&mut t, "clave1234");
+    assert!(out.contains("actualizada"), "{out}");
+    t.frame();
+
+    // apt sin sudo: el error de Debian.
+    let out = run(&mut t, "apt install hola");
+    assert!(out.contains("superusuario"), "{out}");
+    // Escribir en las carpetas del sistema: Permiso denegado.
+    let out = run(&mut t, "touch /Programas/x.txt");
+    assert!(out.contains("Permiso denegado"), "{out}");
+    let out = run(&mut t, "echo hola > /Sistema/prueba.txt");
+    assert!(out.contains("Permiso denegado"), "{out}");
+    let out = run(&mut t, "cat /Sistema/config.ini");
+    assert!(out.contains("Permiso denegado"), "{out}");
+
+    // sudo pide la contraseña: mal tres veces, se rinde.
+    let out = run(&mut t, "sudo touch /Programas/x.txt");
+    assert!(out.contains("[sudo] contraseña para roman"), "{out}");
+    assert!(run(&mut t, "mala").contains("probá otra vez"));
+    assert!(run(&mut t, "mala2").contains("probá otra vez"));
+    assert!(run(&mut t, "mala3").contains("3 intentos"));
+    assert!(!fatfs_exists_in(&mut t, "/Programas/x.txt"));
+    // Bien: corre como root, y no la vuelve a pedir enseguida.
+    run(&mut t, "sudo whoami");
+    let out = run(&mut t, "clave1234");
+    assert!(out.contains("root"), "{out}");
+    let out = run(
+        &mut t,
+        "sudo mkdir -p /Programas && sudo touch /Programas/x.txt && whoami",
+    );
+    assert!(!out.contains("contraseña"), "{out}");
+    assert!(out.contains("roman"), "{out}");
+    assert!(fatfs_exists_in(&mut t, "/Programas/x.txt"));
+    let out = run(&mut t, "ls -l /Programas");
+    assert!(out.contains("-rw-r--r-- 1 root  root"), "{out}");
+    assert!(run(&mut t, "sudo grep usuario /Sistema/config.ini").contains("usuario="));
+    // sudo -k olvida la contraseña.
+    run(&mut t, "sudo -k");
+    assert!(run(&mut t, "sudo -l").contains("[sudo] contraseña"));
+    assert!(run(&mut t, "clave1234").contains("(ALL : ALL) ALL"));
+
+    // chmod: un script sin x no se ejecuta; con +x, sí.
+    run(&mut t, "cd /Documentos");
+    run(&mut t, "echo 'echo hola desde el script' > saludo.sh");
+    let out = run(&mut t, "./saludo.sh");
+    assert!(out.contains("Permiso denegado"), "{out}");
+    assert!(run(&mut t, "sh saludo.sh").contains("hola desde el script"));
+    assert!(!run(&mut t, "chmod +x saludo.sh").contains("chmod:"));
+    assert!(run(&mut t, "ls -l saludo.sh").contains("-rwxr-xr-x"));
+    assert!(run(&mut t, "./saludo.sh").contains("hola desde el script"));
+    assert!(run(&mut t, "stat saludo.sh").contains("(0755/-rwxr-xr-x)"));
+    run(&mut t, "chmod 600 notas.txt");
+    assert!(run(&mut t, "ls -l notas.txt").contains("-rw-------"));
+    assert!(run(&mut t, "chmod u*x notas.txt").contains("modo inválido"));
+    // Los archivos de root solo los cambia root.
+    let out = run(&mut t, "chmod 777 /Programas/x.txt");
+    assert!(out.contains("Operación no permitida"), "{out}");
+    let out = run(&mut t, "chown root notas.txt");
+    assert!(out.contains("Operación no permitida"), "{out}");
+    run(&mut t, "sudo chown root:sudo notas.txt");
+    assert!(run(&mut t, "ls -l notas.txt").contains("root  sudo"));
+    // Mover lleva los permisos.
+    run(&mut t, "mv saludo.sh /Proyectos/");
+    assert!(run(&mut t, "ls -l /Proyectos/saludo.sh").contains("-rwxr-xr-x"));
+    // Quedan en el disco.
+    let db = fatfs_read_in(&mut t, "/Sistema/permisos.db").expect("permisos.db");
+    let db = String::from_utf8_lossy(&db);
+    assert!(db.contains("0755 1000 1000 /proyectos/saludo.sh"), "{db}");
+
+    // su: terminal de root hasta exit.
+    let out = run(&mut t, "su");
+    assert!(out.contains("Contraseña"), "{out}");
+    run(&mut t, "clave1234");
+    // El prompt pasa a ser el de root (con #).
+    assert!(run(&mut t, "whoami").contains(
+        "root@jarvis:/Documentos# whoami
+root"
+    ));
+    assert!(run(&mut t, "id").contains("uid=0(root)"));
+    run(&mut t, "exit");
+    assert!(run(&mut t, "id").contains("uid=1000(roman)"));
+    assert!(
+        t.d.app(AppKind::Terminal).is_some(),
+        "exit en root no cierra la terminal"
+    );
+
+    // Los programas de Linux corren como el usuario, o como root con sudo.
+    run(&mut t, "sudo apt install programas-linux");
+    t.type_text("sudo hola-linux");
+    t.key(Key::Enter);
+    let reqs = t.d.take_requests();
+    assert_eq!(reqs.spawn.last().map(|s| s.uid), Some(0));
 }

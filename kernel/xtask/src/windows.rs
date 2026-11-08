@@ -213,7 +213,7 @@ pub fn build_programs() -> Result<()> {
 
 /// Lo que se prueba en QEMU, con la Terminal ya abierta (lo usan `vino` y `test`).
 pub fn steps(s: &mut Session) -> Result<()> {
-    s.type_text("apt install vino programas-windows")?;
+    s.type_text("sudo apt install vino programas-windows")?;
     s.monitor("sendkey ret")?;
     s.wait_for("APT_INSTALADO programas-windows", STEP)?;
     s.wait_for("TERMINAL_FIN 0", STEP)?;
@@ -469,7 +469,7 @@ pub fn console(image: &Path, python: bool) -> Result<()> {
     s.monitor("sendkey ctrl-alt-t")?;
     s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
     thread::sleep(Duration::from_millis(500));
-    s.type_text("apt install vino programas-windows")?;
+    s.type_text("sudo apt install vino programas-windows")?;
     s.monitor("sendkey ret")?;
     s.wait_for("APT_INSTALADO programas-windows", STEP)?;
     println!("CONSOLA_LISTA: agregá renglones a {}", input.display());

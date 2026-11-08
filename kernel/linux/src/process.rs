@@ -84,6 +84,10 @@ pub struct Process {
     fds: Vec<Option<Fd>>,
     fs_base: u64,
     gs_base: u64,
+    /// Con qué usuario corre (1000; 0 si se lanzó con `sudo`). Lo pone quien lo lanza.
+    pub uid: u32,
+    /// La máscara de los archivos nuevos (`umask`).
+    umask: u32,
 }
 
 fn err(e: i64) -> Flow {
@@ -139,6 +143,8 @@ impl Process {
             fds: Vec::new(),
             fs_base: 0,
             gs_base: 0,
+            uid: abi::UID,
+            umask: 0o022,
         };
         p.load_segments(file, &program, sys)?;
         // Un programa dinámico arranca por su intérprete (`ld.so`), que carga las bibliotecas y
@@ -445,13 +451,11 @@ impl Process {
             }
             nr::ACCESS => {
                 let path = self.path_arg(abi::AT_FDCWD, a[0], sys)?;
-                self.stat_path(&path, sys)?;
-                ok(0)
+                self.access(&path, a[1] as u32, sys)
             }
             nr::FACCESSAT | nr::FACCESSAT2 => {
                 let path = self.path_arg(a[0] as i64, a[1], sys)?;
-                self.stat_path(&path, sys)?;
-                ok(0)
+                self.access(&path, a[2] as u32, sys)
             }
             nr::LSEEK => {
                 let h = self.get(a[0])?;
@@ -681,7 +685,35 @@ impl Process {
                 self.copy_out(buf, &exe[..n], sys)?;
                 ok(n as i64)
             }
-            nr::CHMOD | nr::UMASK => ok(0o022),
+            nr::UMASK => {
+                let old = self.umask;
+                self.umask = (a[0] as u32) & 0o777;
+                ok(i64::from(old))
+            }
+            nr::CHMOD => {
+                let path = self.path_arg(abi::AT_FDCWD, a[0], sys)?;
+                self.file_done(FileOp::Chmod(path, a[1] as u32 & 0o7777), sys)
+            }
+            nr::FCHMODAT => {
+                let path = self.path_arg(a[0] as i64, a[1], sys)?;
+                self.file_done(FileOp::Chmod(path, a[2] as u32 & 0o7777), sys)
+            }
+            nr::FCHMOD => {
+                let path = self.fd_path(a[0])?;
+                self.file_done(FileOp::Chmod(path, a[1] as u32 & 0o7777), sys)
+            }
+            nr::CHOWN | nr::LCHOWN => {
+                let path = self.path_arg(abi::AT_FDCWD, a[0], sys)?;
+                self.file_done(FileOp::Chown(path, a[1] as u32, a[2] as u32), sys)
+            }
+            nr::FCHOWNAT => {
+                let path = self.path_arg(a[0] as i64, a[1], sys)?;
+                self.file_done(FileOp::Chown(path, a[2] as u32, a[3] as u32), sys)
+            }
+            nr::FCHOWN => {
+                let path = self.fd_path(a[0])?;
+                self.file_done(FileOp::Chown(path, a[1] as u32, a[2] as u32), sys)
+            }
             // Memoria.
             nr::BRK => {
                 let mut pages = PagesOf(sys);
@@ -741,7 +773,7 @@ impl Process {
             // Identidad.
             nr::GETPID | nr::GETTID | nr::SET_TID_ADDRESS | nr::GETPGRP => ok(self.pid as i64),
             nr::GETPPID => ok(1),
-            nr::GETUID | nr::GETEUID | nr::GETGID | nr::GETEGID => ok(abi::UID as i64),
+            nr::GETUID | nr::GETEUID | nr::GETGID | nr::GETEGID => ok(i64::from(self.uid)),
             nr::SETPGID | nr::SETSID => ok(0),
             nr::UNAME => {
                 let mut u = vec![0u8; 65 * 6];
@@ -995,6 +1027,53 @@ impl Process {
             FileReply::Meta(_) => Err(ENOTDIR),
             FileReply::Error(e) => Err(e),
             _ => Err(EIO),
+        }
+    }
+
+    /// `access(path, modo)`: ¿existe y puede este usuario leer (4), escribir (2) o ejecutar (1)?
+    fn access(&mut self, path: &str, want: u32, sys: &mut dyn System) -> Result<Flow, i64> {
+        if device(path).is_some() {
+            return Ok(Flow::Return(0));
+        }
+        let m = match sys.file(FileOp::Stat(path.to_string())) {
+            FileReply::Meta(m) => m,
+            FileReply::Error(e) => return Err(e),
+            _ => return Err(EIO),
+        };
+        let want = want & 7;
+        let ok = if self.uid == 0 {
+            // root puede todo, salvo ejecutar un archivo sin ningún bit x.
+            want & 1 == 0 || m.is_dir || m.mode & 0o111 != 0
+        } else {
+            let shift = if self.uid == m.uid {
+                6
+            } else if self.uid == abi::UID && (m.gid == abi::UID || m.gid == 27) {
+                3
+            } else {
+                0
+            };
+            (m.mode >> shift) & want == want
+        };
+        if ok { Ok(Flow::Return(0)) } else { Err(EACCES) }
+    }
+
+    /// Un pedido de archivos que solo contesta "listo" o un error.
+    fn file_done(&mut self, op: FileOp, sys: &mut dyn System) -> Result<Flow, i64> {
+        match sys.file(op) {
+            FileReply::Done => Ok(Flow::Return(0)),
+            FileReply::Error(e) => Err(e),
+            _ => Err(EIO),
+        }
+    }
+
+    /// La ruta de un archivo abierto (para `fchmod`/`fchown`).
+    fn fd_path(&self, fd: u64) -> Result<String, i64> {
+        let h = self.get(fd)?;
+        let o = h.borrow();
+        match &o.node {
+            Node::File { path, .. } => Ok(path.clone()),
+            Node::Dir { path, .. } => Ok(path.clone()),
+            _ => Err(EINVAL),
         }
     }
 
@@ -1346,13 +1425,17 @@ fn rlimit(resource: u64) -> [u8; 16] {
 
 /// Un `struct stat` de x86_64 (144 bytes).
 fn stat_raw(mode: u32, size: u64, mtime: u64, rdev: u64) -> [u8; 144] {
+    stat_owned(mode, size, mtime, rdev, abi::UID, abi::UID)
+}
+
+fn stat_owned(mode: u32, size: u64, mtime: u64, rdev: u64, uid: u32, gid: u32) -> [u8; 144] {
     let mut s = [0u8; 144];
     s[0..8].copy_from_slice(&1u64.to_le_bytes()); // st_dev
     s[8..16].copy_from_slice(&1u64.to_le_bytes()); // st_ino
     s[16..24].copy_from_slice(&1u64.to_le_bytes()); // st_nlink
     s[24..28].copy_from_slice(&mode.to_le_bytes());
-    s[28..32].copy_from_slice(&abi::UID.to_le_bytes());
-    s[32..36].copy_from_slice(&abi::UID.to_le_bytes());
+    s[28..32].copy_from_slice(&uid.to_le_bytes());
+    s[32..36].copy_from_slice(&gid.to_le_bytes());
     s[40..48].copy_from_slice(&rdev.to_le_bytes());
     s[48..56].copy_from_slice(&size.to_le_bytes());
     s[56..64].copy_from_slice(&4096u64.to_le_bytes()); // st_blksize
@@ -1364,10 +1447,11 @@ fn stat_raw(mode: u32, size: u64, mtime: u64, rdev: u64) -> [u8; 144] {
 }
 
 fn stat_meta(m: Meta) -> [u8; 144] {
+    let perm = m.mode & 0o7777;
     if m.is_dir {
-        stat_raw(abi::S_IFDIR | 0o755, 4096, m.mtime, 0)
+        stat_owned(abi::S_IFDIR | perm, 4096, m.mtime, 0, m.uid, m.gid)
     } else {
-        stat_raw(abi::S_IFREG | 0o644, m.size, m.mtime, 0)
+        stat_owned(abi::S_IFREG | perm, m.size, m.mtime, 0, m.uid, m.gid)
     }
 }
 

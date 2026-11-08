@@ -17,6 +17,8 @@ struct Fake {
     pages: BTreeMap<u64, (Vec<u8>, u32)>,
     files: BTreeMap<String, Vec<u8>>,
     dirs: Vec<String>,
+    /// Modo y dueño de lo que se cambió con chmod/chown (lo demás: 0644/0755 de 1000).
+    modes: BTreeMap<String, (u32, u32, u32)>,
     trash: Vec<String>,
     out: Vec<u8>,
     input: Vec<Vec<u8>>,
@@ -98,17 +100,29 @@ impl System for Fake {
     fn file(&mut self, op: FileOp) -> FileReply {
         match op {
             FileOp::Stat(p) => {
-                if self.dirs.contains(&p) {
+                let is_dir = self.dirs.contains(&p);
+                let (mode, uid, gid) = self.modes.get(&p).copied().unwrap_or((
+                    if is_dir { 0o755 } else { 0o644 },
+                    1000,
+                    1000,
+                ));
+                if is_dir {
                     FileReply::Meta(Meta {
                         is_dir: true,
                         size: 0,
                         mtime: 7,
+                        mode,
+                        uid,
+                        gid,
                     })
                 } else if let Some(d) = self.files.get(&p) {
                     FileReply::Meta(Meta {
                         is_dir: false,
                         size: d.len() as u64,
                         mtime: 7,
+                        mode,
+                        uid,
+                        gid,
                     })
                 } else {
                     FileReply::Error(ENOENT)
@@ -155,6 +169,27 @@ impl System for Fake {
                 }
                 None => FileReply::Error(ENOENT),
             },
+            FileOp::Chmod(p, mode) => {
+                if !self.files.contains_key(&p) && !self.dirs.contains(&p) {
+                    return FileReply::Error(ENOENT);
+                }
+                let e = self.modes.entry(p).or_insert((0o644, 1000, 1000));
+                e.0 = mode;
+                FileReply::Done
+            }
+            FileOp::Chown(p, uid, gid) => {
+                if !self.files.contains_key(&p) {
+                    return FileReply::Error(ENOENT);
+                }
+                let e = self.modes.entry(p).or_insert((0o644, 1000, 1000));
+                if uid != u32::MAX {
+                    e.1 = uid;
+                }
+                if gid != u32::MAX {
+                    e.2 = gid;
+                }
+                FileReply::Done
+            }
             FileOp::Rmdir(_) | FileOp::Rename(..) => FileReply::Error(EPERM),
         }
     }
@@ -568,4 +603,41 @@ fn un_programa_dinamico_arranca_por_su_interprete() {
     }
     assert!(aux.contains(&(7, INTERP_BASE)), "{aux:x?}");
     assert!(aux.contains(&(9, PIE_BASE + 0x1000)), "{aux:x?}");
+}
+
+#[test]
+fn permisos_chmod_chown_access_y_umask() {
+    let (mut sys, mut p) = start();
+    sys.files.insert("/a.sh".into(), b"echo".to_vec());
+    let a = cstr(&mut p, &mut sys, "/a.sh");
+    // access(X_OK) sin bit x: no; después de chmod 755, sí.
+    assert_eq!(call(&mut p, &mut sys, nr::ACCESS, &[a, 1]), -EACCES);
+    assert_eq!(call(&mut p, &mut sys, nr::ACCESS, &[a, 4 | 2]), 0);
+    assert_eq!(call(&mut p, &mut sys, nr::CHMOD, &[a, 0o755]), 0);
+    assert_eq!(call(&mut p, &mut sys, nr::ACCESS, &[a, 1]), 0);
+    // stat devuelve el modo y el dueño de verdad.
+    assert_eq!(
+        call(&mut p, &mut sys, nr::CHOWN, &[a, 0, u64::from(u32::MAX)]),
+        0
+    );
+    let st = buf(&mut p, &mut sys, &[0; 144]);
+    assert_eq!(call(&mut p, &mut sys, nr::STAT, &[a, st]), 0);
+    let raw = p.copy_in(st, 144, &mut sys).unwrap();
+    let mode = u32::from_le_bytes(raw[24..28].try_into().unwrap());
+    assert_eq!(mode & 0o7777, 0o755);
+    assert_eq!(u32::from_le_bytes(raw[28..32].try_into().unwrap()), 0);
+    // Ahora es de root con 755: el usuario no puede escribirlo; root sí.
+    assert_eq!(call(&mut p, &mut sys, nr::ACCESS, &[a, 2]), -EACCES);
+    p.uid = 0;
+    assert_eq!(call(&mut p, &mut sys, nr::ACCESS, &[a, 2]), 0);
+    assert_eq!(call(&mut p, &mut sys, nr::GETEUID, &[]), 0);
+    // fchmod sobre un descriptor abierto.
+    let fd = call(&mut p, &mut sys, nr::OPEN, &[a, 0]) as u64;
+    assert_eq!(call(&mut p, &mut sys, nr::FCHMOD, &[fd, 0o700]), 0);
+    assert_eq!(sys.modes["/a.sh"].0, 0o700);
+    // umask devuelve la anterior.
+    assert_eq!(call(&mut p, &mut sys, nr::UMASK, &[0o077]), 0o022);
+    assert_eq!(call(&mut p, &mut sys, nr::UMASK, &[0o022]), 0o077);
+    let nada = cstr(&mut p, &mut sys, "/no-existe");
+    assert_eq!(call(&mut p, &mut sys, nr::CHMOD, &[nada, 0o644]), -ENOENT);
 }

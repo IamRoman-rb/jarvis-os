@@ -423,6 +423,8 @@ pub struct Desktop<D: BlockDevice> {
     /// Los parlantes (K12): el mezclador.
     sound: crate::sound::Sound,
     antivirus: crate::antivirus::Antivirus,
+    /// Dueños y permisos de los archivos (ADR 0020).
+    perms: crate::perms::Perms,
 }
 
 /// Arma un `Ctx` con campos separados de `self` (así se puede usar junto con `self.slots`).
@@ -440,6 +442,7 @@ macro_rules! ctx {
             clipboard: &mut $s.clipboard,
             audio: &mut $s.sound,
             antivirus: &mut $s.antivirus,
+            perms: &mut $s.perms,
         }
     };
 }
@@ -576,6 +579,7 @@ impl<D: BlockDevice> Desktop<D> {
             procs: Default::default(),
             sound: Default::default(),
             antivirus: crate::antivirus::Antivirus::new(),
+            perms: crate::perms::Perms::new(),
             last_clock: None,
             sync: Default::default(),
             brain: Default::default(),
@@ -867,7 +871,8 @@ impl<D: BlockDevice> Desktop<D> {
         match ev {
             ProcEvent::File { pid, op } => {
                 let now = crate::apps::timestamp(clock);
-                self.procs.file(pid, op, self.fs.as_mut(), now);
+                self.procs
+                    .file(pid, op, self.fs.as_mut(), &mut self.perms, now);
                 return;
             }
             ProcEvent::ReadLine { pid, max } => {
@@ -2758,7 +2763,7 @@ impl<D: BlockDevice> Desktop<D> {
             for req in out.spawn {
                 self.logs
                     .push(format!("PROGRAMA_INICIO {} {}", req.pid, req.path));
-                self.procs.started(req.pid);
+                self.procs.started(req.pid, req.uid);
                 self.requests.spawn.push(req);
             }
             for (pid, data) in out.proc_input {

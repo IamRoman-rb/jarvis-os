@@ -27,6 +27,7 @@ pub mod input;
 pub mod keymap;
 pub mod look;
 pub mod panels;
+pub mod perms;
 pub mod pin;
 pub mod procs;
 pub mod remote;

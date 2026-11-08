@@ -7,6 +7,11 @@
 //! (ELF estáticos): esos corren en su propio proceso (ADR 0010) y la shell espera a que terminen
 //! ([`Job::Process`]), mostrando su salida a medida que llega.
 //!
+//! **Usuarios** (ADR 0020): la shell corre como el usuario (uid 1000). `sudo` pide la contraseña
+//! (la del asistente de instalación) y la recuerda 15 minutos, como `sudo-rs`; mientras corre lo
+//! que se le pidió, el uid efectivo es 0 ([`Shell::euid`]). `su` deja la terminal como root
+//! (`#` en el prompt) hasta `exit`.
+//!
 //! Los comandos que usan la red (`curl`, `wget`, `apt`, `ping`) no pueden esperar bloqueando (el
 //! escritorio es un solo hilo): piden la descarga por el `Outbox` y la shell queda **en espera**
 //! ([`Shell::waiting`]) hasta que llega la respuesta ([`Shell::net_response`]). Ahí sigue con el
@@ -54,6 +59,22 @@ pub const BIN: &str = "/Programas/bin";
 /// El `PATH`: los programas de `apt` (los de JARVIS-OS y los de Debian) y los de `snap`.
 pub const PATH: &str = "/Programas/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin";
 const MAX_DEPTH: u32 = 8;
+
+/// Cuánto recuerda `sudo` la contraseña (como el `timestamp_timeout` de sudo: 15 minutos).
+pub const SUDO_TIMEOUT_MS: u64 = 15 * 60 * 1000;
+/// Intentos de contraseña antes de rendirse (como sudo).
+const SUDO_TRIES: u8 = 3;
+
+/// Una contraseña que la terminal está pidiendo (sin mostrar lo que se tipea).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Auth {
+    /// `sudo …`: la línea entera se corre cuando la contraseña es correcta.
+    Sudo { line: String, tries: u8 },
+    /// `su`: la terminal pasa a ser de root.
+    Su { tries: u8 },
+    /// `passwd`: 0 = la actual, 1 = la nueva, 2 = la nueva otra vez.
+    Passwd { step: u8, new: String },
+}
 
 /// Lo que devuelve un comando.
 pub(crate) enum Res {
@@ -193,6 +214,16 @@ pub struct Shell {
     /// La entrada del script que se está ejecutando (`fortune | cowsay`): la reciben los
     /// comandos del script que no tienen otra.
     script_stdin: Option<String>,
+    /// El usuario efectivo del comando que corre: 1000, o 0 adentro de `sudo` o después de `su`.
+    pub euid: u32,
+    /// El usuario de la terminal (0 después de `su`, hasta `exit`).
+    base_uid: u32,
+    /// Hasta cuándo `sudo` no vuelve a pedir la contraseña (0: la pide).
+    sudo_until: u64,
+    /// La contraseña que se está pidiendo.
+    pub(crate) auth: Option<Auth>,
+    /// La máscara de los archivos nuevos (`umask`).
+    pub(crate) umask: u16,
 }
 
 impl Shell {
@@ -247,6 +278,11 @@ impl Shell {
             exit: false,
             rng: core::cell::Cell::new(0x2545_f491_4f6c_dd1d),
             script_stdin: None,
+            euid: crate::perms::USER,
+            base_uid: crate::perms::USER,
+            sudo_until: 0,
+            auth: None,
+            umask: 0o022,
         }
     }
 
@@ -272,6 +308,25 @@ impl Shell {
         self.var("USER").unwrap_or("roman")
     }
 
+    /// El nombre del usuario efectivo (`root` adentro de `sudo`).
+    pub fn effective_user(&self) -> &str {
+        if self.euid == crate::perms::ROOT {
+            "root"
+        } else {
+            self.user()
+        }
+    }
+
+    /// ¿La terminal es de root (después de `su`)?
+    pub fn is_root_shell(&self) -> bool {
+        self.base_uid == crate::perms::ROOT
+    }
+
+    /// ¿Está pidiendo una contraseña? (La terminal no muestra lo que se tipea.)
+    pub fn wants_password(&self) -> bool {
+        self.auth.is_some()
+    }
+
     pub fn host(&self) -> &str {
         self.var("HOSTNAME").unwrap_or("jarvis")
     }
@@ -285,12 +340,21 @@ impl Shell {
         }
     }
 
-    /// `roman@jarvis:~$ ` con colores, como Ubuntu.
+    /// `roman@jarvis:~$ ` con colores, como Ubuntu (`root@jarvis:~# ` después de `su`).
     pub fn prompt(&self) -> String {
+        let (user, sign) = if self.is_root_shell() {
+            ("root", '#')
+        } else {
+            (self.user(), '$')
+        };
         format!(
-            "{}{}@{}{}:{}{}{}$ ",
-            ansi::EXEC,
-            self.user(),
+            "{}{}@{}{}:{}{}{}{sign} ",
+            if self.is_root_shell() {
+                ansi::RED
+            } else {
+                ansi::EXEC
+            },
+            user,
             self.host(),
             ansi::RESET,
             ansi::DIR,
@@ -299,9 +363,203 @@ impl Shell {
         )
     }
 
-    /// ¿Está esperando a la red (o a `sleep`)?
+    /// ¿Está esperando a la red (o a `sleep`, o una contraseña)?
     pub fn waiting(&self) -> bool {
-        self.pending.is_some()
+        self.pending.is_some() || self.auth.is_some()
+    }
+
+    /// ¿`sudo` puede correr sin pedir la contraseña ahora? (Recién dada, sin contraseña
+    /// configurada, o la terminal ya es de root.)
+    pub(crate) fn sudo_ok<D: BlockDevice>(&self, ctx: &Ctx<'_, D>) -> bool {
+        self.is_root_shell()
+            || ctx.config.pin.is_none()
+            || (self.sudo_until != 0 && ctx.now_ms < self.sudo_until)
+    }
+
+    /// ¿La línea usa `sudo` (en cualquiera de sus comandos)?
+    fn uses_sudo(line: &str) -> bool {
+        match parse::parse(line) {
+            Ok(list) => list.iter().any(|p| {
+                p.commands.iter().any(|c| {
+                    c.words
+                        .first()
+                        .is_some_and(|w| matches!(w.as_slice(), [Part::Lit(s, _)] if s == "sudo"))
+                })
+            }),
+            Err(_) => false,
+        }
+    }
+
+    /// Lo que se tipeó mientras se pedía una contraseña. Devuelve lo que hay que mostrar.
+    pub fn password<D: BlockDevice>(&mut self, typed: &str, ctx: &mut Ctx<'_, D>) -> String {
+        let mut out = Out::new();
+        out.term.push('\n');
+        let Some(auth) = self.auth.take() else {
+            return out.term;
+        };
+        let user = self.user().to_string();
+        let right = ctx.config.pin.as_ref().is_none_or(|h| h.verify(typed));
+        match auth {
+            Auth::Sudo { line, tries } => {
+                if right {
+                    self.sudo_until = ctx.now_ms + SUDO_TIMEOUT_MS;
+                    ctx.log.push("SUDO_OK".into());
+                    self.run_text(&line, ctx, &mut out);
+                } else if tries + 1 >= SUDO_TRIES {
+                    out.err(&format!(
+                        "sudo: {SUDO_TRIES} intentos de contraseña incorrectos"
+                    ));
+                    ctx.log.push("SUDO_FALLO".into());
+                    self.status = 1;
+                } else {
+                    out.term.push_str("Lo siento, probá otra vez.\n");
+                    out.term
+                        .push_str(&format!("[sudo] contraseña para {user}: "));
+                    self.auth = Some(Auth::Sudo {
+                        line,
+                        tries: tries + 1,
+                    });
+                }
+            }
+            Auth::Su { tries } => {
+                if right {
+                    self.base_uid = crate::perms::ROOT;
+                    self.euid = crate::perms::ROOT;
+                    self.status = 0;
+                    ctx.log.push("SU_ROOT".into());
+                } else if tries + 1 >= SUDO_TRIES {
+                    out.err("su: fallo de autenticación");
+                    self.status = 1;
+                } else {
+                    out.term.push_str("su: contraseña incorrecta\nContraseña: ");
+                    self.auth = Some(Auth::Su { tries: tries + 1 });
+                }
+            }
+            Auth::Passwd { step, new } => match step {
+                0 if !right => {
+                    out.err("passwd: fallo de autenticación\npasswd: no se cambió la contraseña");
+                    self.status = 10;
+                }
+                0 => {
+                    out.term.push_str("Nueva contraseña: ");
+                    self.auth = Some(Auth::Passwd {
+                        step: 1,
+                        new: String::new(),
+                    });
+                }
+                1 if typed.chars().count() < 4 => {
+                    out.err("CONTRASEÑA INCORRECTA: tiene que tener al menos 4 caracteres\npasswd: no se cambió la contraseña");
+                    self.status = 10;
+                }
+                1 => {
+                    out.term.push_str("Vuelva a escribir la nueva contraseña: ");
+                    self.auth = Some(Auth::Passwd {
+                        step: 2,
+                        new: typed.to_string(),
+                    });
+                }
+                _ if typed != new => {
+                    out.err("Las contraseñas no coinciden.\npasswd: no se cambió la contraseña");
+                    self.status = 10;
+                }
+                _ => {
+                    let mut cfg = ctx.config.clone();
+                    let extra = ctx.now_ms.to_le_bytes();
+                    cfg.pin = crate::pin::hash_pin(&new, &extra);
+                    ctx.out.config = Some(cfg);
+                    out.term
+                        .push_str("passwd: contraseña actualizada correctamente\n");
+                    ctx.log.push("PASSWD_OK".into());
+                    self.status = 0;
+                }
+            },
+        }
+        if self.auth.is_none() && self.pending.is_none() {
+            // Sin más que pedir: el prompt vuelve (lo agrega la terminal).
+        }
+        out.term
+    }
+
+    /// Ctrl+C mientras se pide una contraseña.
+    pub fn cancel_password(&mut self) -> bool {
+        if self.auth.take().is_some() {
+            self.status = 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Empieza a pedir una contraseña.
+    pub(crate) fn ask(&mut self, auth: Auth, prompt: &str, out: &mut Out) {
+        out.term.push_str(prompt);
+        self.auth = Some(auth);
+    }
+
+    /// `exit` en una terminal de root (después de `su`): vuelve al usuario.
+    pub(crate) fn leave_root(&mut self) -> bool {
+        if self.is_root_shell() {
+            self.base_uid = crate::perms::USER;
+            self.euid = crate::perms::USER;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn sudo_reset(&mut self) {
+        self.sudo_until = 0;
+    }
+
+    /// La tabla de permisos, cargada.
+    pub(crate) fn perms<'b, D: BlockDevice>(
+        ctx: &'b mut Ctx<'_, D>,
+    ) -> &'b mut crate::perms::Perms {
+        if let Some(fs) = ctx.fs.as_deref_mut() {
+            ctx.perms.ensure_loaded(fs);
+        }
+        if ctx.perms.user != ctx.config.user {
+            ctx.perms.user = ctx.config.user.clone();
+        }
+        ctx.perms
+    }
+
+    /// ¿El usuario efectivo NO puede hacer `a` sobre `path`? (`path` tiene que existir.)
+    pub(crate) fn denied<D: BlockDevice>(
+        &self,
+        ctx: &mut Ctx<'_, D>,
+        path: &str,
+        a: crate::perms::Access,
+    ) -> bool {
+        let Some(fs) = ctx.fs.as_deref_mut() else {
+            return false;
+        };
+        let is_dir = path == "/" || fs.stat(path).is_ok_and(|s| s.is_dir);
+        let uid = self.euid;
+        !Self::perms(ctx).allowed(uid, path, is_dir, a)
+    }
+
+    /// ¿NO puede escribir `path`? Si existe, el archivo; si no, la carpeta donde se crearía.
+    pub(crate) fn denied_write<D: BlockDevice>(&self, ctx: &mut Ctx<'_, D>, path: &str) -> bool {
+        let exists = ctx.fs.as_deref_mut().is_some_and(|fs| fs.exists(path));
+        if exists {
+            self.denied(ctx, path, crate::perms::Access::Write)
+        } else {
+            self.denied(
+                ctx,
+                &crate::files::parent(path),
+                crate::perms::Access::Write,
+            )
+        }
+    }
+
+    /// ¿NO puede crear, borrar o renombrar algo en la carpeta de `path`?
+    pub(crate) fn denied_parent<D: BlockDevice>(&self, ctx: &mut Ctx<'_, D>, path: &str) -> bool {
+        self.denied(
+            ctx,
+            &crate::files::parent(path),
+            crate::perms::Access::Write,
+        )
     }
 
     /// Ruta absoluta y normalizada (`..`, `.`, `~`).
@@ -358,6 +616,21 @@ impl Shell {
         // El momento en que se escribe cada comando mezcla el generador de $RANDOM.
         self.rng
             .set(self.rng.get() ^ ctx.now_ms.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+        // `sudo` sin la contraseña reciente: se pide antes de correr la línea (como sudo, que la
+        // pide al empezar).
+        let expanded = self.expand_alias(trimmed);
+        if !self.sudo_ok(ctx) && Self::uses_sudo(&expanded) {
+            let user = self.user().to_string();
+            self.ask(
+                Auth::Sudo {
+                    line: trimmed.to_string(),
+                    tries: 0,
+                },
+                &format!("[sudo] contraseña para {user}: "),
+                &mut out,
+            );
+            return out.term;
+        }
         self.run_text(trimmed, ctx, &mut out);
         out.term
     }
@@ -585,6 +858,11 @@ impl Shell {
         out: &mut Out,
     ) {
         let now = ctx.timestamp();
+        if self.denied_write(ctx, path) {
+            out.err(&format!("jsh: {path}: Permiso denegado"));
+            self.status = 1;
+            return;
+        }
         let Some(fs) = ctx.fs.as_deref_mut() else {
             out.err("jsh: no hay disco");
             return;

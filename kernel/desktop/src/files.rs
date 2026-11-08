@@ -659,6 +659,23 @@ impl FilesApp {
             return;
         };
         self.dirty = true;
+        // Las carpetas del sistema son de root (ADR 0020): desde Archivos no se cambian.
+        let changes = matches!(
+            dialog,
+            Dialog::NewFolder(_)
+                | Dialog::NewFile(_)
+                | Dialog::Rename { .. }
+                | Dialog::ConfirmTrash(_)
+        );
+        if changes && crate::perms::is_system(&self.cwd) {
+            self.notify(
+                tr("Esta carpeta es del sistema: para cambiarla usá sudo en la Terminal."),
+                true,
+                now_ms,
+                log,
+            );
+            return;
+        }
         let result = match &dialog {
             Dialog::NewFolder(input) => {
                 let path = join(&self.cwd, input.text.trim());
@@ -922,6 +939,17 @@ impl FilesApp {
             self.notify(tr("No hay nada copiado."), false, now_ms, log);
             return;
         };
+        if crate::perms::is_system(&self.cwd)
+            || (cut && sources.iter().any(|s| crate::perms::is_system(&parent(s))))
+        {
+            self.notify(
+                tr("Esta carpeta es del sistema: para cambiarla usá sudo en la Terminal."),
+                true,
+                now_ms,
+                log,
+            );
+            return;
+        }
         let mut pasted: Vec<String> = Vec::new();
         let mut failed = None;
         for src in &sources {

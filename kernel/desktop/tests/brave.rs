@@ -226,7 +226,7 @@ fn sin_puente_avisa_y_reintenta() {
 fn el_firewall_puede_bloquear_a_brave() {
     let mut t = Driver::new();
     t.d.open(
-        Launch::Terminal(Some("ufw deny out port 8119 app brave".into())),
+        Launch::Terminal(Some("sudo ufw deny out port 8119 app brave".into())),
         t.now,
         CLOCK,
     );

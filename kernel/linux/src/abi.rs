@@ -64,6 +64,10 @@ pub mod nr {
     pub const UNLINK: u64 = 87;
     pub const READLINK: u64 = 89;
     pub const CHMOD: u64 = 90;
+    pub const FCHMOD: u64 = 91;
+    pub const CHOWN: u64 = 92;
+    pub const FCHOWN: u64 = 93;
+    pub const LCHOWN: u64 = 94;
     pub const UMASK: u64 = 95;
     pub const GETTIMEOFDAY: u64 = 96;
     pub const GETRLIMIT: u64 = 97;
@@ -92,10 +96,12 @@ pub mod nr {
     pub const TGKILL: u64 = 234;
     pub const OPENAT: u64 = 257;
     pub const MKDIRAT: u64 = 258;
+    pub const FCHOWNAT: u64 = 260;
     pub const NEWFSTATAT: u64 = 262;
     pub const UNLINKAT: u64 = 263;
     pub const RENAMEAT: u64 = 264;
     pub const READLINKAT: u64 = 267;
+    pub const FCHMODAT: u64 = 268;
     pub const FACCESSAT: u64 = 269;
     pub const PPOLL: u64 = 271;
     pub const SET_ROBUST_LIST: u64 = 273;

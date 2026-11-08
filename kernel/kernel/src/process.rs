@@ -168,13 +168,15 @@ pub fn spawn(req: SpawnRequest) -> Result<(), String> {
         &envp,
         &mut sys,
     );
-    let (process, entry, rsp) = match loaded {
+    let (mut process, entry, rsp) = match loaded {
         Ok(l) => l,
         Err(e) => {
             paging::free_space(root);
             return Err(e.to_string());
         }
     };
+    // Con qué usuario corre (ADR 0020): 1000, o root si se lanzó con sudo.
+    process.uid = req.uid;
     let name: &'static str = Box::leak(process.name.clone().into_boxed_str());
     let proc = Box::into_raw(Box::new(Proc {
         pid: req.pid,

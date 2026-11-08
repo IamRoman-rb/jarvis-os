@@ -30,6 +30,10 @@ pub enum FileOp {
     Remove(String),
     Rmdir(String),
     Rename(String, String),
+    /// `chmod`: los 12 bits de permisos (ADR 0020).
+    Chmod(String, u32),
+    /// `chown`: dueño y grupo (`u32::MAX` = no cambiar, como el -1 de Linux).
+    Chown(String, u32, u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +42,10 @@ pub struct Meta {
     pub size: u64,
     /// Segundos desde 1970 (UTC).
     pub mtime: u64,
+    /// Los permisos (`0o755`), el dueño y el grupo (ADR 0020).
+    pub mode: u32,
+    pub uid: u32,
+    pub gid: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
