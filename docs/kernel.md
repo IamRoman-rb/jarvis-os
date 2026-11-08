@@ -491,12 +491,34 @@ firmware UEFI (OVMF en QEMU)
 | `task` (`jarvis-task`) | Multitarea: el planificador (prioridades, ronda con turno de 10 ms, esperas por evento o plazo, avisos que llegan antes de esperar, tiempo de CPU por tarea) en una tabla fija. | 12 tests (turnos, desalojo, "lost wakeup", plazos) y `cargo xtask test` (tres tareas, disco y red por interrupción) |
 | `linux` (`jarvis-linux`) | La ABI de Linux x86_64 (K11): cargador de ELF (estáticos y static-pie), pila inicial con el vector auxiliar, zonas de memoria (brk, mmap con `MAP_FIXED_NOREPLACE`, mprotect, páginas al primer uso) y ~90 llamadas al sistema (archivos, directorios, consola, tiempo, azar, sockets TCP, señales mínimas, `arch_prctl` con FS y GS). Sobre un trait `System`. | 22 tests: un proceso de mentira de punta a punta (cargar, archivos, directorios, memoria, punteros del kernel → EFAULT, sockets) y `cargo xtask test` (programas de verdad, compilados con musl) |
 | `vino` (otro workspace) | Programas de Windows (K15, ADR 0018), como Wine: un programa de Linux (musl) con el cargador de PE32+ (secciones, relocalizaciones, imports, api sets, TLS), el TEB/PEB en GS y las DLL "builtin" en Rust `extern "win64"`: `kernel32`, `ntdll`, el CRT de Microsoft (`ucrtbase`/`msvcrt`/`vcruntime140`, con su `printf`), azar y `MessageBox`. Carga también las DLL de verdad que trae el programa (exports, reenvíos, `DllMain`, `LoadLibrary`), sostiene **hilos** (`CreateThread`/`_beginthreadex` sobre `clone`+`futex` del kernel, con TEB, TLS y la sincronización de Windows) y el **SEH de C** (`__try`/`__except`/`__finally`, con el desenrollador de pila x64 propio). Lo que falta, lo avisa. | 49 tests en el anfitrión (PE, cargador, TEB, printf, archivos y descriptores, hilos y sincronización, el desenrollador contra tablas `.pdata` armadas a mano) y `cargo xtask test` (Rust, C, una DLL propia, hilos, Python de Windows con su biblioteca, y `__try`/`__except`) |
-| `drivers` (`jarvis-drivers`) | Hardware real (K13, ADR 0011), la mitad que interpreta: tablas fijas de ACPI, entradas del IOAPIC y mensajes MSI, GPT (leer, crear, disco vacío), comandos AHCI/ATA y NVMe, descriptores de e1000, RTL8139, RTL8168 y AMD PCnet, USB (descriptores, TRB y contextos de xHCI, HID, Bulk-Only + SCSI), verbos y grafo de HDA, sensores de temperatura; la placa Wi-Fi RTL8821CE (K14, `rtw88`: encendido, efuse, carga del firmware, comandos H2C, tablas de Realtek con condiciones, canales, potencia, descriptores) y el ramdisk del arranque. Sin `unsafe`. | Tests con tablas y descriptores armados byte por byte; la GPT **cruzada contra la crate `gpt`** en los dos sentidos; la RTL8821CE contra una **placa simulada** (bits que se borran solos, el DMA interno, el efuse, la radio, el firmware que arranca). En QEMU, `cargo xtask test-hardware` (AHCI + e1000e + HDA, NVMe + RTL8139, todo por USB) y `cargo xtask test-instalar` |
+| `drivers` (`jarvis-drivers`) | Hardware real (K13, ADR 0011), la mitad que interpreta: tablas fijas de ACPI, entradas del IOAPIC y mensajes MSI, GPT (leer, crear, disco vacío), comandos AHCI/ATA y NVMe, descriptores de e1000, RTL8139, RTL8168 y AMD PCnet, USB (descriptores, TRB y contextos de xHCI, HID, Bulk-Only + SCSI), verbos y grafo de HDA, sensores de temperatura; la placa Wi-Fi RTL8821CE (K14, `rtw88`: encendido, efuse, carga del firmware, comandos H2C, tablas de Realtek con condiciones, canales, potencia, descriptores), las webcams UVC (formatos, probe/commit, armado de cuadros, YUY2 y MJPEG sin tablas de Huffman) y el ramdisk del arranque. Sin `unsafe`. | Tests con tablas y descriptores armados byte por byte; la GPT **cruzada contra la crate `gpt`** en los dos sentidos; la RTL8821CE contra una **placa simulada** (bits que se borran solos, el DMA interno, el efuse, la radio, el firmware que arranca). En QEMU, `cargo xtask test-hardware` (AHCI + e1000e + HDA, NVMe + RTL8139, todo por USB) y `cargo xtask test-instalar` |
 | `wifi` (`jarvis-wifi`) | Wi-Fi (K14, ADR 0012), lo que no toca la placa: tramas 802.11 (encabezado, datos ↔ Ethernet, beacons, sondeo, autenticación, asociación), elemento RSN, PMK y PTK, el saludo de 4 vías y el de grupo de la estación, CCMP con contadores contra repeticiones, y la estación entera (sin E/S): buscar redes, conectarse, datos, pérdida de beacons y reintentos. | 20 tests: vectores del estándar (PBKDF2 del anexo J, AES Key Wrap del RFC 3394), 6 **cruzados** contra un punto de acceso en Python con `cryptography` (`wifi/tests/datos/generar.py`: los mensajes 2 y 4 y las tramas cifradas coinciden byte a byte) y 8 de la estación contra puntos de acceso de mentira en un aire simulado |
+| `squashfs` (`jarvis-squashfs`) | El lector de squashfs 4.0 de los `.snap` (K16, ADR 0021): superbloque, metadatos, inodos básicos y extendidos, directorios, fragmentos; xz, gzip y lz4. | Tests **cruzados contra `backhand`**, que arma las imágenes |
+| `reglas` (`jarvis-reglas`) | El motor del antivirus (K16, ADR 0024): reglas tipo YARA (texto, hex con comodines y saltos, condiciones, `N of`, `filesize`, `uintN`) con Aho-Corasick propio, y la heurística de PE/ELF (imports sospechosos, entropía, empaquetadores). | Tests con muestras inofensivas armadas en el test |
 | `kernel` (`jarvis-kernel`) | El binario sin sistema operativo debajo. Solo hardware → eventos, bloques y píxeles. | `cargo xtask test` en QEMU |
 | `xtask` | Imagen booteable, disco FAT32, QEMU (serie + monitor + red + audio), puente (HTTPS, repositorio de paquetes, conversión de imágenes y SVG a BMP con transparencia), puente de Brave (DevTools → mosaicos LZ4), test de punta a punta, capturas. | 2 tests (el puente no sale de su carpeta; PNG y SVG → BMP) y `cargo xtask test` |
 
 ## Lo que se aprendió (y por qué el código es así)
+
+### K16: instalar de verdad
+
+- **FAT32 no sabe de dueños ni permisos**, y no hace falta cambiar el formato: se guardan aparte
+  (`/Sistema/permisos.db`), como hace WSL con los metadatos de DrvFs. Lo que no está anotado
+  hereda de la carpeta (las del sistema, de root).
+- **Un `.snap` es un squashfs** y un paquete portable de winget es un `.exe` o un `.zip`: instalar
+  es abrir el contenedor, verificar el hash que publica la tienda y dejar un lanzador. Lo difícil
+  no es el formato sino las dependencias (la base glibc de los snaps la pone `libc6` de Debian).
+- **Una regla de antivirus es una búsqueda de muchas cadenas a la vez**: Aho-Corasick recorre el
+  archivo una sola vez para todas. La heurística da puntaje (y solo lo seguro va a cuarentena
+  solo): los falsos positivos rompen la confianza más rápido que un virus.
+- **Un "instalador de drivers" no puede instalar drivers de otro sistema**: lo que sí sirve de
+  afuera es el firmware (igual para todos) y saber exactamente qué hardware falta.
+- **UVC manda la imagen de a paquetes con un bit que cambia en cada cuadro (FID)**: el cuadro
+  termina cuando cambia o cuando llega EOF. Y muchas webcams mandan MJPEG **sin tablas de
+  Huffman**: hay que ponerle las del estándar antes de decodificar.
+- **Bajar el tono sin hacerla lenta**: remuestrear baja el tono y alarga; WSOLA vuelve al largo
+  copiando pedazos que encajan por correlación. La voz se sintetiza de a oración para empezar a
+  hablar enseguida.
 
 ### K15: Linux puro y `vino`
 
@@ -1095,8 +1117,12 @@ El orden cambió varias veces a pedido: el gestor de archivos (K2), el escritori
 terminal con paquetes (K4), el motor web con firewall e idiomas (K5) y Brave con sincronización
 (K6) se adelantaron.
 
-**Dónde estamos:** K0–K15 terminados (16 de 16 hitos). Lo último: JARVIS-OS habla solo Linux y
-los programas de Windows corren con `vino` (K15, ADR 0018): además de Rust y C, ya andan las DLL de terceros, los hilos (`clone`+`futex`), Python de Windows con su biblioteca y el SEH de C. Antes, el Wi-Fi (K14, ADR 0012).
+**Dónde estamos:** K0–K16 terminados (17 de 17 hitos). Lo último (K16, ADRs 0020–0025):
+instalar de verdad. Usuarios con `sudo` y permisos, `winget install` que deja `rg` o `jq` andando
+con `vino`, `snap install` que abre el squashfs, la instalación en VirtualBox probada de punta a
+punta, firewall con listas y modo "preguntar", antivirus con reglas tipo YARA, gestor de
+controladores, la app Cámara y la voz nueva (Kokoro). Antes, `vino` (K15, ADR 0018) y el Wi-Fi
+(K14, ADR 0012).
 La RTL8821CE de la PC de Roman tiene driver (port de rtw88, con el firmware de Realtek en el
 ramdisk del arranque), una estación que busca redes en 2,4 y 5 GHz, se conecta con WPA2, usa
 802.11n/ac y se reconecta sola, y una sección Wi-Fi en Configuración → Red. También: el volumen
@@ -1124,6 +1150,7 @@ puntos de acceso de mentira, y el registro del arranque dice qué pasó).
 | **K14** ✅ | **Wi-Fi** (ADR 0012), en 4 etapas: 1) tramas 802.11, RSN, WPA2-PSK (PMK, PTK, saludos de 4 vías y de grupo) y CCMP en `jarvis-wifi`, cruzados contra Python ✅; 2) driver de la RTL8821CE (port de rtw88: encendido, efuse, firmware por la página reservada, tablas de Realtek, canales, potencia, antena sin Bluetooth) y su firmware en el ramdisk del arranque ✅; 3) la estación (buscar, autenticar, asociar, saludo, datos cifrados), cable y Wi-Fi juntos con DHCP al cambiar de conexión, y Wi-Fi en Configuración → Red ✅; 4) 5 GHz (con los canales de radar solo escuchando), 802.11n/ac con WMM y reconexión con espera ✅. Falta verificarlo en la PC. El ahorro de energía queda para después | Redes inalámbricas, criptografía de enlace, firmware de dispositivos |
 
 | **K15** ✅ | **Linux puro y `vino`** (ADR 0018, reemplaza a la 0016): el kernel habla solo la ABI de Linux (`arch_prctl` con GS, `MAP_FIXED_NOREPLACE`; sale el parser de PE) ✅; `vino`, un programa de Linux que corre `.exe` de 64 bits de consola como Wine: cargador de PE, TEB/PEB, DLL builtin (`kernel32`, `ntdll`, el CRT de Microsoft) ✅; `wine`/`./x.exe`/doble clic, `apt install vino` ✅; corren programas de Rust y C, DLL de terceros, **hilos** (`clone`+`futex`), **Python de Windows** con su biblioteca estándar y el **SEH de C** (`__try`/`__except`) ✅. Las excepciones de C++ (throw/catch), 32 bits y ventanas, después | Formatos ejecutables, ABI y convenciones de llamada, compatibilidad de sistemas |
+| **K16** ✅ | **Instalar de verdad**, en 10 etapas: usuarios root/roman, `sudo` con contraseña, `chmod`/`chown`/`su`/`passwd` y permisos guardados aparte del FAT32 (ADR 0020) ✅; `winget install` de paquetes portable/zip con SHA-256 y alias que corren por `vino` (`rg`, `jq` reales) ✅; `snap install` de Snapcraft con un lector de squashfs propio (xz, gzip, lz4) ✅ (ADR 0021); `cargo xtask vbox-instalar` en VirtualBox (IDE+PCnet y SATA+e1000) ✅; firewall con listas de bloqueo, modo "preguntar" y registro de conexiones, y antivirus con reglas tipo YARA, heurística de PE/ELF y firmas de ClamAV (ADR 0024) ✅; gestor de controladores: inventario PCI/USB, catálogo y firmware verificado (ADR 0023) ✅; la app **Cámara** con la webcam del anfitrión, "bloquear al irme" y la mitad pura del driver UVC (ADR 0022) ✅; la voz con **Kokoro-82M** y un procesado propio (ADR 0025) ✅. Las transferencias isócronas de xHCI (la webcam USB en JARVIS-OS) quedan para cuando se puedan probar | Permisos POSIX, formatos de paquetes (ZIP, squashfs), firmas y heurísticas, USB Video Class, procesamiento de señales |
 
 Recursos: [Writing an OS in Rust](https://os.phil-opp.com), la [wiki de OSDev](https://wiki.osdev.org),
 la especificación de virtio y la especificación "Microsoft FAT32 File System".

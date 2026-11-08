@@ -7,7 +7,7 @@ red (K7). Decisiones: docs/adr/ (la vigente sobre la base es la 0003; red y nave
 terminal, paquetes y programas de otros sistemas, la 0005; motor web, firewall, snap/winget e
 idiomas, la 0006; conexiones largas, Brave remoto, sincronización e ISO, la 0007; el cerebro en el anfitrión, la 0008; TLS y decodificadores en el kernel, la 0009, propuesta; espacio de usuario y programas
 de Linux, la 0010, propuesta; hardware real, la 0011; Wi-Fi, la 0012; JARVIS modificando el sistema desde adentro, la 0013; sin navegador propio, la 0014; gestos con la cámara, la 0015; antivirus, la 0017; el kernel habla solo Linux y los programas de Windows los corre `vino`, la 0018, que reemplaza a la 0016; el cerebro propio de JARVIS, sin modelos de terceros, la 0019, con sus metas en docs/cerebro-propio.md; usuarios, `sudo` y permisos, la 0020; instalar programas reales con winget y snap, la 0021;
-gestor de controladores, la 0023; firewall con listas y antivirus con reglas, la 0024). Roadmap y arquitectura del kernel:
+la cámara (app Cámara, "bloquear al irme" y driver UVC), la 0022; gestor de controladores, la 0023; firewall con listas y antivirus con reglas, la 0024; la voz con Kokoro, la 0025). Roadmap y arquitectura del kernel:
 docs/kernel.md. Leelos antes de proponer cambios de arquitectura. docs/investigacion.md es el
 registro de la investigación inicial (sus secciones 2–4 quedaron reemplazadas por el ADR 0003).
 
@@ -57,7 +57,8 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    (desktop/src/sync.rs lo une con el FAT32 y las conexiones largas)
     - drivers/     hardware real (K13, ADR 0011): la mitad de los drivers que interpreta (tablas
                    ACPI, APIC/MSI, GPT, AHCI, NVMe, IDE, CD (El Torito), placas de red (Intel, Realtek, AMD PCnet), USB/xHCI, HDA, sensores, la
-                   placa Wi-Fi RTL8821CE en rtw88/ y el ramdisk del arranque); no_std y sin unsafe
+                   placa Wi-Fi RTL8821CE en rtw88/, las webcams UVC en uvc.rs y el ramdisk del
+                   arranque); no_std y sin unsafe
                    (los registros los tocan kernel/ahci.rs, xhci.rs, hda.rs, rtw88.rs…). Las
                    tablas de Realtek salen de drivers/tablas/generar_rtw8821c.py
     - wifi/        Wi-Fi (K14, ADR 0012): tramas 802.11, RSN, WPA2-PSK (claves, saludo de 4 vías),
@@ -83,6 +84,8 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
                    puente en http://paquetes.jarvis/)
     - rootfs/      contenido inicial del disco virtual
 - src/jarvis/    cerebro en Python: agente, tools, política de permisos, auditoría
+    - camera.py    la webcam del anfitrión para la app Cámara y "bloquear al irme" (ADR 0022)
+    - voice/       la voz: Whisper, Kokoro (engine.py) y el procesado propio (dsp.py, ADR 0025)
     - neural/      el cerebro propio (ADR 0019): tensores con autograd, capas y optimizadores
                    sobre NumPy, hechos desde cero (metas en docs/cerebro-propio.md)
     - nlu/         el entendedor de órdenes propio (C2-C3): corpus por plantillas, red chica,
@@ -135,8 +138,8 @@ Cerebro (desde la raíz):
   (un `uv sync` sin `--extra voice` desinstala la voz; `cargo xtask run` la reinstala sola)
 - jarvis serve [--simulado]: el cerebro para el kernel (ADR 0008). Lo levanta `cargo xtask run`
   con un token por sesión (variable JARVIS_CEREBRO_TOKEN; el kernel lo recibe por fw_cfg).
-  Voz ("JARVIS, ..."): uv sync --extra voice ; uv run jarvis voz instalar (baja ~590 MB: preguntale antes a Roman) ;
-  uv run jarvis voz probar
+  Voz ("JARVIS, ..."): uv sync --extra voice ; uv run jarvis voz instalar (baja ~730 MB: preguntale antes a Roman) ;
+  uv run jarvis voz probar ; uv run jarvis voz decir "texto" [--voz cine] [--wav x.wav]
 - uv run pytest -m live   (API real: solo si te lo pido)
 
 ## Reglas del kernel
