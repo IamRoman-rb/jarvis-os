@@ -24,6 +24,8 @@ pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 sha2 = { version = "0.10", default-features = false }
 # Los .snap: squashfs propio (ADR 0021) y el SHA3-384 que publica Snapcraft.
 jarvis-squashfs = { path = "../squashfs" }
+# Reglas tipo YARA y heurística de ejecutables para el antivirus (ADR 0024).
+jarvis-reglas = { path = "../reglas" }
 sha3 = { version = "0.10", default-features = false }
 
 # En el kernel (sin SSE), SHA-2 por software, como en jarvis-tls.

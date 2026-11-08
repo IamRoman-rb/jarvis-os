@@ -1490,7 +1490,7 @@ impl Shell {
                 let root = argv.get(2).map(|r| self.abs(r));
                 return match crate::antivirus::command(argv, root, ctx, o, e) {
                     Ok(code) => Res::Code(code),
-                    Err(id) => Res::Wait(Job::Antivirus { id }),
+                    Err(id) => Res::Wait(Job::Antivirus { id, rules: false }),
                 };
             }
             "apt" => {

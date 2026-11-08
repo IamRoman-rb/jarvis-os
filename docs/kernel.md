@@ -394,6 +394,13 @@ roman@jarvis:~$ sudo ufw default deny outgoing && sudo ufw allow out to wikipedi
 roman@jarvis:~$ ufw status numbered · ufw delete 1 · ufw show blocked · ufw app list
 ```
 
+También (ADR 0024): `sudo ufw default ask outgoing` pregunta por cada conexión nueva (permitir
+en la sesión, siempre o denegar siempre), `sudo ufw listas actualizar` baja las listas de bloqueo
+de URLhaus y StevenBlack, `ufw show conexiones` muestra quién se conectó a dónde y
+`app programas:curl` es una regla para un solo programa de Linux. El antivirus suma reglas tipo
+YARA (`antivirus reglas`, `antivirus analizar ARCHIVO`), heurística de ejecutables y firmas de
+ClamAV (`antivirus importar x.hsb`).
+
 Las reglas se evalúan en orden (gana la primera). Las apps que se pueden nombrar: `brave`,
 `terminal`, `apt`, `snap`, `winget`, `configuracion`, `jarvis` y `sistema`. Lo mismo se maneja
 desde Configuración → Firewall. Lo que entra ya está cerrado: JARVIS-OS no escucha en ningún

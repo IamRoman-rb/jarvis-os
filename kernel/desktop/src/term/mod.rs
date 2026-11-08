@@ -106,9 +106,10 @@ pub(crate) enum Job {
     Winget(alloc::boxed::Box<winget::WingetJob>),
     /// `ufw listas actualizar`: bajando las listas de bloqueo.
     Blocklist(alloc::boxed::Box<BlocklistJob>),
-    /// `antivirus actualizar`: bajando las firmas.
+    /// `antivirus actualizar`: bajando las firmas y después las reglas.
     Antivirus {
         id: u32,
+        rules: bool,
     },
     Sleep {
         until: u64,
@@ -124,7 +125,7 @@ pub(crate) enum Job {
 impl Job {
     fn net_id(&self) -> Option<u32> {
         match self {
-            Job::Fetch { id, .. } | Job::Ping { id, .. } | Job::Antivirus { id } => Some(*id),
+            Job::Fetch { id, .. } | Job::Ping { id, .. } | Job::Antivirus { id, .. } => Some(*id),
             Job::Apt(a) => a.waiting_id(),
             Job::Snap(s) => s.waiting_id(),
             Job::Winget(w) => w.waiting_id(),
@@ -1175,7 +1176,24 @@ impl Shell {
             Job::Snap(job) => job.on_response(result, ctx, &mut out),
             Job::Winget(job) => job.on_response(result, ctx, &mut out),
             Job::Blocklist(job) => job.on_response(result, ctx, &mut out),
-            Job::Antivirus { .. } => Some(crate::antivirus::on_update(result, ctx, &mut out)),
+            Job::Antivirus { rules: true, .. } => {
+                Some(crate::antivirus::on_rules(result, ctx, &mut out))
+            }
+            Job::Antivirus { id, rules } => {
+                let (code, _) = crate::antivirus::on_update(result, ctx, &mut out);
+                if code != 0 {
+                    Some((code, String::new()))
+                } else {
+                    out.info("Bajando las reglas tipo YARA...");
+                    *id = ctx.out.fetch_as(
+                        crate::antivirus::RULES_URL,
+                        crate::system::FetchKind::Download,
+                        "antivirus",
+                    );
+                    *rules = true;
+                    None
+                }
+            }
             Job::Sleep { .. } | Job::Process { .. } => Some((0, String::new())),
         };
         match finished {

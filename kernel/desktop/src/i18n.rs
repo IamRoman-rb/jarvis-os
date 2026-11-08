@@ -2398,6 +2398,7 @@ static EN_F: &[(&str, &str)] = &[
         "Amenaza en {}: {}. No se pudo mover a cuarentena: {}",
         "Threat in {}: {}. It could not be quarantined: {}",
     ),
+    ("Archivo sospechoso: {}: {}", "Suspicious file: {}: {}"),
     ("Archivos · {}", "Files · {}"),
     (
         "Arriba a la izquierda está la barra con tus aplicaciones: archivos, terminal, música y más.",
@@ -2590,6 +2591,7 @@ static PT_F: &[(&str, &str)] = &[
         "Amenaza en {}: {}. No se pudo mover a cuarentena: {}",
         "Ameaça em {}: {}. Não foi possível pôr em quarentena: {}",
     ),
+    ("Archivo sospechoso: {}: {}", "Arquivo suspeito: {}: {}"),
     ("Archivos · {}", "Arquivos · {}"),
     (
         "Arriba a la izquierda está la barra con tus aplicaciones: archivos, terminal, música y más.",

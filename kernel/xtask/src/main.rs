@@ -1209,6 +1209,22 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.monitor("sendkey ret")?;
     s.wait_for("FIREWALL_BLOQUEO terminal example.com", STEP)?;
     s.wait_for("TERMINAL_FIN", STEP)?;
+    // ADR 0024: en modo "preguntar", una conexión nueva espera la respuesta de un diálogo. (La
+    // política nueva vale desde el comando siguiente: la configuración se aplica al terminar.)
+    s.type_text("sudo ufw default ask outgoing")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("wget http://paquetes.jarvis/indice.txt")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("FIREWALL_PREGUNTA terminal paquetes.jarvis", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    s.screenshot(&target_dir().join("jarvis-os-firewall-pregunta.png"))?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("FIREWALL_RESPUESTA permitir terminal paquetes.jarvis", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("sudo ufw default allow outgoing")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
     // K10: HTTPS con el TLS del kernel, contra sitios de verdad (hace falta internet, por eso
     // es opcional). Uno válido tiene que llegar; uno con el certificado vencido, no.
     if std::env::var_os("JARVIS_TEST_INTERNET").is_some() {
@@ -1285,7 +1301,7 @@ fn test(image: &Path, disk: &Path) -> Result<()> {
     s.wait_for("TERMINAL_FIN 0", STEP)?;
     s.type_text(&format!("red 10.0.2.2:{port}"))?;
     s.monitor("sendkey ret")?;
-    s.wait_for("FIREWALL_BLOQUEO programas 10.0.2.2", STEP)?;
+    s.wait_for("FIREWALL_BLOQUEO programas:red 10.0.2.2", STEP)?;
     s.wait_for("RED_PROGRAMA_ERROR", STEP)?;
     s.wait_for("TERMINAL_FIN 1", STEP)?;
     // Un intérprete de JavaScript (Boa) como programa de Linux: código suelto, un archivo y la

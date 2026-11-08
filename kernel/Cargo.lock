@@ -986,6 +986,7 @@ dependencies = [
  "jarvis-gfx",
  "jarvis-image",
  "jarvis-linux",
+ "jarvis-reglas",
  "jarvis-squashfs",
  "jarvis-sync",
  "jarvis-wifi",
@@ -1073,6 +1074,10 @@ dependencies = [
  "rustls",
  "smoltcp",
 ]
+
+[[package]]
+name = "jarvis-reglas"
+version = "0.1.0"
 
 [[package]]
 name = "jarvis-relay"

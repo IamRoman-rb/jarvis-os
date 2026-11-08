@@ -10,6 +10,14 @@
 //!   **cuarentena** ([`QUARANTINE`]): se aparta, no se borra (regla 13), y desde ahí no se puede
 //!   ejecutar. `antivirus restaurar` lo devuelve a donde estaba.
 //! - **A pedido**: `antivirus escanear [ruta]` revisa una carpeta entera.
+//! - **Reglas tipo YARA** (ADR 0024, `jarvis-reglas`): describen pedazos que el malware no puede
+//!   cambiar (no solo archivos idénticos). Vienen adentro del sistema (`kernel/paquetes/antivirus/
+//!   reglas.yar`) y se actualizan con `antivirus actualizar`. Las de severidad **alta** mandan a
+//!   cuarentena; las de **media**, avisan.
+//! - **Heurística** (inspirada en capa): qué puede hacer un ejecutable por las funciones que
+//!   importa (inyectar código, registrar teclas, cifrar archivos) y si está empaquetado. Solo
+//!   **avisa**: un indicio no es una prueba.
+//! - **Firmas de ClamAV** (`.hsb`, SHA-256): `antivirus importar archivo.hsb`.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -25,6 +33,12 @@ pub const DIR: &str = "/Sistema/antivirus";
 pub const DB: &str = "/Sistema/antivirus/firmas.bin";
 pub const INFO: &str = "/Sistema/antivirus/estado.txt";
 pub const QUARANTINE: &str = "/Cuarentena";
+/// Las reglas bajadas (si no hay, se usan las que vienen adentro).
+pub const RULES: &str = "/Sistema/antivirus/reglas.yar";
+/// De dónde se bajan las reglas (el puente las sirve desde kernel/paquetes/antivirus/).
+pub const RULES_URL: &str = "http://paquetes.jarvis/antivirus/reglas.yar";
+/// Las reglas que vienen con el sistema.
+const BUILTIN_RULES: &str = include_str!("../../paquetes/antivirus/reglas.yar");
 /// De dónde salió cada archivo en cuarentena (nombre en la cuarentena|ruta original).
 const ORIGINS: &str = "/Sistema/antivirus/cuarentena.txt";
 /// Los SHA-256 de las muestras de malware de las últimas 48 horas.
@@ -40,6 +54,8 @@ pub enum Threat {
     Eicar,
     /// Un malware conocido: su SHA-256.
     Known([u8; 32]),
+    /// Una regla de severidad alta: (nombre, descripción).
+    Rule(String, String),
 }
 
 impl Threat {
@@ -50,6 +66,7 @@ impl Threat {
                 "malware conocido (MalwareBazaar, SHA-256 {}…)",
                 &hex(h)[..16]
             ),
+            Threat::Rule(name, desc) => format!("{desc} (regla {name})"),
         }
     }
 }
@@ -95,8 +112,10 @@ fn is_eicar(data: &[u8]) -> bool {
         && data[sig.len()..].iter().all(|b| b.is_ascii_whitespace())
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Antivirus {
+    /// Las reglas compiladas (las del disco o las que vienen adentro).
+    rules: Option<jarvis_reglas::Scanner>,
     /// Ordenadas, sin repetidos.
     sigs: Vec<[u8; 32]>,
     loaded: bool,
@@ -123,6 +142,7 @@ impl Antivirus {
             return;
         }
         self.loaded = true;
+        self.load_rules(fs);
         if let Ok(b) = fs.read_file(DB) {
             self.sigs = b.as_chunks::<32>().0.to_vec();
             self.sigs.sort_unstable();
@@ -143,16 +163,84 @@ impl Antivirus {
         self.sigs.len()
     }
 
-    /// Revisa `data` (sin tocar el disco).
+    /// Compila las reglas: las bajadas si andan, si no las que vienen adentro.
+    pub fn load_rules<D: BlockDevice>(&mut self, fs: &mut FileSystem<D>) {
+        let downloaded = fs
+            .read_file(RULES)
+            .ok()
+            .and_then(|b| jarvis_reglas::compile(&String::from_utf8_lossy(&b)).ok());
+        let rules = downloaded.or_else(|| jarvis_reglas::compile(BUILTIN_RULES).ok());
+        self.rules = rules.map(jarvis_reglas::Scanner::new);
+    }
+
+    pub fn rule_count(&self) -> usize {
+        self.rules.as_ref().map_or(0, |s| s.rules.len())
+    }
+
+    /// Revisa `data` (sin tocar el disco): EICAR, las firmas y las reglas de severidad alta.
     pub fn scan(&self, data: &[u8]) -> Option<Threat> {
         if is_eicar(data) {
             return Some(Threat::Eicar);
         }
         let h = sha256(data);
-        self.sigs
-            .binary_search(&h)
-            .is_ok()
-            .then_some(Threat::Known(h))
+        if self.sigs.binary_search(&h).is_ok() {
+            return Some(Threat::Known(h));
+        }
+        let scanner = self.rules.as_ref()?;
+        scanner
+            .scan(data)
+            .into_iter()
+            .find(|m| m.severity == "alta")
+            .map(|m| Threat::Rule(m.rule, m.description))
+    }
+
+    /// Lo sospechoso que no alcanza para la cuarentena: reglas de severidad media y la
+    /// heurística. Una línea por indicio.
+    pub fn warnings(&self, data: &[u8]) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(s) = &self.rules {
+            for m in s.scan(data) {
+                if m.severity != "alta" {
+                    out.push(format!("{} (regla {})", m.description, m.rule));
+                }
+            }
+        }
+        let h = jarvis_reglas::heuristica::analyze(data);
+        if h.suspicious() {
+            out.push(jarvis_reglas::heuristica::describe(&h));
+        }
+        out
+    }
+
+    /// Suma firmas en el formato de ClamAV `.hsb` (`sha256:tamaño:nombre`). Devuelve cuántas.
+    pub fn import_hsb(&mut self, text: &str) -> Result<usize, String> {
+        let mut lines = String::new();
+        let mut rejected = 0;
+        for l in text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        {
+            let hash = l.split(':').next().unwrap_or("");
+            match hash.len() {
+                64 => {
+                    lines.push_str(hash);
+                    lines.push('\n');
+                }
+                _ => rejected += 1,
+            }
+        }
+        if lines.is_empty() {
+            return Err(if rejected > 0 {
+                "solo se importan firmas SHA-256 (.hsb): las MD5 (.hdb) y SHA-1 no".into()
+            } else {
+                "el archivo no tiene firmas".into()
+            });
+        }
+        let updated = self.updated.unwrap_or(0);
+        let n = self.merge_feed(&lines, updated);
+        self.updated = Some(updated);
+        Ok(n)
     }
 
     /// Suma las firmas de la lista de MalwareBazaar (un SHA-256 por línea; `#` es comentario).
@@ -282,10 +370,28 @@ impl Antivirus {
 pub fn guard<D: BlockDevice>(ctx: &mut Ctx<'_, D>, path: &str, data: &[u8]) -> Option<String> {
     let now = ctx.timestamp();
     let fs = ctx.fs.as_deref_mut()?;
-    let (threat, moved) = ctx.antivirus.check_new(fs, path, data, now)?;
+    let Some((threat, moved)) = ctx.antivirus.check_new(fs, path, data, now) else {
+        // Sin amenaza segura: si hay indicios, se avisa (sin cuarentena).
+        if ctx.antivirus.enabled {
+            let w = ctx.antivirus.warnings(data);
+            if !w.is_empty() {
+                ctx.log.push(format!("ANTIVIRUS_SOSPECHOSO {path}"));
+                ctx.out.notify(
+                    trf("Archivo sospechoso: {}: {}", &[path, &w.join("; ")]),
+                    false,
+                );
+            }
+        }
+        return None;
+    };
     let kind = match threat {
         Threat::Eicar => "EICAR",
         Threat::Known(_) => "MalwareBazaar",
+        Threat::Rule(..) => "regla",
+    };
+    let kind = match &threat {
+        Threat::Rule(name, _) => name.as_str(),
+        _ => kind,
     };
     ctx.log.push(format!("ANTIVIRUS_AMENAZA {path} {kind}"));
     let msg = match moved {
@@ -324,6 +430,9 @@ Uso:
   antivirus escanear [RUTA]     revisa una carpeta entera (por defecto, todo el disco)
   antivirus cuarentena          lo que está apartado y de dónde vino
   antivirus restaurar NOMBRE    devuelve un archivo de la cuarentena a su lugar
+  antivirus analizar ARCHIVO    qué dicen las firmas, las reglas y la heurística
+  antivirus reglas              las reglas tipo YARA cargadas
+  antivirus importar X.hsb      suma firmas SHA-256 de ClamAV
   antivirus activar|desactivar  la protección en tiempo real
 Lo que llega por Brave, curl, wget, winget y apt se revisa solo, y los programas antes de
 ejecutarse. Lo infectado va a /Cuarentena: no se borra.";
@@ -346,9 +455,10 @@ pub(crate) fn command<D: BlockDevice>(
     match args.get(1).map(String::as_str).unwrap_or("estado") {
         "estado" => {
             o.push_str(&format!(
-                "Protección en tiempo real: {}\nFirmas: {} (MalwareBazaar) + EICAR\nÚltima actualización: {}\nEn esta sesión: {} archivos revisados, {} amenazas\nEn cuarentena: {}\n",
+                "Protección en tiempo real: {}\nFirmas: {} (MalwareBazaar) + EICAR\nReglas: {} (tipo YARA) + heurística de ejecutables\nÚltima actualización: {}\nEn esta sesión: {} archivos revisados, {} amenazas\nEn cuarentena: {}\n",
                 if av.enabled { "activada" } else { "DESACTIVADA" },
                 av.count(),
+                av.rule_count(),
                 av.updated
                     .map_or("nunca (ejecutá «antivirus actualizar»)".into(), date),
                 av.scanned,
@@ -375,6 +485,9 @@ pub(crate) fn command<D: BlockDevice>(
                     continue;
                 }
                 av.scanned += 1;
+                for w in av.warnings(&data) {
+                    o.push_str(&format!("{path}: sospechoso: {w}\n"));
+                }
                 if let Some(t) = av.scan(&data) {
                     found += 1;
                     av.found += 1;
@@ -393,6 +506,88 @@ pub(crate) fn command<D: BlockDevice>(
             ctx.log
                 .push(format!("ANTIVIRUS_ESCANEO {} {found}", files.len()));
             Ok(if found > 0 { 1 } else { 0 })
+        }
+        "analizar" | "analyze" => {
+            let Some(path) = root else {
+                e.push_str("antivirus: decime qué archivo analizar\n");
+                return Ok(1);
+            };
+            let data = match fs.read_file(&path) {
+                Ok(d) => d,
+                Err(err) => {
+                    e.push_str(&format!("antivirus: {path}: {err}\n"));
+                    return Ok(1);
+                }
+            };
+            o.push_str(&format!(
+                "{path} ({} bytes, SHA-256 {})\n",
+                data.len(),
+                hex(&sha256(&data))
+            ));
+            match av.scan(&data) {
+                Some(t) => o.push_str(&format!("AMENAZA: {}\n", t.name())),
+                None => o.push_str(
+                    "No es malware conocido ni coincide con una regla de severidad alta.\n",
+                ),
+            }
+            for w in av.warnings(&data) {
+                o.push_str(&format!("Indicio: {w}\n"));
+            }
+            if let Some(pe) = jarvis_reglas::heuristica::pe_facts(&data) {
+                o.push_str(&format!(
+                    "Programa de Windows: {} funciones importadas, secciones:",
+                    pe.imports.len()
+                ));
+                for (n, ent, _) in &pe.sections {
+                    o.push_str(&format!(" {n} ({ent:.1})"));
+                }
+                o.push('\n');
+            }
+            Ok(0)
+        }
+        "importar" | "import" => {
+            let Some(path) = root else {
+                e.push_str("antivirus: decime el archivo de firmas (.hsb de ClamAV)\n");
+                return Ok(1);
+            };
+            let text = match fs.read_file(&path) {
+                Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+                Err(err) => {
+                    e.push_str(&format!("antivirus: {path}: {err}\n"));
+                    return Ok(1);
+                }
+            };
+            match av.import_hsb(&text) {
+                Ok(n) => {
+                    let _ = av.save(fs, now);
+                    ctx.log.push(format!("ANTIVIRUS_IMPORTADAS {n}"));
+                    o.push_str(&format!(
+                        "{n} firmas nuevas (ClamAV). La base tiene {}.\n",
+                        av.count()
+                    ));
+                    Ok(0)
+                }
+                Err(err) => {
+                    e.push_str(&format!("antivirus: {err}\n"));
+                    Ok(1)
+                }
+            }
+        }
+        "reglas" | "rules" => {
+            match &av.rules {
+                Some(s) => {
+                    for r in &s.rules {
+                        o.push_str(&format!(
+                            "{:<34}{:<7}{}\n",
+                            r.name,
+                            r.severity(),
+                            r.meta("description").unwrap_or("")
+                        ));
+                    }
+                }
+                None => o.push_str("No hay reglas cargadas.\n"),
+            }
+            Ok(0)
         }
         "cuarentena" => {
             let q = quarantined(fs);
@@ -492,6 +687,43 @@ pub(crate) fn on_update<D: BlockDevice>(
         av.count()
     ));
     (0, String::new())
+}
+
+/// Llegaron las reglas (`antivirus actualizar`, después de las firmas). Se guardan solo si
+/// compilan: unas reglas rotas no pueden dejar al antivirus sin reglas.
+pub(crate) fn on_rules<D: BlockDevice>(
+    result: &Result<crate::system::HttpResponse, String>,
+    ctx: &mut Ctx<'_, D>,
+    out: &mut crate::term::Out,
+) -> (i32, String) {
+    let text = match result {
+        Ok(r) if r.status == 200 => String::from_utf8_lossy(&r.body).into_owned(),
+        _ => {
+            out.info("Las reglas no se pudieron bajar: quedan las que había.");
+            return (0, String::new());
+        }
+    };
+    match jarvis_reglas::compile(&text) {
+        Ok(rules) => {
+            let now = ctx.timestamp();
+            let Some(fs) = ctx.fs.as_deref_mut() else {
+                return (1, String::new());
+            };
+            let n = rules.len();
+            let _ = crate::term::apt::ensure_dirs(fs, DIR, now)
+                .and_then(|()| fs.write_file(RULES, text.as_bytes(), now));
+            ctx.antivirus.load_rules(fs);
+            ctx.log.push(format!("ANTIVIRUS_REGLAS {n}"));
+            out.info(&format!("{n} reglas tipo YARA al día."));
+            (0, String::new())
+        }
+        Err(e) => {
+            out.err(&format!(
+                "antivirus: las reglas nuevas tienen un error ({e}): quedan las que había"
+            ));
+            (1, String::new())
+        }
+    }
 }
 
 /// Aparta `path` en la cuarentena (con un nombre único) y anota de dónde vino.
