@@ -85,7 +85,7 @@ packages = ["jarvis"]
 # módulos no están instalados.
 [[tool.mypy.overrides]]
 module = [
-    "sounddevice", "openwakeword", "openwakeword.*", "faster_whisper", "piper",
+    "sounddevice", "openwakeword", "openwakeword.*", "faster_whisper", "piper", "kokoro_onnx",
     "cv2", "mediapipe",
 ]
 ignore_missing_imports = true
