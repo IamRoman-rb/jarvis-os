@@ -69,6 +69,16 @@ Igual que el de proyectos, con dos excepciones para comandos sueltos (sin `;`, `
 | `cargo test/check/clippy/build/fmt`, `uv run pytest/ruff/mypy` | 2 |
 | Cualquier otro | 3 |
 
+## El entendedor de órdenes propio (NLU, `src/jarvis/nlu/`)
+
+No es una tool ni tiene permisos propios: cuando en modo `primero` resuelve una orden, la tool se
+pide por `Gate.run`, con el mismo nivel, la misma confirmación y la misma auditoría que si la
+hubiera pedido Claude. Solo resuelve solo lo de **nivel 1** y las respuestas locales (hora,
+fecha, saludo); lo de nivel 2 o 3, programar, lo ambiguo y lo que pide borrar, ejecutar,
+instalar o apagar va al modelo de lenguaje. No tiene intenciones para `a_papelera`,
+`ejecutar_comando`, `olvidar` ni `aplicar_cambios_sistema`. Lo verifica
+`tests/policy/test_nlu_gate.py`.
+
 ## Auditoría
 
 Cada tool deja renglones en `auditoria.jsonl`, en la carpeta de logs del usuario

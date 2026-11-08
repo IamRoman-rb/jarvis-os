@@ -951,10 +951,7 @@ fn sudo_pide_la_contrasena_y_los_permisos_se_respetan() {
     assert!(out.contains("Contraseña"), "{out}");
     run(&mut t, "clave1234");
     // El prompt pasa a ser el de root (con #).
-    assert!(run(&mut t, "whoami").contains(
-        "root@jarvis:/Documentos# whoami
-root"
-    ));
+    assert!(run(&mut t, "whoami").contains("root@jarvis:/Documentos# whoami\nroot"));
     assert!(run(&mut t, "id").contains("uid=0(root)"));
     run(&mut t, "exit");
     assert!(run(&mut t, "id").contains("uid=1000(roman)"));

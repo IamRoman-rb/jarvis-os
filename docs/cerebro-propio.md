@@ -4,14 +4,16 @@ La decisión está en el [ADR 0019](adr/0019-cerebro-propio.md). Acá van las me
 una con qué es, por qué va en ese lugar y cuándo está **lista** (un criterio que se puede medir).
 Una meta a la vez, como los hitos del kernel (`docs/kernel.md`).
 
-Código: `src/jarvis/neural/` (Python, sobre NumPy). Tests: `tests/unit/test_neural*.py`.
+Código: `src/jarvis/neural/` (el motor) y `src/jarvis/nlu/` (el entendedor de órdenes), en Python
+sobre NumPy. Tests: `tests/unit/test_neural*.py`, `tests/unit/test_nlu.py` y
+`tests/policy/test_nlu_gate.py`.
 
 | Meta | Qué | Estado |
 |------|-----|--------|
-| C0 | Diagnóstico: por qué hoy JARVIS entiende mal | pendiente |
+| C0 | Diagnóstico: por qué hoy JARVIS entiende mal | en curso: el registro está; faltan las 20 frases reales |
 | C1 | Motor de redes neuronales: tensores, autograd, capas, optimizadores | **lista** |
-| C2 | Datos: el corpus de órdenes de JARVIS | pendiente |
-| C3 | El entendedor de órdenes (NLU): intención + datos | pendiente |
+| C2 | Datos: el corpus de órdenes de JARVIS | en curso: 17 intenciones, ~2200 frases de entrenamiento |
+| C3 | El entendedor de órdenes (NLU): intención + datos | en curso: primera entrega en modo sombra (ver abajo) |
 | C4 | Tokenizador propio (BPE) | pendiente |
 | C5 | Modelo de lenguaje propio: un transformer tipo GPT, preentrenado | pendiente |
 | C6 | Ajuste a conversación y a usar tools | pendiente |
@@ -78,6 +80,42 @@ dato (etiquetas BIO: `B-app`, `I-app`, `O`).
 - **Lista cuando:** ≥ 95 % de intenciones correctas en el conjunto de prueba, ≥ 90 % de las
   frases reales de C0, < 20 ms por frase en esta PC, y los tests de política y de prompt
   injection siguen pasando (una frase no puede saltarse el `Gate`).
+
+### Primera entrega de C0, C2 y C3 (noviembre de 2026)
+
+- **C0**: `pedidos.jsonl` (carpeta de logs del usuario) anota por pedido el origen (texto o voz),
+  la latencia (primera palabra y total), qué agente contestó, los cambios de agente, las tools
+  usadas, qué habría hecho el NLU, si se resolvió local y los tokens si el proveedor los informa
+  (Claude por el Agent SDK sí; Gemini y Codex por sus programas, no). El texto del pedido no se
+  guarda salvo `diagnostico = true` en `config.toml`. `jarvis nlu informe` lo resume.
+- **C2**: plantillas rioplatenses con voseo, errores de tipeo, "JARVIS," adelante y sin tildes;
+  17 intenciones (11 tools de nivel 1 o 2, hora, fecha, saludo, gracias, programar y "fuera").
+  Particiones **por plantilla** y por valor libre (un test verifica que no se pisan) y 30 frases
+  fuera de alcance que nunca se entrenan.
+- **C3**: n-gramas de caracteres con hashing (4096) → capa de 64 → intención, entrenada con
+  AdamW del motor propio en ~15 s. Temperatura y dos umbrales calibrados en validación (con y
+  sin evidencia de las reglas de datos); las reglas de datos dan los argumentos. Si la frase pide
+  algo que el NLU no hace (borrar, ejecutar, instalar, apagar…), no actúa aunque crea entender.
+- **Modos** (`cerebro_local` en `config.toml`): `sombra` (el de fábrica: mide y no actúa),
+  `primero` (resuelve nivel 1 y respuestas locales por el `Gate`) y `apagado`.
+
+Resultados en el conjunto de prueba (plantillas nunca vistas; `jarvis nlu evaluar`):
+
+| | Red propia | Reglas de hoy |
+|---|---|---|
+| F1 macro | 0,71 | 0,11 |
+| Exactitud | 0,58 | 0,08 |
+| Acciones equivocadas | 2,8 % | 4,5 % |
+| Fuera de alcance rechazadas (30 nunca vistas) | 96,7 % | 100 % |
+| Cobertura local (sin modelo de lenguaje) | 46,5 % | 6 % |
+| Latencia p95 | 0,4 ms | < 0,1 ms |
+
+**Lo que falta para dar C3 por lista**: 95 % de intenciones y menos de 1 % de acciones
+equivocadas. Las intenciones débiles son las que cambian mucho de forma entre plantillas
+(`buscar_web`, `recordar`, `programar`): hacen falta más plantillas y, sobre todo, las frases
+reales de C0 para probar. Después, la red de etiquetas BIO para los datos y comparar con un
+algoritmo genético para elegir n-gramas e hiperparámetros (con las mismas particiones y
+semillas, y contra búsqueda al azar). Hasta entonces, el modo de fábrica es `sombra`.
 
 ## C4. Tokenizador propio (BPE)
 

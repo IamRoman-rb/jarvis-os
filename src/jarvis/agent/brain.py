@@ -67,6 +67,14 @@ class ClaudeBrain:
         self._kernel = kernel
         self._gate = Gate(kernel)
         self._client: Any = None
+        #: El uso de la última respuesta, si el SDK lo informó (para el registro de C0).
+        self._usage: dict[str, Any] | None = None
+
+    def last_info(self) -> dict[str, Any]:
+        info: dict[str, Any] = {"agente": "claude"}
+        if self._usage is not None:
+            info["uso"] = self._usage
+        return info
 
     async def _can_use_tool(self, name: str, args: dict[str, Any], _ctx: Any) -> Any:
         from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
@@ -119,6 +127,7 @@ class ClaudeBrain:
 
         client = await self._connect()
         await client.query(text)
+        self._usage = None
         streamed = False
         async for msg in client.receive_response():
             if isinstance(msg, StreamEvent):
@@ -138,6 +147,8 @@ class ClaudeBrain:
                     raise BrainError(_claude_error("rate_limit", text), agotado=True)
                 if text:
                     yield text
+            elif isinstance(msg, ResultMessage) and not msg.is_error:
+                self._usage = _usage(msg)
             elif isinstance(msg, ResultMessage) and msg.is_error:
                 result = str(msg.result or "Claude devolvió un error")
                 raise BrainError(
@@ -153,6 +164,24 @@ class ClaudeBrain:
         if self._client is not None:
             await self._client.disconnect()
             self._client = None
+
+
+def _usage(msg: Any) -> dict[str, Any] | None:
+    """Los tokens de entrada y salida (y el costo) que informó el SDK, si los informó."""
+    usage = getattr(msg, "usage", None)
+    if not isinstance(usage, dict):
+        return None
+    keys = (
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    )
+    out: dict[str, Any] = {k: usage[k] for k in keys if isinstance(usage.get(k), int)}
+    cost = getattr(msg, "total_cost_usd", None)
+    if isinstance(cost, int | float):
+        out["costo_usd"] = round(float(cost), 6)
+    return out or None
 
 
 def _claude_error(kind: str, text: str) -> str:

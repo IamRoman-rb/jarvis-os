@@ -41,9 +41,11 @@ def serve(
     from jarvis.agent.council import CouncilBrain, ask_claude
     from jarvis.agent.providers import AgentHub
     from jarvis.config import Config
+    from jarvis.nlu.router import LocalFirstBrain, Understanding, load_or_train
     from jarvis.projects import ClaudeProject, OsProject, ProjectRunner, ScriptedProject
     from jarvis.service.server import Host, Session
     from jarvis.service.server import serve as run_server
+    from jarvis.tools.system import Gate
 
     token = os.environ.get("JARVIS_CEREBRO_TOKEN", "")
     if len(token) < 16:
@@ -52,17 +54,27 @@ def serve(
     config = Config.load()
     setup_logging(config)
 
+    # El entendedor de órdenes propio (C3): se carga (o entrena, unos segundos) en otro hilo;
+    # mientras tanto todo va al modelo de lenguaje.
+    nlu_box: list[Understanding] = []
+
     def make_brain(session: Session) -> Brain:
         if simulado:
             return ScriptedBrain(session)
         voice = host.voice is not None
         memory = host.memory.context if host.memory else None
         claude = ClaudeBrain(config, session, voice=voice, memory=memory)
-        if host.agents is None:
-            return claude
-        # Claude, Gemini, ChatGPT y DeepSeek juntos: el principal y el consejo los elige Roman.
-        return CouncilBrain(
-            claude, host.agents, session, lambda: session.mode, voice=voice, memory=memory
+        inner: Brain = claude
+        if host.agents is not None:
+            # Claude, Gemini, ChatGPT y DeepSeek juntos: el principal y el consejo los elige Roman.
+            inner = CouncilBrain(
+                claude, host.agents, session, lambda: session.mode, voice=voice, memory=memory
+            )
+        return LocalFirstBrain(
+            inner,
+            Gate(session),
+            lambda: config.cerebro_local,
+            lambda: nlu_box[0] if nlu_box else None,
         )
 
     def make_os_project(request: str) -> ProjectRunner:
@@ -84,6 +96,7 @@ def serve(
         make_project=make_project,
         make_os_project=make_os_project if updater else None,
         updater=updater,
+        keep_text=config.diagnostico,
     )
     if not simulado:
         from jarvis import account
@@ -107,6 +120,20 @@ def serve(
         parent = os.environ.get("JARVIS_PADRE", "")
         if parent.isdigit():
             asyncio.get_running_loop().create_task(watch_parent(int(parent)))
+        if not simulado and config.cerebro_local != "apagado":
+
+            async def load_nlu() -> None:
+                try:
+                    model = await asyncio.to_thread(load_or_train)
+                except Exception:
+                    logging.getLogger("jarvis.nlu").exception("el NLU propio no cargó")
+                    return
+                nlu_box.append(Understanding(model))
+                logging.getLogger("jarvis.nlu").info(
+                    "NLU propio listo (modo %s)", config.cerebro_local
+                )
+
+            asyncio.get_running_loop().create_task(load_nlu())
         if not simulado and not sin_voz:
             host.voice = await start_voice()
         if not simulado:
@@ -266,6 +293,74 @@ def voz_probar() -> None:
     typer.echo(f"Entendí: {text!r}")
     if text:
         voice.speak(f"Entendí: {text}", lambda n: None)
+
+
+nlu_app = typer.Typer(help="El entendedor de órdenes propio de JARVIS (C3).")
+app.add_typer(nlu_app, name="nlu")
+
+
+@nlu_app.command("entrenar")
+def nlu_train() -> None:
+    """Genera el corpus, entrena la red y la guarda (la usa `jarvis serve`)."""
+    import time as _time
+
+    from jarvis.nlu import dataset
+    from jarvis.nlu.router import model_path, train
+
+    start = _time.monotonic()
+    model = train()
+    model.save(model_path())
+    typer.echo(
+        f"Entrenado en {_time.monotonic() - start:.1f} s con {model.meta.get('train')} frases "
+        f"(corpus {dataset.VERSION}). Umbrales: {model.threshold:.2f} sin evidencia, "
+        f"{model.threshold_evidence:.2f} con evidencia. Guardado en {model_path()}"
+    )
+
+
+@nlu_app.command("evaluar")
+def nlu_evaluate() -> None:
+    """Las métricas en el conjunto de prueba (nunca usado para entrenar ni para elegir nada):
+    la red contra las reglas de hoy."""
+    from jarvis.nlu import baseline, dataset, evaluate
+    from jarvis.nlu import slots as slot_rules
+    from jarvis.nlu.intents import BY_NAME
+    from jarvis.nlu.router import Understanding, load_or_train
+
+    test = dataset.generate("test")
+    ood = dataset.ood_heldout()
+    understanding = Understanding(load_or_train())
+    typer.echo(evaluate.evaluate(understanding.predictor(), test, ood).text("NLU propio (red)"))
+
+    def rules(text: str) -> tuple[str | None, dict[str, str] | None]:
+        intent = baseline.predict(text)
+        if intent is None:
+            return None, None
+        return intent, slot_rules.extract(intent, text) if BY_NAME[intent].slots else {}
+
+    typer.echo("")
+    typer.echo(evaluate.evaluate(rules, test, ood).text("Reglas de hoy (línea de base)"))
+
+
+@nlu_app.command("probar")
+def nlu_try(frase: str) -> None:
+    """Qué haría el NLU con una frase (sin ejecutar nada)."""
+    from jarvis.nlu.router import Understanding, load_or_train
+
+    d = Understanding(load_or_train()).decide(frase)
+    typer.echo(f"acción: {d.action} · intención: {d.intent or '(se abstiene)'} · mejor: {d.best}")
+    typer.echo(f"confianza: {d.confidence:.2f} · tool: {d.tool} · argumentos: {d.args}")
+    if d.answer:
+        typer.echo(f"respuesta: {d.answer}")
+    if d.reason:
+        typer.echo(f"motivo: {d.reason}")
+
+
+@nlu_app.command("informe")
+def nlu_report() -> None:
+    """Lo que dice el registro de pedidos (C0): cuánto se resolvió sin el modelo de lenguaje."""
+    from jarvis.nlu import telemetry
+
+    typer.echo(telemetry.summary(telemetry.read()))
 
 
 @app.callback()

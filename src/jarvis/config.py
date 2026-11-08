@@ -11,6 +11,9 @@ Ejemplo (todo es opcional):
     chatgpt = "gpt-5"
     deepseek = "deepseek-reasoner"
 
+    cerebro_local = "sombra"  # el NLU propio: "apagado", "sombra" (solo mide) o "primero"
+    diagnostico = false       # true: pedidos.jsonl guarda el texto de cada pedido (C0)
+
     [clima]  # dónde estás, para el clima del saludo (sin esto, se usa la ubicación de la IP)
     latitud = -34.6
     longitud = -58.4
@@ -45,6 +48,11 @@ class Config:
     agentes: dict[str, str] = field(default_factory=dict)
     #: (latitud, longitud, lugar) para el clima; None = la ubicación aproximada de la IP.
     clima: tuple[float, float, str] | None = None
+    #: El entendedor de órdenes propio (ADR 0019, C3): "apagado", "sombra" (predice y anota,
+    #: no actúa) o "primero" (resuelve solo lo de nivel 1 y las respuestas locales).
+    cerebro_local: str = "sombra"
+    #: El registro por pedido (C0) guarda el texto del pedido (si no, solo su largo y huella).
+    diagnostico: bool = False
 
     @staticmethod
     def path() -> Path:
@@ -69,12 +77,20 @@ class Config:
             puerto=puerto if isinstance(puerto, int) and 0 < puerto < 65536 else DEFAULT_PORT,
             voz=str(data.get("voz", "cine")),
             clima=_clima(data.get("clima")),
+            cerebro_local=_local_mode(data.get("cerebro_local")),
+            diagnostico=data.get("diagnostico") is True,
             agentes={
                 str(k): v
                 for k, v in (data.get("agentes") or {}).items()
                 if isinstance(v, str) and v
             },
         )
+
+
+def _local_mode(value: object) -> str:
+    return (
+        value if isinstance(value, str) and value in ("apagado", "sombra", "primero") else "sombra"
+    )
 
 
 def _clima(data: object) -> tuple[float, float, str] | None:

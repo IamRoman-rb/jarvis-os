@@ -12,6 +12,7 @@ import asyncio
 import hmac
 import itertools
 import logging
+import time
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,7 @@ from jarvis.agent.council import LEADS, Mode
 from jarvis.agent.providers import PROVIDERS, AgentError, AgentHub
 from jarvis.gestures import GestureHub
 from jarvis.memory import Memory
+from jarvis.nlu import telemetry
 from jarvis.projects import ProjectError, ProjectRunner, list_projects, resolve_project
 from jarvis.protocol import MAX_LINE, Message, ProtocolError, decode, encode
 from jarvis.service.voicehub import VoiceHub
@@ -87,6 +89,10 @@ class Host:
     memory: Memory | None = None
     #: Los gestos con la cámara del anfitrión. None = sin gestos (tests, simulado).
     gestures: GestureHub | None = None
+    #: El registro por pedido (C0) guarda el texto (`diagnostico` en config.toml).
+    keep_text: bool = False
+    #: Registrar cada pedido en pedidos.jsonl (C0). Los tests lo apagan.
+    telemetry: bool = True
 
 
 class Session:
@@ -111,6 +117,8 @@ class Session:
         self._linking: dict[str, asyncio.Task[None]] = {}
         #: El agente principal y el consejo (los elige Roman en Configuración → Asistente).
         self.mode = Mode()
+        #: Las tools que se ejecutaron en el pedido en curso (para el registro de C0).
+        self.request_tools: list[str] = []
 
     async def _ask(self, msg: dict[str, Any], wait: float) -> Any:
         call = next(self._calls)
@@ -124,6 +132,7 @@ class Session:
 
     async def call(self, tool: str, args: dict[str, Any]) -> tuple[bool, str]:
         """El kernel ejecuta la acción y contesta `resultado` (las de proyectos, acá)."""
+        self.request_tools.append(tool)
         if tool in HOST_TOOLS:
             return await self._host_call(tool, args)
         try:
@@ -323,12 +332,43 @@ class Session:
         self.writer.write(encode(msg))
         await self.writer.drain()
 
+    def _record(
+        self, text: str, by_voice: bool, start: float, first: float | None, error: str
+    ) -> None:
+        """El registro por pedido (C0): qué llegó, quién contestó, cuánto tardó."""
+        if self.host is None or not self.host.telemetry:
+            return
+        info: dict[str, Any] = {}
+        last_info = getattr(self.brain, "last_info", None)
+        if callable(last_info):
+            try:
+                info = dict(last_info())
+            except Exception:
+                log.exception("no pude leer los datos del cerebro para el registro")
+        now = time.monotonic()
+        telemetry.record(
+            text,
+            self.host.keep_text,
+            origen="voz" if by_voice else "texto",
+            ms=round((now - start) * 1000),
+            primer_texto_ms=round((first - start) * 1000) if first is not None else None,
+            tools=list(self.request_tools),
+            error=error[:200] if error else None,
+            **info,
+        )
+
     async def answer(self, req_id: int, text: str, by_voice: bool = False) -> None:
         if self.brain is None:
             return
         full = ""
+        self.request_tools = []
+        start = time.monotonic()
+        first: float | None = None
+        error = ""
         try:
             async for delta in self.brain.reply(text):
+                if first is None:
+                    first = time.monotonic()
                 full += delta
                 await self.send({"t": "texto", "id": req_id, "delta": delta})
             await self.send({"t": "fin", "id": req_id})
@@ -346,13 +386,18 @@ class Session:
                 self._background.add(task)
                 task.add_done_callback(self._background.discard)
         except asyncio.CancelledError:
+            error = "cancelado"
             await self.send({"t": "fin", "id": req_id})
             raise
         except BrainError as e:
+            error = str(e)
             await self.send({"t": "error", "id": req_id, "msg": str(e)})
         except Exception as e:  # el kernel tiene que enterarse de cualquier falla
+            error = f"falla del cerebro: {e}"
             log.exception("el cerebro falló")
             await self.send({"t": "error", "id": req_id, "msg": f"falla del cerebro: {e}"})
+        finally:
+            self._record(text, by_voice, start, first, error)
 
     async def greet(self, req_id: int, moment: str, name: str) -> None:
         """El saludo al arrancar JARVIS-OS: según la hora y, a la mañana, con el clima."""

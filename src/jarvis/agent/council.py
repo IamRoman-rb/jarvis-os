@@ -19,6 +19,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from typing import Any
 
 from jarvis.agent.brain import Brain, BrainError
 from jarvis.agent.prompts import build_prompt
@@ -119,6 +120,18 @@ class CouncilBrain:
         self._gate = Gate(kernel)
         self._mode = mode
         self._voice = voice
+        #: Quién contestó el último pedido y cuántas veces hubo que cambiar de agente (C0).
+        self.last_agent = ""
+        self.last_switches = 0
+
+    def last_info(self) -> dict[str, Any]:
+        info: dict[str, Any] = {"agente": self.last_agent, "cambios": self.last_switches}
+        claude_info = getattr(self._claude, "last_info", None)
+        if self.last_agent == "claude" and callable(claude_info):
+            uso = claude_info().get("uso")
+            if uso is not None:
+                info["uso"] = uso
+        return info
 
     def resting(self, agent: str) -> bool:
         """¿Se quedó sin uso hace poco? (se lo saltea)"""
@@ -182,7 +195,11 @@ class CouncilBrain:
         opinions = await self._opinions(text, advisors) if advisors else []
         prompt = with_opinions(text, opinions)
         errors: list[str] = []
+        self.last_agent = ""
+        self.last_switches = 0
         for agent in order:
+            self.last_agent = agent
+            self.last_switches = len(errors)
             started = False
             try:
                 async for delta in self._lead(agent, prompt):

@@ -80,6 +80,9 @@ el proyecto también es de aprendizaje, sobre todo en el kernel.
 - src/jarvis/    cerebro en Python: agente, tools, política de permisos, auditoría
     - neural/      el cerebro propio (ADR 0019): tensores con autograd, capas y optimizadores
                    sobre NumPy, hechos desde cero (metas en docs/cerebro-propio.md)
+    - nlu/         el entendedor de órdenes propio (C2-C3): corpus por plantillas, red chica,
+                   abstención calibrada, modos sombra/primero y el registro por pedido (C0).
+                   `jarvis nlu entrenar | evaluar | probar "frase" | informe`
 - design/stitch/ design system "Obsidian Kinetic HUD" y mockups (referencia visual del HUD)
 - docs/          investigación, ADRs, kernel.md, permisos.md
 

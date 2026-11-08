@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from jarvis.nlu import telemetry
 from jarvis.policy import audit as audit_mod
 
 
@@ -15,3 +16,12 @@ def audit_file(tmp_path: Path) -> Iterator[Path]:
     audit_mod.set_path(p)
     yield p
     audit_mod.set_path(None)
+
+
+@pytest.fixture(autouse=True)
+def pedidos_file(tmp_path: Path) -> Iterator[Path]:
+    """El registro de pedidos (C0) de cada test va a un archivo propio."""
+    p = tmp_path / "pedidos.jsonl"
+    telemetry.set_path(p)
+    yield p
+    telemetry.set_path(None)
