@@ -9,6 +9,8 @@
 //! - [`ntdll`]: lo poco de NT que piden los programas (`NtWriteFile`, `Rtl*`).
 //! - [`crt`]: la biblioteca de C de Microsoft (`ucrtbase`, `msvcrt`, `vcruntime140`).
 //! - [`extra`]: azar (`bcryptprimitives`, `advapi32`) y `MessageBox` (`user32`) en la Terminal.
+//! - [`compat`]: lo que piden ripgrep y jq instalados con `winget` (K16): `setjmp`/`longjmp`,
+//!   Bessel, `userenv`, `shlwapi` y las que contestan "no soportado".
 //!
 //! Los nombres de DLL se normalizan: los "api sets" (`api-ms-win-crt-stdio-l1-1-0.dll`) son
 //! nombres virtuales que Windows resuelve a la DLL de verdad (`ucrtbase.dll`), y `kernel32` toma
@@ -16,6 +18,7 @@
 
 #![allow(clippy::missing_safety_doc, clippy::too_many_arguments)]
 
+pub mod compat;
 pub mod crt;
 pub mod crt2;
 pub mod extra;
@@ -43,9 +46,11 @@ pub enum Dll {
     Advapi32,
     User32,
     Version,
+    Userenv,
+    Shlwapi,
 }
 
-const ALL: [Dll; 7] = [
+const ALL: [Dll; 9] = [
     Dll::Kernel32,
     Dll::Ntdll,
     Dll::Crt,
@@ -53,6 +58,8 @@ const ALL: [Dll; 7] = [
     Dll::Advapi32,
     Dll::User32,
     Dll::Version,
+    Dll::Userenv,
+    Dll::Shlwapi,
 ];
 
 /// `KERNEL32.dll`, `api-ms-win-crt-runtime-l1-1-0.dll`… → la DLL de `vino` que la reemplaza.
@@ -74,6 +81,8 @@ pub fn dll_of(name: &str) -> Option<Dll> {
         "advapi32" | "cryptbase" => Dll::Advapi32,
         "user32" => Dll::User32,
         "version" => Dll::Version,
+        "userenv" => Dll::Userenv,
+        "shlwapi" => Dll::Shlwapi,
         _ => return None,
     })
 }
@@ -88,6 +97,8 @@ pub fn file_name(d: Dll) -> &'static str {
         Dll::Advapi32 => "advapi32.dll",
         Dll::User32 => "user32.dll",
         Dll::Version => "version.dll",
+        Dll::Userenv => "userenv.dll",
+        Dll::Shlwapi => "shlwapi.dll",
     }
 }
 
@@ -112,6 +123,11 @@ fn table() -> &'static HashMap<(Dll, &'static str), usize> {
             (Dll::Bcrypt, extra::bcrypt_exports()),
             (Dll::Advapi32, extra::advapi32_exports()),
             (Dll::User32, extra::user32_exports()),
+            (Dll::Kernel32, compat::kernel32_exports()),
+            (Dll::Ntdll, compat::ntdll_exports()),
+            (Dll::Crt, compat::crt_exports()),
+            (Dll::Userenv, compat::userenv_exports()),
+            (Dll::Shlwapi, compat::shlwapi_exports()),
         ] {
             for (name, f) in list {
                 t.insert((d, name), f);

@@ -1,0 +1,16 @@
+# Manifiesto de prueba (formato de winget-pkgs): un ZIP con un programa "portable" adentro,
+# como ripgrep. Lo usa `sudo winget install --manifest http://paquetes.jarvis/winget/Jarvis.HolaWin.installer.yaml`
+# (cargo xtask vino y los tests de la terminal). Si cambia hola-win.zip, cambia el SHA-256.
+PackageIdentifier: Jarvis.HolaWin
+PackageVersion: 1.0.0
+InstallerType: zip
+NestedInstallerType: portable
+Installers:
+- Architecture: x64
+  NestedInstallerFiles:
+  - RelativeFilePath: hola-win-1.0/hola-win.exe
+    PortableCommandAlias: hola-win
+  InstallerUrl: http://paquetes.jarvis/winget/hola-win.zip
+  InstallerSha256: 938F7AE61EF6391DF9613F23B27426A469884036648FDDE164363AB80E4195E9
+ManifestType: installer
+ManifestVersion: 1.12.0

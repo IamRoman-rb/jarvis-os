@@ -25,6 +25,7 @@ pub mod parse;
 mod regex;
 pub mod snap;
 pub mod winget;
+pub mod zip;
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -152,7 +153,7 @@ pub(crate) struct Out {
 }
 
 impl Out {
-    fn new() -> Out {
+    pub(crate) fn new() -> Out {
         Out {
             term: String::new(),
             capture: Vec::new(),

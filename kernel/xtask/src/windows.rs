@@ -305,6 +305,67 @@ pub fn steps(s: &mut Session) -> Result<()> {
     s.wait_for("antes", STEP)?;
     s.wait_for("TERMINAL_FIN 3", STEP)?;
     s.saw_or_wait("falta KERNEL32!GetSystemPowerStatus", STEP)?;
+    // winget (ADR 0021): un ZIP con un programa portable adentro, desde un manifiesto propio
+    // (sin internet): se verifica el SHA-256, se instala y queda el comando, que corre vino.
+    s.type_text(
+        "sudo winget install --manifest http://paquetes.jarvis/winget/Jarvis.HolaWin.installer.yaml",
+    )?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("WINGET_INSTALADO Jarvis.HolaWin hola-win", STEP)?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    s.type_text("hola-win desde winget")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("Hola desde Windows! argc=3", STEP)?;
+    s.wait_for("Como te llamas?", STEP)?;
+    s.type_text("Roman")?;
+    s.monitor("sendkey ret")?;
+    s.wait_for("TERMINAL_FIN 0", STEP)?;
+    Ok(())
+}
+
+/// `cargo xtask winget`: programas de Windows de verdad, instalados con winget desde el
+/// repositorio oficial (winget-pkgs) y GitHub, y corridos con vino: ripgrep (un ZIP con
+/// `rg.exe`, Rust) y jq (un `.exe` portable, C). Necesita internet.
+pub fn winget_real(image: &Path, disk: &Path) -> Result<()> {
+    super::puente::start();
+    let mut s = Session::start(image, disk)?;
+    s.wait_for(BOOT_MARKER, BOOT_TIMEOUT)?;
+    s.monitor("sendkey ctrl-alt-t")?;
+    s.wait_for("VENTANA_ABIERTA Terminal", STEP)?;
+    thread::sleep(Duration::from_millis(500));
+    let long = Duration::from_secs(600);
+    let r = (|| -> Result<()> {
+        s.type_text("sudo apt install vino")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("APT_INSTALADO vino", STEP)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+        s.type_text("sudo winget install BurntSushi.ripgrep.MSVC")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("WINGET_INSTALADO BurntSushi.ripgrep.MSVC rg", long)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+        s.type_text("rg --version")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("ripgrep 15", STEP)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+        s.type_text("echo hola desde rg > /Documentos/rg.txt && rg -n desde /Documentos/rg.txt")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("1:hola desde rg", STEP)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+        s.type_text("sudo winget install jqlang.jq")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("WINGET_INSTALADO jqlang.jq jq", long)?;
+        s.wait_for("TERMINAL_FIN 0", STEP)?;
+        s.type_text("jq -n 40+2")?;
+        s.monitor("sendkey ret")?;
+        s.wait_for("PROCESO_FIN", STEP)?;
+        s.saw_or_wait("42", STEP)?;
+        Ok(())
+    })();
+    thread::sleep(Duration::from_secs(1));
+    s.screenshot(&target_dir().join("jarvis-os-winget.png"))?;
+    s.quit();
+    r?;
+    println!("ok: winget instaló ripgrep y jq de verdad y vino los corrió");
     Ok(())
 }
 

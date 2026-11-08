@@ -24,3 +24,8 @@ Greenshot.Greenshot|Greenshot|Capturas de pantalla
 Telegram.TelegramDesktop|Telegram|Mensajería
 Discord.Discord|Discord|Chat de voz y texto
 Valve.Steam|Steam|Tienda de juegos
+# Se instalan de verdad (portable o zip) y corren con vino:
+BurntSushi.ripgrep.MSVC|ripgrep|Busca texto en archivos, muy rápido (rg)
+jqlang.jq|jq|Procesa JSON desde la terminal
+sharkdp.fd|fd|Busca archivos por nombre (una alternativa a find)
+sharkdp.bat|bat|cat con colores y números de línea

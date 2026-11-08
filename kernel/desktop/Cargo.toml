@@ -32,6 +32,8 @@ fatfs = "0.3.6"
 # Solo para la vista previa (tests/vista_previa.rs): convierte las imágenes como el puente.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 resvg = { version = "0.45", default-features = false }
+# Test cruzado del lector de ZIP (term/zip.rs) contra la implementación de referencia.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

@@ -343,17 +343,23 @@ Cada revisión queda en `/snap/<nombre>/<revisión>/`; `/snap/bin` está en el `
 y una carpeta por revisión con su `manifiesto.txt`. Snaps de ejemplo: `saludo` (con canal beta),
 `notas`, `dado` y `reloj`.
 
-### `winget` (programas de Windows)
+### `winget` (programas de Windows, ADR 0021)
 
 ```
-roman@jarvis:~$ winget search zip
-roman@jarvis:~$ winget show 7zip.7zip          # del repositorio oficial de Microsoft (GitHub)
-roman@jarvis:~$ winget install 7zip.7zip       # baja el instalador de 64 bits a /Descargas
-roman@jarvis:~$ file /Descargas/7z2408-x64.exe
+roman@jarvis:~$ winget search ripgrep
+roman@jarvis:~$ sudo winget install BurntSushi.ripgrep.MSVC   # un ZIP con rg.exe: se instala
+roman@jarvis:~$ rg -n TODO /Proyectos                         # lo corre vino
+roman@jarvis:~$ sudo winget install jqlang.jq && jq -n 40+2   # un .exe "portable"
+roman@jarvis:~$ winget list · sudo winget upgrade jqlang.jq · sudo winget uninstall jqlang.jq
+roman@jarvis:~$ sudo winget install --manifest http://paquetes.jarvis/winget/Jarvis.HolaWin.installer.yaml
 ```
 
-`winget search` busca en `kernel/paquetes/winget.txt`; con el Id exacto, `show` e `install` van
-al repositorio real. Los instaladores no se ejecutan (ADR 0005); hasta 32 MB por descarga.
+Contra el repositorio oficial de Microsoft (winget-pkgs, en GitHub). Lo bajado se verifica con el
+SHA-256 del manifiesto (si no coincide, no se instala) y con el antivirus. Los paquetes
+`portable` y `zip` (con un portable adentro) se instalan en `/Programas/windows/<Id>/` y dejan un
+comando en `/Programas/bin` que corre con `vino`. Los instaladores con ventanas (`exe`, `msi`,
+`inno`, `nullsoft`…) se bajan a `/Descargas`: `vino` todavía no corre programas gráficos.
+`cargo xtask winget` (con internet) instala ripgrep y jq de verdad y los corre.
 
 ### `vino` (programas de Windows, K15)
 

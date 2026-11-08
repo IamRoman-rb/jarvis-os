@@ -967,3 +967,76 @@ fn sudo_pide_la_contrasena_y_los_permisos_se_respetan() {
     let reqs = t.d.take_requests();
     assert_eq!(reqs.spawn.last().map(|s| s.uid), Some(0));
 }
+
+/// ADR 0021: `winget install` instala un paquete `zip` con un programa "portable" adentro
+/// (verifica el SHA-256 del manifiesto), deja el comando y lo corre con vino.
+#[test]
+fn winget_instala_un_zip_portable_y_lo_corre_con_vino() {
+    let mut t = Driver::new();
+    open_terminal(&mut t);
+    let manifest = "http://paquetes.jarvis/winget/Jarvis.HolaWin.installer.yaml";
+    // Sin sudo, no.
+    let out = run(&mut t, &format!("winget install --manifest {manifest}"));
+    assert!(out.contains("permisos de administrador"), "{out}");
+    let out = run(
+        &mut t,
+        &format!("sudo winget install --manifest {manifest}"),
+    );
+    assert!(out.contains("SHA-256 verificado"), "{out}");
+    assert!(out.contains("Instalado Jarvis.HolaWin 1.0.0"), "{out}");
+    assert!(out.contains("Comando:"), "{out}");
+    assert!(
+        out.contains("sudo apt install vino"),
+        "sin vino, dice cómo conseguirlo: {out}"
+    );
+    assert!(fatfs_exists_in(
+        &mut t,
+        "/Programas/windows/Jarvis.HolaWin/hola-win-1.0/hola-win.exe"
+    ));
+    assert!(fatfs_exists_in(
+        &mut t,
+        "/Programas/windows/Jarvis.HolaWin/hola-win-1.0/LEAME.txt"
+    ));
+    assert!(
+        t.logs()
+            .iter()
+            .any(|l| l == "WINGET_INSTALADO Jarvis.HolaWin hola-win")
+    );
+    let out = run(&mut t, "winget list");
+    assert!(out.contains("Jarvis.HolaWin"), "{out}");
+    assert!(out.contains("hola-win"), "{out}");
+
+    // Con vino, el comando lo corre: `hola-win uno` → vino …/hola-win.exe uno.
+    run(&mut t, "sudo apt install vino");
+    t.type_text("hola-win uno");
+    t.key(Key::Enter);
+    let reqs = t.d.take_requests();
+    let sp = reqs
+        .spawn
+        .last()
+        .unwrap_or_else(|| panic!("{}", screen(&t)));
+    assert_eq!(sp.path, "/Programas/bin/vino");
+    assert_eq!(
+        sp.argv,
+        [
+            "vino",
+            "/Programas/windows/Jarvis.HolaWin/hola-win-1.0/hola-win.exe",
+            "uno"
+        ]
+    );
+    t.d.proc_event(jarvis_desktop::procs::ProcEvent::Exited {
+        pid: sp.pid,
+        code: 0,
+        why: None,
+    });
+
+    // Desinstalar: a la Papelera.
+    let out = run(&mut t, "sudo winget uninstall Jarvis.HolaWin");
+    assert!(out.contains("Papelera"), "{out}");
+    assert!(!fatfs_exists_in(&mut t, "/Programas/bin/hola-win"));
+    assert!(!fatfs_exists_in(
+        &mut t,
+        "/Programas/windows/Jarvis.HolaWin"
+    ));
+    assert!(!run(&mut t, "winget list").contains("Jarvis.HolaWin"));
+}

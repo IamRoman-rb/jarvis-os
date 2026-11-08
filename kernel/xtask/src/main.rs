@@ -75,13 +75,16 @@ fn main() -> ExitCode {
         "brave" => brave_cmd(),
         "pantallas" => build().and_then(|img| screens(&img, &fresh_disk("disco-pantallas.img")?)),
         "glibc" => build().and_then(|img| glibc(&img, &fresh_disk("disco-glibc.img")?)),
+        "winget" => build_user()
+            .and_then(|_| build())
+            .and_then(|img| windows::winget_real(&img, &fresh_disk("disco-winget.img")?)),
         "antivirus" => build().and_then(|img| antivirus(&img, &fresh_disk("disco-antivirus.img")?)),
         "relay" => sincro::relay_cmd(),
         "iso" => build().and_then(|img| iso_cmd(&img)),
         "run2" => build().and_then(|img| sincro::run2(&img)),
         "sincronizar" => build().and_then(|img| sincro::e2e(&img)),
         _ => Err(
-            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino [--python]|windows|consola [--python]|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
+            "uso: cargo xtask <build|run|test|test-hardware|test-instalar|usuario|vino [--python]|windows|winget|consola [--python]|screenshot|pantallas|relay [--publico] [puerto]|run2|sincronizar|iso [--probar|--abrir]|vbox [MÁQUINA] [--iso] [--simulado]|vdi|disk [--reset]|brave [--instalar|--red --token X|--probar URL]>"
                 .into(),
         ),
     };

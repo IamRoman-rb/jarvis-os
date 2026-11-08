@@ -2643,7 +2643,16 @@ impl Shell {
             ctx.log.push(format!("TERMINAL_EXE {path}"));
             return Res::Code(126);
         }
-        match binfmt::detect(&data) {
+        let kind = binfmt::detect(&data);
+        if matches!(kind, binfmt::Kind::Script | binfmt::Kind::Text)
+            && let Some(exe) = winget::launcher_target(&String::from_utf8_lossy(&data))
+        {
+            // Un programa de Windows instalado con winget: va directo a vino.
+            let mut args = alloc::vec![exe.clone()];
+            args.extend(argv[1..].iter().cloned());
+            return self.run_windows(&args, &exe, stdin, ctx, e);
+        }
+        match kind {
             binfmt::Kind::Script | binfmt::Kind::Text => {
                 let text = String::from_utf8_lossy(&data).into_owned();
                 let mut args = alloc::vec![path.clone()];

@@ -106,7 +106,8 @@ Kernel (desde kernel/):
 - Programas Linux:  cargo xtask usuario (compila kernel/usuario/ y vino → target/usuario/; run y test lo
                     hacen solos). En JARVIS-OS: apt install programas-linux js ; hola-linux ; js
 - Programas Windows: cargo xtask vino (solo la parte de Windows de `test`: instala vino y corre los .exe
-                    de prueba) ; cargo xtask windows (regenera usuario-win/bin/, en Windows con
+                    de prueba) ; cargo xtask winget (con internet: winget instala ripgrep y jq de
+                    verdad y vino los corre) ; cargo xtask windows (regenera usuario-win/bin/, en Windows con
                     Visual Studio). En JARVIS-OS: apt install vino programas-windows ;
                     wine /Programas/windows/hola-win.exe ; vino --imports x.exe (qué le falta)
 - Monitores:        cargo xtask pantallas (dos monitores, capturas por salida); JARVIS_MONITORES=N en run/test
