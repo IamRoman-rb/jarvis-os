@@ -200,13 +200,20 @@ core::arch::global_asm!(
     "ret",
 );
 
-unsafe extern "C" {
+// Cada una con la convención que de verdad usa su ensamblador, escrita a mano: `extern "C"` es
+// la de Windows al compilar en Windows y la de Linux (System V) en Linux, y el ensamblador lee
+// los argumentos de registros fijos. Con "C", en Linux el CONTEXT llegaba en rdi y
+// `vino_rtl_capture_context` escribía en lo que hubiera en rcx.
+unsafe extern "win64" {
     fn vino_rtl_capture_context(ctx: *mut u8);
-    fn vino_restore_context(ctx: *const u8) -> !;
-    /// Entrada de `RaiseException` (convención de Windows).
+    /// Entrada de `RaiseException`.
     pub fn vino_raise_exception(code: u32, flags: u32, n: u32, args: *const u64) -> !;
     /// Entrada de `_CxxThrowException`.
     pub fn vino_cxx_throw(object: u64, throw_info: u64) -> !;
+}
+
+unsafe extern "sysv64" {
+    fn vino_restore_context(ctx: *const u8) -> !;
 }
 
 unsafe extern "win64" fn RtlRestoreContext(ctx: *const u8, _record: u64) -> ! {
