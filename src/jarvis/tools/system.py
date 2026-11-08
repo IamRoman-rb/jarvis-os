@@ -66,6 +66,12 @@ SPECS: list[tuple[str, str, dict[str, type]]] = [
     ("copiar", "Copia un archivo a una carpeta.", {"origen": str, "destino": str}),
     ("mover", "Mueve un archivo o carpeta a otra carpeta.", {"origen": str, "destino": str}),
     ("cerrar_ventana", "Cierra la ventana de una app.", {"app": str}),
+    (
+        "energia",
+        'Apaga, reinicia o suspende JARVIS-OS (accion: "apagar", "reiniciar" o "suspender"). '
+        "Usala cuando Roman pide apagar, reiniciar o suspender el sistema, la PC o a vos.",
+        {"accion": str},
+    ),
     ("a_papelera", "Mueve un archivo o carpeta a la Papelera (nunca borra).", {"ruta": str}),
     ("listar_proyectos", "Los proyectos de código de Roman (carpetas en su PC).", {}),
     (
@@ -150,6 +156,10 @@ def describe(tool: str, args: dict[str, Any]) -> str:
             return f"Abrir el proyecto {a.get('nombre', '?')} y {what}."
         case "cerrar_ventana":
             return f"Cerrar la ventana de {a.get('app', '?')}."
+        case "energia":
+            what = a.get("accion", "?").lower()
+            verb = {"apagar": "Apagar", "reiniciar": "Reiniciar", "suspender": "Suspender"}
+            return f"{verb.get(what, what)} JARVIS-OS (lo que no esté guardado se pierde)."
         case "a_papelera":
             return f"Mover a la Papelera: {a.get('ruta', '?')}."
         case "ejecutar_comando":

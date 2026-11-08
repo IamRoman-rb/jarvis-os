@@ -69,6 +69,23 @@ async def test_nivel_3_pregunta_y_si_no_no_se_hace(audit_file: Path) -> None:
     assert entry["evento"] == "rechazada" and entry["nivel"] == 3
 
 
+async def test_apagar_el_sistema_se_confirma(audit_file: Path) -> None:
+    assert level_of("energia") == 2
+    assert MCP_PREFIX + "energia" not in auto_approved()
+    # Si Roman dice que no, no se apaga.
+    k = FakeKernel(answer=False)
+    ok, _ = await Gate(k).run("energia", {"accion": "apagar"})
+    assert not ok and k.calls == []
+    assert k.asked == [("energia", 2, "Apagar JARVIS-OS (lo que no esté guardado se pierde).")]
+    # Si dice que sí, se le pide al kernel.
+    k = FakeKernel(answer=True, result=(True, "JARVIS-OS se apaga en 4 segundos."))
+    assert await Gate(k).run("energia", {"accion": "reiniciar"}) == (
+        True,
+        "JARVIS-OS se apaga en 4 segundos.",
+    )
+    assert k.calls == [("energia", {"accion": "reiniciar"})]
+
+
 async def test_una_tool_desconocida_se_rechaza_sin_preguntar() -> None:
     k = FakeKernel(answer=True)
     assert not await Gate(k).permit("mcp__otro__Bash", {"command": "rm -rf /"})

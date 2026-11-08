@@ -378,6 +378,8 @@ pub struct Desktop<D: BlockDevice> {
     greeting_until: u64,
     /// Cuándo apagar para que arranque la versión nueva del sistema (la pidió JARVIS).
     restart_at: Option<u64>,
+    /// Apagar o reiniciar en un rato (la herramienta `energia` de JARVIS: así alcanza a contestar).
+    power_at: Option<(u64, Power)>,
     phrase: usize,
     screenshot: bool,
     format: Option<(PixelFormat, usize)>,
@@ -589,6 +591,7 @@ impl<D: BlockDevice> Desktop<D> {
             greeted: false,
             greeting_until: 0,
             restart_at: None,
+            power_at: None,
             phrase: 0,
             screenshot: false,
             format: None,
@@ -1156,6 +1159,12 @@ impl<D: BlockDevice> Desktop<D> {
             // Apagar (no reiniciar): `cargo xtask run` ve la marca, arma la imagen nueva y
             // vuelve a arrancar QEMU.
             self.power(Power::Shutdown);
+        }
+        if let Some((at, p)) = self.power_at
+            && self.last_now >= at
+        {
+            self.power_at = None;
+            self.power(p);
         }
         self.brain.tick(self.last_now, &mut self.out);
         self.logs.append(&mut self.brain.logs);

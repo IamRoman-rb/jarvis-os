@@ -35,6 +35,7 @@ registra (default deny). Detalle del modelo en [investigacion.md §6.4 y §12.2]
 | `copiar` | 2 | Reversible. |
 | `mover` | 2 | Reversible. |
 | `cerrar_ventana` | 2 | Se puede perder lo que no se guardó (la app pregunta si hay cambios). |
+| `energia` | 2 | Apaga, reinicia o suspende JARVIS-OS: se ve y se vuelve a prender, pero se puede perder lo que no se guardó (como `cerrar_ventana`). Se ejecuta 4 s después de aprobarla, para que llegue la respuesta. |
 | `abrir_proyecto` | 2 | Arranca un agente de código en el anfitrión; cada edición y comando suyo se confirma aparte. |
 | `modificar_sistema` | 2 | Arranca un agente de código sobre el repositorio de JARVIS-OS (como `abrir_proyecto`); cada edición suya es nivel 2 y cada comando nivel 3, salvo los de la tabla de abajo. |
 | `aplicar_cambios_sistema` | 3 | Compila y, si compila, reinicia JARVIS-OS con la versión nueva. |

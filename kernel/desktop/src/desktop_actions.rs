@@ -11,7 +11,7 @@ use jarvis_fs::{BlockDevice, FileSystem, Timestamp};
 use super::Desktop;
 use crate::apps::{app_by_name, name_of, timestamp};
 use crate::files::{FilesApp, basename, format_size, join};
-use crate::system::Launch;
+use crate::system::{Launch, Power};
 
 /// Lo más que se le devuelve a Claude de un archivo.
 const MAX_READ: usize = 64 * 1024;
@@ -147,6 +147,36 @@ impl<D: BlockDevice> Desktop<D> {
                     }
                     None => (false, format!("{} no está abierta.", name_of(k))),
                 }
+            }
+            "energia" => {
+                // La pidió JARVIS (nivel 2: Roman ya la confirmó). Unos segundos de margen para
+                // que llegue la respuesta y se oiga la despedida.
+                let what = arg("accion").to_lowercase();
+                let p = match what.as_str() {
+                    "apagar" | "apagado" | "shutdown" => Power::Shutdown,
+                    "reiniciar" | "reinicio" | "reboot" => Power::Reboot,
+                    "suspender" | "suspension" | "suspensión" | "sleep" => {
+                        self.suspend();
+                        return (
+                            true,
+                            "Suspendí JARVIS-OS (se despierta con el mouse o una tecla).".into(),
+                        );
+                    }
+                    _ => {
+                        return (
+                            false,
+                            format!("No sé hacer \"{what}\": puedo apagar, reiniciar o suspender."),
+                        );
+                    }
+                };
+                self.logs.push(format!("CEREBRO_ENERGIA {p:?}"));
+                self.power_at = Some((now_ms + 4000, p));
+                let msg = if p == Power::Shutdown {
+                    "JARVIS-OS se apaga en 4 segundos."
+                } else {
+                    "JARVIS-OS se reinicia en 4 segundos."
+                };
+                (true, msg.into())
             }
             "ejecutar_comando" => {
                 let cmd = arg("comando");

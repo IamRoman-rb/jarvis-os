@@ -35,6 +35,9 @@ LEVELS: dict[str, int] = {
     "copiar": 2,
     "mover": 2,
     "cerrar_ventana": 2,
+    # Apagar, reiniciar o suspender: se ve y se vuelve a prender; como cerrar una ventana, se
+    # puede perder lo que no se guardó (por eso se confirma).
+    "energia": 2,
     "abrir_proyecto": 2,
     # Arranca el agente sobre el repo de JARVIS-OS; cada edición y comando suyo se confirma.
     "modificar_sistema": 2,

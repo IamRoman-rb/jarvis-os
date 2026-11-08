@@ -16,6 +16,8 @@ struct Brain {
     stream: Option<u32>,
     /// Los renglones que mandó el escritorio.
     sent: String,
+    /// Si el escritorio pidió apagar o reiniciar.
+    power: Option<jarvis_desktop::Power>,
 }
 
 impl Brain {
@@ -26,6 +28,7 @@ impl Brain {
             t,
             stream: None,
             sent: String::new(),
+            power: None,
         }
     }
 
@@ -37,7 +40,9 @@ impl Brain {
     }
 
     fn collect(&mut self) {
-        for op in self.t.d.take_requests().streams {
+        let requests = self.t.d.take_requests();
+        self.power = self.power.or(requests.power);
+        for op in requests.streams {
             match op {
                 StreamOp::Connect(r) => {
                     assert_eq!((r.host.as_str(), r.port), ("10.0.2.2", 8121));
@@ -711,4 +716,44 @@ fn bloquear_al_irme_bloquea_cuando_no_hay_nadie() {
     b.reply(r#"{"t":"presencia","hay":false}"#);
     assert_eq!(b.t.d.overlay_name(), "bloqueo");
     assert!(b.t.logs().iter().any(|l| l == "PRESENCIA_BLOQUEO"));
+}
+
+#[test]
+fn jarvis_apaga_y_reinicia_el_sistema() {
+    for (cmd, want) in [
+        ("shutdown", jarvis_desktop::Power::Shutdown),
+        ("poweroff", jarvis_desktop::Power::Shutdown),
+        ("reboot", jarvis_desktop::Power::Reboot),
+    ] {
+        let mut b = connected();
+        b.reply(&format!(
+            r#"{{"t":"accion","llamada":1,"tool":"ejecutar_comando","args":{{"comando":"{cmd}"}}}}"#
+        ));
+        assert_eq!(b.power, Some(want), "{cmd}: {:?}", b.t.logs());
+    }
+}
+
+#[test]
+fn la_herramienta_energia_apaga_reinicia_y_suspende() {
+    for (accion, want) in [
+        ("apagar", Some(jarvis_desktop::Power::Shutdown)),
+        ("reiniciar", Some(jarvis_desktop::Power::Reboot)),
+    ] {
+        let mut b = connected();
+        b.reply(&format!(
+            r#"{{"t":"accion","llamada":1,"tool":"energia","args":{{"accion":"{accion}"}}}}"#
+        ));
+        assert!(last_line(&b).contains(r#""ok":true"#), "{}", last_line(&b));
+        // Primero contesta (y JARVIS se despide); se apaga unos segundos después.
+        assert_eq!(b.power, None);
+        for _ in 0..5 {
+            b.second();
+        }
+        assert_eq!(b.power, want, "{accion}");
+    }
+    let mut b = connected();
+    b.reply(r#"{"t":"accion","llamada":2,"tool":"energia","args":{"accion":"suspender"}}"#);
+    assert!(b.t.logs().iter().any(|l| l == "SUSPENDIDO"));
+    b.reply(r#"{"t":"accion","llamada":3,"tool":"energia","args":{"accion":"explotar"}}"#);
+    assert!(last_line(&b).contains(r#""ok":false"#));
 }
